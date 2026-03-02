@@ -3,7 +3,7 @@
 
 This document covers setup and troubleshooting for the notebook workflow that uses Azure AI Projects + OpenTelemetry tracing.
 
-[!image](https://github.com/user-attachments/assets/52606c05-9b90-49e2-bd39-d874d133f1e9)
+![image](https://github.com/user-attachments/assets/52606c05-9b90-49e2-bd39-d874d133f1e9)
 
 ---
 
