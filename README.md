@@ -16,7 +16,10 @@ The notebook walks through a complete run:
 3. Build `AIProjectClient` with `DefaultAzureCredential`.
 4. Enable OpenTelemetry + Azure Monitor tracing.
 5. Create an agent version and query it.
-6. Validate traces in Microsoft Foundry (Traces - Preview), Application Insights, and Log Analytics.
+6. Validate traces in the following:
+   - Microsoft Foundry (Traces - Preview)
+   - Application Insights
+   - Log Analytics.
 
 ![image](https://github.com/user-attachments/assets/aaf309b6-5e28-421f-9784-6118b7b5535c)
 
