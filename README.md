@@ -20,6 +20,8 @@ The notebook walks through a complete run:
 
 ![image](https://github.com/user-attachments/assets/aaf309b6-5e28-421f-9784-6118b7b5535c)
 
+![image](https://github.com/user-attachments/assets/5334d116-c5cd-4d2a-b3e1-dbe839a9874f)
+
 ---
 
 ## Recommended run order
