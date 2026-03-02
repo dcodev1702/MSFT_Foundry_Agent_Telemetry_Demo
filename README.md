@@ -48,7 +48,7 @@ Example output:
 ```text
 DefaultAzureCredential acquired a token from AzurePowerShellCredential
 🔐 Credential used: AzurePowerShellCredential
-👤 Signed-in account: lireland@DibSecurity.onmicrosoft.com
+👤 Signed-in account: agent007@m365x81069033.onmicrosoft.com
 ```
 
 How account resolution works:
