@@ -1,4 +1,5 @@
-# Azure AI Foundry Notebook Guide (`zolab-ai-agent-demo.ipynb`)
+# Azure AI Foundry Notebook Guide 
+> (`zolab-ai-agent-demo.ipynb`)
 
 This document covers setup and troubleshooting for the notebook workflow that uses Azure AI Projects + OpenTelemetry tracing.
 
