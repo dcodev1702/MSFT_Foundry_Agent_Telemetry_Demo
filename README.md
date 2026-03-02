@@ -1,4 +1,4 @@
-# Azure AI Foundry Notebook Guide
+# Microsoft AI Foundry - Agent Telemetry Notebook Guide
 > (`zolab-ai-agent-demo-win11.ipynb`)
 
 This document reflects the current Windows 11 notebook flow for creating and querying an Azure AI Foundry agent with end-to-end telemetry.
