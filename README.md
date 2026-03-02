@@ -1,175 +1,166 @@
-# Azure AI Foundry Notebook Guide 
-> (`zolab-ai-agent-demo.ipynb`)
+# Azure AI Foundry Notebook Guide
+> (`zolab-ai-agent-demo-win11.ipynb`)
 
-This document covers setup and troubleshooting for the notebook workflow that uses Azure AI Projects + OpenTelemetry tracing.
+This document reflects the current Windows 11 notebook flow for creating and querying an Azure AI Foundry agent with end-to-end telemetry.
 
 ![image](https://github.com/user-attachments/assets/52606c05-9b90-49e2-bd39-d874d133f1e9)
 
 ---
 
-## Notebook intent (observability-first)
+## What this notebook does
 
-This notebook demonstrates how to enable end-to-end observability for Azure AI Foundry Agent workflows, with emphasis on **visibility** rather than agent behavior. It configures Azure Monitor + OpenTelemetry and SDK instrumentation so you can:
+The notebook walks through a complete run:
 
-- Correlate client-side and service-side operations for a single run.
-- View trace spans and execution flow in **Foundry Trace (Preview)**.
-- Send telemetry to **Application Insights** for deeper diagnostics and historical analysis.
-- Capture context needed for troubleshooting latency, failures, and workflow bottlenecks.
+1. Create or reuse a local `.venv` and register a Jupyter kernel.
+2. Install Azure AI and telemetry dependencies with compatibility safeguards.
+3. Build `AIProjectClient` with `DefaultAzureCredential`.
+4. Enable OpenTelemetry + Azure Monitor tracing.
+5. Create an agent version and query it.
+6. Validate traces in Log Analytics.
 
 ![image](https://github.com/user-attachments/assets/aaf309b6-5e28-421f-9784-6118b7b5535c)
 
 ---
 
-## Known-good dependency set
+## Recommended run order
 
-Run this in notebook Cell 5:
+After selecting the `AI Agent Demo (.venv)` kernel, run cells in order:
+
+1. Cell 3 - venv and kernel setup
+2. Cell 5 - dependency install
+3. Cell 7 - imports
+4. Cell 9 - project client + identity hint
+5. Cell 11 - telemetry enablement
+6. Cell 13 - create agent
+7. Cell 15 - query agent and save `stories.json`
+8. Cell 17 - query Log Analytics
+
+---
+
+## Key setup snippets
+
+### 1) Windows-safe venv setup (Cell 3)
 
 ```python
-%pip install --no-input --pre "azure-ai-projects>=2.0.0b4" azure-identity "opentelemetry-sdk<1.39" "opentelemetry-api<1.39" azure-monitor-opentelemetry azure-core-tracing-opentelemetry
+venv_dir = os.path.join(os.getcwd(), ".venv")
+subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+
+venv_python = (
+    os.path.join(venv_dir, "Scripts", "python.exe")
+    if os.name == "nt"
+    else os.path.join(venv_dir, "bin", "python")
+)
+
+subprocess.check_call([venv_python, "-m", "pip", "install", "--upgrade", "ipykernel"])
+subprocess.check_call([
+    venv_python,
+    "-m",
+    "ipykernel",
+    "install",
+    "--user",
+    "--name",
+    "ai-agent-demo",
+    "--display-name",
+    "AI Agent Demo (.venv)",
+])
 ```
 
----
+### 2) Dependency install with pip + exporter safeguards (Cell 5)
 
-## Recommended run order (after kernel restart)
+```python
+outdated = subprocess.check_output(
+    [sys.executable, "-m", "pip", "list", "--outdated", "--format=json"],
+    text=True,
+)
+if any(pkg["name"].lower() == "pip" for pkg in json.loads(outdated)):
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
 
-1. Cell 7 (imports)
-2. Cell 9 (project client)
-3. Cell 11 (telemetry setup)
-4. Cell 13 (agent creation)
-5. Cell 15 (agent query)
+%pip --disable-pip-version-check install --upgrade --pre azure-monitor-opentelemetry-exporter
+%pip --disable-pip-version-check install --pre "azure-ai-projects>=2.0.0b4"
+%pip --disable-pip-version-check install azure-identity azure-monitor-opentelemetry azure-core-tracing-opentelemetry
+```
 
----
+Why this matters:
+- `pip` upgrades only when it is actually outdated.
+- Exporter is explicitly updated to avoid OpenTelemetry import mismatches.
 
-## Credential transparency (Cell 9)
+### 3) Azure CLI / PowerShell identity hint (Cell 9)
 
-Cell 9 now prints both:
+```python
+def _resolve_identity_hint(credential_name: str) -> str | None:
+    if credential_name == "AzureCliCredential":
+        az_exe = "az.cmd" if os.name == "nt" else "az"
+        return _run_command([az_exe, "account", "show", "--query", "user.name", "-o", "tsv"])
+    if credential_name == "AzurePowerShellCredential":
+        powershell_cmd = "$ctx = Get-AzContext; if ($ctx -and $ctx.Account) { $ctx.Account.Id }"
+        return _run_command(["pwsh", "-NoProfile", "-Command", powershell_cmd])
+    return None
+```
 
-- The concrete credential selected by `DefaultAzureCredential` (for example, `AzurePowerShellCredential` or `AzureCliCredential`)
-- The signed-in account identifier when available (for example, UPN)
+This is the Windows fix for Azure CLI account resolution from Python subprocess (`az.cmd` instead of `az`).
 
-Example output:
+Expected output:
 
 ```text
-DefaultAzureCredential acquired a token from AzurePowerShellCredential
-🔐 Credential used: AzurePowerShellCredential
-👤 Signed-in account: agent007@m365x81069033.onmicrosoft.com
+🔐 Credential used: AzureCliCredential
+👤 Signed-in account: agent007@BondEnterprises.onmicrosoft.com
 ```
 
-How account resolution works:
-
-- If `AzurePowerShellCredential` is selected, the notebook queries `Get-AzContext` via `pwsh` and prints `Account.Id`.
-- If `AzureCliCredential` is selected, the notebook queries `az account show --query user.name -o tsv`.
-- For other credential types, the notebook still prints the credential class and may report that account resolution is unavailable.
-
----
-
-## Telemetry imports explained
-
-The notebook imports a small set of libraries specifically to enable tracing and export telemetry:
-
-- `from opentelemetry import trace`  
-	Creates/uses tracers so notebook steps can emit spans.
-
-- `from azure.monitor.opentelemetry import configure_azure_monitor`  
-	Configures Azure Monitor OpenTelemetry integration and exporter wiring.
-
-- `from azure.ai.projects.telemetry import AIProjectInstrumentor`  
-	Instruments Azure AI Projects + OpenAI client calls so SDK operations are automatically traced.
-
-- `from azure.core.settings import settings` with `settings.tracing_implementation = "opentelemetry"`  
-	Ensures Azure SDK tracing routes through OpenTelemetry.
-
-- `from azure.monitor.opentelemetry.exporter import AzureMonitorTraceExporter` and OTel span processor imports  
-	Used as resilient fallback export path if full monitor configuration is slow/unavailable.
-
----
-
-## How telemetry is illuminated on the agent
-
-Telemetry visibility comes from combining automatic SDK instrumentation with explicit span context around agent lifecycle operations:
-
-1. **Telemetry pipeline setup (Cell 11)**  
-	 Initializes monitor/export, enables tracing feature flags, and instruments SDK clients.
+### 4) Telemetry enablement (Cell 11)
 
 ```python
 os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
 os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
+os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
+os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
 
-ai_conn_str = project_client.telemetry.get_application_insights_connection_string()
-configure_azure_monitor(
-	connection_string=ai_conn_str,
-	enable_performance_counters=False,
-)
+application_insights_connection_string = project_client.telemetry.get_application_insights_connection_string()
+from azure.monitor.opentelemetry import configure_azure_monitor
 
-AIProjectInstrumentor().instrument(
-	enable_content_recording=True,
-	enable_trace_context_propagation=True,
-)
+configure_azure_monitor(connection_string=application_insights_connection_string)
+AIProjectInstrumentor().instrument(enable_content_recording=True)
 ```
 
-2. **Agent creation span (Cell 13)**  
-	 Wraps create-version call in a custom span and stamps attributes like `agent.name`, `agent.id`, model, and version.
+### 5) Query and persist results (Cell 15)
 
-```python
-tracer = trace.get_tracer(__name__)
-with tracer.start_as_current_span("agent-creation") as span:
-	span.set_attribute("agent.name", agent_name)
-	span.set_attribute("gen_ai.request.model", model_name)
-	agent = project_client.agents.create_version(
-		agent_name=agent_name,
-		definition=PromptAgentDefinition(model=model_name, instructions="..."),
-	)
-	span.set_attribute("agent.id", agent.id)
-	span.set_attribute("agent.version", agent.version)
-```
+The notebook queries the agent through the OpenAI-compatible client and appends each result to `stories.json` with:
 
-3. **Agent query span (Cell 15)**  
-	 Wraps responses call, records prompt/model/completion metadata, and correlates request/response IDs.
-
-```python
-with tracer.start_as_current_span("agent-query") as span:
-	span.set_attribute("agent.name", agent.name)
-	span.set_attribute("gen_ai.request.model", model_name)
-	span.set_attribute("gen_ai.prompt", user_prompt)
-
-	response = openai_client.responses.create(
-		input=[{"role": "user", "content": user_prompt}],
-		extra_body={"agent_reference": {"name": agent.name, "id": agent.id, "type": "agent_reference"}},
-	)
-
-	span.set_attribute("gen_ai.response.id", response.id)
-	span.set_attribute("gen_ai.completion", response.output_text[:500])
-```
-
-4. **Agent correlation in request body (Cell 15)**  
-	 Sends `agent_reference` with both `name` and `id`, which improves visibility in Foundry Trace (Preview).
-
-5. **Trace propagation enabled**  
-	 Allows client-side and service-side operations to be linked in a single distributed trace view.
-
-Result: you get timeline-level visibility across setup, agent creation, and inference requests in both Application Insights and Foundry Trace (Preview).
+- `timestamp`
+- `agent`
+- `model`
+- `prompt`
+- `story`
+- incremented `id`
 
 ---
 
-## Telemetry troubleshooting (Trace preview)
+## Troubleshooting notes
 
-- Ensure `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` is set before instrumentation.
-- Keep `enable_performance_counters=False` in telemetry setup to avoid local hangs in some environments.
-- Include both `name` and `id` in `agent_reference` for best visibility in Foundry Trace (Preview).
-- If telemetry setup gets stuck after multiple reruns, restart the kernel and rerun the cells above in sequence.
+### ImportError: `cannot import name 'LogData'`
 
----
+If you hit this while importing Azure Monitor telemetry modules, rerun Cell 5. The exporter upgrade line is intended to resolve this compatibility issue.
 
-## Validation checklist (quick smoke test)
+### Signed-in account shows as unavailable
 
-- Run Cells 7, 9, 11, 13, and 15 in order after a fresh kernel restart.
-- Confirm Cell 11 prints completion for all three telemetry steps and ends with `Tracer ready ✅`.
-- In Foundry Trace (Preview), verify you see spans for both `agent-creation` and `agent-query` for the latest run.
-- In Application Insights, verify fresh telemetry arrives for the same execution window and includes agent/query-related spans.
+If `DefaultAzureCredential` reports `AzureCliCredential` but no user is shown, rerun Cell 9. On Windows the notebook now uses `az.cmd` specifically for this lookup.
+
+### Telemetry cell fails after dependency changes
+
+Restart the notebook kernel and rerun from Cell 5 through Cell 11.
 
 ---
 
-## Resources
+## Validation checklist
+
+1. Cell 9 prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
+2. Cell 11 prints `Tracing enabled -> Application Insights (connection string retrieved from project)`.
+3. Cell 13 creates or versions the agent successfully.
+4. Cell 15 returns a response and appends a new record in `stories.json`.
+5. Cell 17 returns data for end-to-end and trend KQL queries.
+
+---
+
+## References
 
 - https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview?pivots=programming-language-python#foundry-tools-sdks
 - https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup?view=foundry
