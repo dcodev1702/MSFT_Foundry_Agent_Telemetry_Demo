@@ -16,6 +16,8 @@ This notebook demonstrates how to enable end-to-end observability for Azure AI F
 - Send telemetry to **Application Insights** for deeper diagnostics and historical analysis.
 - Capture context needed for troubleshooting latency, failures, and workflow bottlenecks.
 
+![image](https://github.com/user-attachments/assets/aaf309b6-5e28-421f-9784-6118b7b5535c)
+
 ---
 
 ## Known-good dependency set
