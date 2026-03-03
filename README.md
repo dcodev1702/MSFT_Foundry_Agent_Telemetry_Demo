@@ -187,16 +187,48 @@ Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.c
 > **Note:** `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` must be set **before** calling `instrument()`. Content recording is controlled by `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
 
 ```python
+from opentelemetry import trace
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+# ---------------------------------------------------------------------------
+# Phase 1: Trace settings (must be set before instrumentation)
+# ---------------------------------------------------------------------------
 os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
 os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
+
+# Enable end-to-end correlation between client and service spans
 os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
 os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
 
+# -----------------------------------------------------------------------------
+# Phase 2: Backend setup (Microsoft Foundry -> Application Insights connection)
+# -----------------------------------------------------------------------------
 application_insights_connection_string = project_client.telemetry.get_application_insights_connection_string()
-from azure.monitor.opentelemetry import configure_azure_monitor
 
+# Configure Azure Monitor as the tracing backend (one-liner per SDK docs)
 configure_azure_monitor(connection_string=application_insights_connection_string)
+
+# -----------------------------------------------------------------------------
+# Phase 3: SDK instrumentation
+# Instrument azure-ai-projects SDK + OpenAI responses/conversations automatically
+# -----------------------------------------------------------------------------
 AIProjectInstrumentor().instrument(enable_content_recording=True)
+
+# -----------------------------------------------------------------------------
+# Phase 4: Tracer handle for custom spans in later sections
+# -----------------------------------------------------------------------------
+tracer = trace.get_tracer(__name__)
+
+project_name = user_endpoint.rstrip("/").split("/")[-1] if "user_endpoint" in globals() else "unknown-project"
+ansi_cyan = "\033[96m"
+ansi_magenta = "\033[95m"
+ansi_reset = "\033[0m"
+project_name_color = ansi_magenta  # change to ansi_cyan if you prefer cyan
+project_name_colored = f"{project_name_color}{project_name}{ansi_reset}"
+foundry_label_colored = f"{project_name_color}Microsoft Foundry{ansi_reset}"
+
+print(f"Tracing enabled → Application Insights for project: '{project_name_colored}'")
+print(f"- [connection string retrieved from: {foundry_label_colored}]")
 ```
 
 ### 3.2. Configure MSFT Learn MCP Tool
