@@ -239,6 +239,8 @@ The code wraps creation with `project_client.agents.create_version(...)` and set
 
 Use the OpenAI-compatible client from the project to send a prompt to the agent and retrieve a response. The agent is referenced by name using `agent_reference`. Each response is appended to `stories.json` as a new object in the array.
 
+Cell 17 also handles MCP approvals automatically when the response includes `mcp_approval_request` items. It submits `mcp_approval_response` payloads and continues until assistant text is returned (or a max round limit is reached).
+
 Saved fields include:
 
 - `timestamp`
@@ -254,7 +256,7 @@ Use this section to validate that telemetry from the notebook is landing in the 
 
 - Workspace resource ID pattern: `/subscriptions/<subscription-id>/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/<Log-Analytics-Workspace-Name>`
 - The Azure CLI extension command `az monitor log-analytics query` may fail in some environments due to extension/runtime mismatch.
-- The code cell uses `az rest` against `api.loganalytics.io` as a reliable fallback.
+- The code cell uses direct HTTPS calls to `api.loganalytics.io` with a `DefaultAzureCredential` bearer token (`urllib.request`) as a reliable fallback.
 
 The notebook runs two KQL queries against `api.loganalytics.io` using `DefaultAzureCredential` token auth:
 
