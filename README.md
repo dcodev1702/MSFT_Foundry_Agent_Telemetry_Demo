@@ -237,18 +237,23 @@ The code wraps creation with `project_client.agents.create_version(...)` and set
 
 ### 5. Query the Agent
 
-Use the OpenAI-compatible client from the project to send a prompt to the agent and retrieve a response. The agent is referenced by name using `agent_reference`. Each response is appended to `stories.json` as a new object in the array.
+Use the OpenAI-compatible client from the project to send prompts to the agent and retrieve responses. The section runs two independent passes:
 
-This section also handles MCP approvals automatically when the response includes `mcp_approval_request` items. It submits `mcp_approval_response` payloads and continues until assistant text is returned (or a max round limit is reached).
+- **Pass 1 (fiction):** Generates a six-sentence fictional story only.
+- **Pass 2 (facts):** Uses the MSFT Learn MCP tool for concise Microsoft Foundry guidance.
 
-Saved fields include:
+The agent is referenced by name using `agent_reference`. MCP approvals are handled automatically when `mcp_approval_request` items are returned, by submitting `mcp_approval_response` payloads until text is produced (or max rounds are reached).
 
+Each run is appended to `stories.json` with these fields:
+
+- `id` (incremented)
 - `timestamp`
 - `agent`
 - `model`
 - `prompt`
 - `story`
-- incremented `id`
+- `msft_learn_insights`
+- `combined_output`
 
 ### 6. Validate Traces in Log Analytics
 
