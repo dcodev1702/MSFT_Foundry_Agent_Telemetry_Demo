@@ -1,4 +1,4 @@
-# Microsoft Foundry - AI Agent Telemetry Notebook Guide
+# Microsoft Foundry - AI Agent (client-side) Observability Notebook
 > (`zolab-ai-agent-demo-win11.ipynb`)
 
 A Jupyter Notebook (Python 3.13) running on Windows 11 that creates and queries a Microsoft Foundry client-side AI Agent demonstrating end-to-end observability.
