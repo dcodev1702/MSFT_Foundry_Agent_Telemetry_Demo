@@ -55,7 +55,7 @@ The notebook walks through a complete run:
     - **Application Insights**
     - **Log Analytics** (`AppDependencies` table)
 
-![image](https://github.com/user-attachments/assets/aaf309b6-5e28-421f-9784-6118b7b5535c)
+![image](https://github.com/user-attachments/assets/2f1886f2-8e5d-47e3-b014-0eb8bf1cbe4c)
 
 ![images](https://github.com/user-attachments/assets/b0e6c9a4-d54f-4c0a-a52d-226d72c12ff4)
 
