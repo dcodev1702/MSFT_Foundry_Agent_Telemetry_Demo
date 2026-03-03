@@ -60,7 +60,7 @@ The notebook walks through a complete run:
 
 ![image](https://github.com/user-attachments/assets/1e7146ef-c44f-4f51-b841-29318fb47a38)
 
-![images](https://github.com/user-attachments/assets/b0e6c9a4-d54f-4c0a-a52d-226d72c12ff4)
+![images](https://github.com/user-attachments/assets/81c0ca29-e9f8-4ee8-80d0-f62f08ff0c50)
 
 ![image](https://github.com/user-attachments/assets/5334d116-c5cd-4d2a-b3e1-dbe839a9874f)
 
