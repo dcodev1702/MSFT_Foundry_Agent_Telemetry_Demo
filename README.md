@@ -185,7 +185,8 @@ Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.c
 2. **`AIProjectInstrumentor`** — Instruments all `azure-ai-projects` SDK operations (agent create/version, list, etc.) and automatically instruments OpenAI responses/conversations operations.
 
 > [!NOTE]
-> `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` must be set **before** calling `instrument()`. Content recording is controlled by `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
+> `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` and additional variables must be set **before** calling `instrument()`.
+> Content recording is controlled by `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
 
 ```python
 from opentelemetry import trace
