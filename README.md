@@ -74,9 +74,9 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 - **1. Install Dependencies**
 - **2. Import Libraries**
 - **3. Configure the Project Client**
-- **3.5 Enable Telemetry**
-- **3.6 Configure MSFT Learn MCP Tool**
-- **MSFT Learn MCP Tool Spec (code block)**
+    - **3.5 Enable Telemetry**
+    - **3.6 Configure MSFT Learn MCP Tool**
+        - **MSFT Learn MCP Tool Spec (code block)**
 - **4. Create the Agent**
 - **5. Query the Agent**
 - **6. Validate Traces in Log Analytics**
