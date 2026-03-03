@@ -186,6 +186,7 @@ Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.c
 
 > [!NOTE]
 > `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` and additional variables must be set **before** calling `instrument()`.
+
 > Content recording is controlled by `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
 
 ```python
