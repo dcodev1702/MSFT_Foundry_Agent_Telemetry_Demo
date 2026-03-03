@@ -11,7 +11,7 @@ This document reflects the current Windows 11 notebook flow for creating and que
 4. Run Cell 13 (create/version agent), Cell 15 (query + save `stories.json`), and Cell 17 (validate Log Analytics traces).
 5. Go to your Azure portal and observe the telemetry & traces in: Application Insights, Foundry (e.g. Traces), and Log Analytics
 
-![image](https://github.com/user-attachments/assets/52606c05-9b90-49e2-bd39-d874d133f1e9)
+![image](https://github.com/user-attachments/assets/4cf6c5e7-036c-4020-aaf6-d67d8a286ebb)
 
 ---
 
