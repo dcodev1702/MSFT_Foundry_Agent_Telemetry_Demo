@@ -66,20 +66,20 @@ The notebook walks through a complete run:
 
 ---
 
-## Notebook section map (1:1)
+## Notebook section map
 
 After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 
-1. **0. Create/Re-use Virtual Environment & Register Kernel**
-2. **1. Install Dependencies**
-3. **2. Import Libraries**
-4. **3. Configure the Project Client**
-5. **3.5 Enable Telemetry**
-6. **3.6 Configure MSFT Learn MCP Tool**
-7. **MSFT Learn MCP Tool Spec (code block)**
-8. **4. Create the Agent**
-9. **5. Query the Agent**
-10. **6. Validate Traces in Log Analytics**
+- **0. Create/Re-use Virtual Environment & Register Kernel**
+- **1. Install Dependencies**
+- **2. Import Libraries**
+- **3. Configure the Project Client**
+- **3.5 Enable Telemetry**
+- **3.6 Configure MSFT Learn MCP Tool**
+- **MSFT Learn MCP Tool Spec (code block)**
+- **4. Create the Agent**
+- **5. Query the Agent**
+- **6. Validate Traces in Log Analytics**
 
 ---
 
