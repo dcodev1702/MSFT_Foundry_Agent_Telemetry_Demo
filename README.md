@@ -7,8 +7,8 @@ This document reflects the current Windows 11 notebook flow for creating and que
 
 1. Open `zolab-ai-agent-demo-win11.ipynb`.
 2. Run **0. Create/Re-use Virtual Environment & Register Kernel**, then switch kernel to **AI Agent Demo (.venv)**.
-3. Run **1. Install Dependencies**, **2. Import Libraries**, **3. Configure the Project Client**, and **3.5 Enable Telemetry** in order.
-4. Run **3.6 Configure MSFT Learn MCP Tool**, **4. Create the Agent**, **5. Query the Agent**, and **6. Validate Traces in Log Analytics**.
+3. Run **1. Install Dependencies**, **2. Import Libraries**, **3. Configure the Project Client**, and **3.1 Enable Telemetry** in order.
+4. Run **3.2 Configure MSFT Learn MCP Tool**, **4. Create the Agent**, **5. Query the Agent**, and **6. Validate Traces in Log Analytics**.
 5. Go to your Azure portal and observe the telemetry & traces in: Application Insights, Foundry (e.g. Traces), and Log Analytics
 
 ![image](https://github.com/user-attachments/assets/4cf6c5e7-036c-4020-aaf6-d67d8a286ebb)
@@ -74,8 +74,8 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 - **1. Install Dependencies**
 - **2. Import Libraries**
 - **3. Configure the Project Client**
-    - **3.5 Enable Telemetry**
-    - **3.6 Configure MSFT Learn MCP Tool**
+    - **3.1 Enable Telemetry**
+    - **3.2 Configure MSFT Learn MCP Tool**
         - **MSFT Learn MCP Tool Spec (code block)**
 - **4. Create the Agent**
 - **5. Query the Agent**
@@ -177,7 +177,7 @@ Expected output:
 👤 Signed-in account: agent007@BondEnterprises.onmicrosoft.com
 ```
 
-### 3.5. Enable Telemetry
+### 3.1. Enable Telemetry
 
 Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects#tracing):
 
@@ -199,7 +199,7 @@ configure_azure_monitor(connection_string=application_insights_connection_string
 AIProjectInstrumentor().instrument(enable_content_recording=True)
 ```
 
-### 3.6. Configure MSFT Learn MCP Tool
+### 3.2. Configure MSFT Learn MCP Tool
 
 This section introduces the MCP setup step and creates the MCP tool spec used by agent creation in Step 4.
 
@@ -284,14 +284,14 @@ If `DefaultAzureCredential` reports `AzureCliCredential` but no user is shown, r
 
 ### Telemetry cell fails after dependency changes
 
-Restart the notebook kernel and rerun from **1. Install Dependencies** through **3.5 Enable Telemetry**.
+Restart the notebook kernel and rerun from **1. Install Dependencies** through **3.1 Enable Telemetry**.
 
 ---
 
 ## Validation checklist
 
 1. **3. Configure the Project Client** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
-2. **3.6 Configure MSFT Learn MCP Tool** prints `MSFT Learn MCP URL: https://learn.microsoft.com/api/mcp`.
+2. **3.2 Configure MSFT Learn MCP Tool** prints `MSFT Learn MCP URL: https://learn.microsoft.com/api/mcp`.
 3. **4. Create the Agent** creates or versions the agent successfully.
 4. **5. Query the Agent** returns a response and appends a new record in `stories.json`.
 5. **6. Validate Traces in Log Analytics** returns data for end-to-end and trend KQL queries.
