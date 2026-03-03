@@ -297,11 +297,11 @@ Restart the notebook kernel and rerun from **1. Install Dependencies** through *
 
 ## Validation checklist
 
-1. **3. Configure the Project Client** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
-2. **3.2 Configure MSFT Learn MCP Tool** prints the MSFT Learn MCP URL ([Microsoft Learn MCP Endpoint](https://learn.microsoft.com/api/mcp)).
-3. **4. Create the Agent** creates or versions the agent successfully.
-4. **5. Query the Agent** returns a response and appends a new record in `stories.json`.
-5. **6. Validate Traces in Log Analytics** returns data for end-to-end and trend KQL queries.
+- **3. Configure the Project Client** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
+- **3.2 Configure MSFT Learn MCP Tool** prints the MSFT Learn MCP URL ([Microsoft Learn MCP Endpoint](https://learn.microsoft.com/api/mcp)).
+- **4. Create the Agent** creates or versions the agent successfully.
+- **5. Query the Agent** returns a response and appends a new record in `stories.json`.
+- **6. Validate Traces in Log Analytics** returns data for end-to-end and trend KQL queries.
 
 ---
 
