@@ -6,9 +6,9 @@ This document reflects the current Windows 11 notebook flow for creating and que
 ## Quick Start
 
 1. Open `zolab-ai-agent-demo-win11.ipynb`.
-2. Run Cell 3, then switch kernel to **AI Agent Demo (.venv)**.
-3. Run Cells 5, 7, 9, and 11 in order to install dependencies, authenticate, and enable tracing.
-4. Run Cell 13 (configure MSFT Learn MCP tool), Cell 15 (create/version agent), Cell 17 (query + save `stories.json`), and Cell 19 (validate Log Analytics traces).
+2. Run **0. Create/Re-use Virtual Environment & Register Kernel**, then switch kernel to **AI Agent Demo (.venv)**.
+3. Run **1. Install Dependencies**, **2. Import Libraries**, **3. Configure the Project Client**, and **3.5 Enable Telemetry** in order.
+4. Run **3.6 Configure MSFT Learn MCP Tool**, **4. Create the Agent**, **5. Query the Agent**, and **6. Validate Traces in Log Analytics**.
 5. Go to your Azure portal and observe the telemetry & traces in: Application Insights, Foundry (e.g. Traces), and Log Analytics
 
 ![image](https://github.com/user-attachments/assets/4cf6c5e7-036c-4020-aaf6-d67d8a286ebb)
@@ -68,24 +68,24 @@ The notebook walks through a complete run:
 
 ## Notebook section map (1:1)
 
-After selecting the `AI Agent Demo (.venv)` kernel, run cells in order:
+After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 
-1. Cell 3 - **0. Create/Re-use Virtual Environment & Register Kernel**
-2. Cell 5 - **1. Install Dependencies**
-3. Cell 7 - **2. Import Libraries**
-4. Cell 9 - **3. Configure the Project Client**
-5. Cell 11 - **3.5 Enable Telemetry**
-6. Cell 12 - **3.6 Configure MSFT Learn MCP Tool**
-7. Cell 13 - **MSFT Learn MCP Tool Spec (code block)**
-8. Cell 15 - **4. Create the Agent**
-9. Cell 17 - **5. Query the Agent**
-10. Cell 19 - **6. Validate Traces in Log Analytics**
+1. **0. Create/Re-use Virtual Environment & Register Kernel**
+2. **1. Install Dependencies**
+3. **2. Import Libraries**
+4. **3. Configure the Project Client**
+5. **3.5 Enable Telemetry**
+6. **3.6 Configure MSFT Learn MCP Tool**
+7. **MSFT Learn MCP Tool Spec (code block)**
+8. **4. Create the Agent**
+9. **5. Query the Agent**
+10. **6. Validate Traces in Log Analytics**
 
 ---
 
 ## Key setup snippets (aligned to notebook headings)
 
-### 0) Create/Re-use Virtual Environment & Register Kernel (Cell 3)
+### 0. Create/Re-use Virtual Environment & Register Kernel
 
 ```python
 venv_dir = os.path.join(os.getcwd(), ".venv")
@@ -111,7 +111,7 @@ subprocess.check_call([
 ])
 ```
 
-### 1) Install Dependencies (Cell 5)
+### 1. Install Dependencies
 
 ```python
 outdated = subprocess.check_output(
@@ -130,7 +130,7 @@ Why this matters:
 - `pip` upgrades only when it is actually outdated.
 - Exporter is explicitly updated to avoid OpenTelemetry import mismatches.
 
-### 2) Import Libraries (Cell 7)
+### 2. Import Libraries
 
 This section verifies imports for:
 
@@ -141,9 +141,9 @@ This section verifies imports for:
 
 and prints platform and Python version diagnostics.
 
-### 3) Configure the Project Client (Cell 9)
+### 3. Configure the Project Client
 
-Cell 9 now includes a full authentication hardening flow:
+This section includes a full authentication hardening flow:
 
 - Tries `DefaultAzureCredential` token acquisition first.
 - If authentication fails, checks for Azure CLI (`az.cmd` on Windows).
@@ -177,7 +177,7 @@ Expected output:
 👤 Signed-in account: agent007@BondEnterprises.onmicrosoft.com
 ```
 
-### 3.5) Enable Telemetry (Cell 11)
+### 3.5. Enable Telemetry
 
 Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects#tracing):
 
@@ -199,9 +199,9 @@ configure_azure_monitor(connection_string=application_insights_connection_string
 AIProjectInstrumentor().instrument(enable_content_recording=True)
 ```
 
-### 3.6) Configure MSFT Learn MCP Tool (Cells 12-13)
+### 3.6. Configure MSFT Learn MCP Tool
 
-Cell 12 introduces the MCP setup step, and Cell 13 creates the MCP tool spec used by agent creation in Step 4.
+This section introduces the MCP setup step and creates the MCP tool spec used by agent creation in Step 4.
 
 - MSFT Learn MCP URL: `https://learn.microsoft.com/api/mcp`
 - MSFT Learn MCP documentation: [Azure MCP Server docs](https://learn.microsoft.com/azure/developer/azure-mcp-server/)
@@ -220,7 +220,7 @@ mcp_tool_spec = MCPTool(
 )
 ```
 
-### 4) Create the Agent (Cell 15)
+### 4. Create the Agent
 
 Define and create a versioned agent. Replace `<your-agent-name>` and `<your-model-deployment-name>` with your actual values.
 
@@ -235,11 +235,11 @@ The code wraps creation with `project_client.agents.create_version(...)` and set
 - `agent.version`
 - `agent.id`
 
-### 5) Query the Agent (Cell 17)
+### 5. Query the Agent
 
 Use the OpenAI-compatible client from the project to send a prompt to the agent and retrieve a response. The agent is referenced by name using `agent_reference`. Each response is appended to `stories.json` as a new object in the array.
 
-Cell 17 also handles MCP approvals automatically when the response includes `mcp_approval_request` items. It submits `mcp_approval_response` payloads and continues until assistant text is returned (or a max round limit is reached).
+This section also handles MCP approvals automatically when the response includes `mcp_approval_request` items. It submits `mcp_approval_response` payloads and continues until assistant text is returned (or a max round limit is reached).
 
 Saved fields include:
 
@@ -250,7 +250,7 @@ Saved fields include:
 - `story`
 - incremented `id`
 
-### 6) Validate Traces in Log Analytics (Cell 19)
+### 6. Validate Traces in Log Analytics
 
 Use this section to validate that telemetry from the notebook is landing in the Log Analytics workspace hosted in the Security subscription.
 
@@ -271,25 +271,25 @@ This path is used as a reliable fallback when `az monitor log-analytics query` i
 
 ### ImportError: `cannot import name 'LogData'`
 
-If you hit this while importing Azure Monitor telemetry modules, rerun Cell 5. The exporter upgrade line is intended to resolve this compatibility issue.
+If you hit this while importing Azure Monitor telemetry modules, rerun **1. Install Dependencies**. The exporter upgrade line is intended to resolve this compatibility issue.
 
 ### Signed-in account shows as unavailable
 
-If `DefaultAzureCredential` reports `AzureCliCredential` but no user is shown, rerun Cell 9. On Windows the notebook now uses `az.cmd` specifically for this lookup.
+If `DefaultAzureCredential` reports `AzureCliCredential` but no user is shown, rerun **3. Configure the Project Client**. On Windows the notebook now uses `az.cmd` specifically for this lookup.
 
 ### Telemetry cell fails after dependency changes
 
-Restart the notebook kernel and rerun from Cell 5 through Cell 11.
+Restart the notebook kernel and rerun from **1. Install Dependencies** through **3.5 Enable Telemetry**.
 
 ---
 
 ## Validation checklist
 
-1. Cell 9 prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
-2. Cell 13 prints `MSFT Learn MCP URL: https://learn.microsoft.com/api/mcp`.
-3. Cell 15 creates or versions the agent successfully.
-4. Cell 17 returns a response and appends a new record in `stories.json`.
-5. Cell 19 returns data for end-to-end and trend KQL queries.
+1. **3. Configure the Project Client** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
+2. **3.6 Configure MSFT Learn MCP Tool** prints `MSFT Learn MCP URL: https://learn.microsoft.com/api/mcp`.
+3. **4. Create the Agent** creates or versions the agent successfully.
+4. **5. Query the Agent** returns a response and appends a new record in `stories.json`.
+5. **6. Validate Traces in Log Analytics** returns data for end-to-end and trend KQL queries.
 
 ---
 
