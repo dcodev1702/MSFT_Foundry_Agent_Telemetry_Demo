@@ -3,7 +3,40 @@
 
 This document reflects the current Windows 11 notebook flow for creating and querying an Azure AI Foundry agent with end-to-end telemetry.
 
+## Quick Start
+
+1. Open `zolab-ai-agent-demo-win11.ipynb`.
+2. Run Cell 3, then switch kernel to **AI Agent Demo (.venv)**.
+3. Run Cells 5, 7, 9, and 11 in order to install dependencies, authenticate, and enable tracing.
+4. Run Cell 13 (create/version agent), Cell 15 (query + save `stories.json`), and Cell 17 (validate Log Analytics traces).
+
 ![image](https://github.com/user-attachments/assets/52606c05-9b90-49e2-bd39-d874d133f1e9)
+
+---
+
+## Prerequisites
+
+Before running this notebook, ensure the following are in place:
+
+### 1. Azure CLI Installed
+The notebook uses `DefaultAzureCredential`, which relies on Azure CLI for local authentication.
+
+- **Install via winget (Windows):**
+    ```powershell
+    winget install --id Microsoft.AzureCLI -e --accept-source-agreements --accept-package-agreements
+    ```
+- **Other platforms / manual install:** https://aka.ms/installazurecli
+
+### 2. Logged in via Azure CLI with Appropriate Permissions
+After installing, sign in and verify your session:
+```bash
+az login
+az account show
+```
+Your Entra ID identity must have **Contributor** (or equivalent) access to the Azure AI Foundry project and the associated Application Insights resource.
+
+### 3. Azure AI Foundry Project with Application Insights
+You need a project provisioned in **Microsoft Foundry** that is connected to an **Application Insights** instance backed by a **Log Analytics workspace**. The notebook retrieves the Application Insights connection string from the project at runtime to enable telemetry export.
 
 ---
 
@@ -17,9 +50,9 @@ The notebook walks through a complete run:
 4. Enable OpenTelemetry + Azure Monitor tracing.
 5. Create an agent version and query it.
 6. Validate traces in the following:
-   - **Microsoft Foundry (Traces - Preview)**
-   - **Application Insights**
-   - **Log Analytics**
+    - **Microsoft Foundry (Traces - Preview)**
+    - **Application Insights**
+    - **Log Analytics** (`AppDependencies` table)
 
 ![image](https://github.com/user-attachments/assets/aaf309b6-5e28-421f-9784-6118b7b5535c)
 
@@ -29,24 +62,24 @@ The notebook walks through a complete run:
 
 ---
 
-## Recommended run order
+## Notebook section map (1:1)
 
 After selecting the `AI Agent Demo (.venv)` kernel, run cells in order:
 
-1. Cell 3 - venv and kernel setup
-2. Cell 5 - dependency install
-3. Cell 7 - imports
-4. Cell 9 - project client + identity hint
-5. Cell 11 - telemetry enablement
-6. Cell 13 - create agent
-7. Cell 15 - query agent and save `stories.json`
-8. Cell 17 - query Log Analytics
+1. Cell 3 - **0. Create/Re-use Virtual Environment & Register Kernel**
+2. Cell 5 - **1. Install Dependencies**
+3. Cell 7 - **2. Import Libraries**
+4. Cell 9 - **3. Configure the Project Client**
+5. Cell 11 - **3.5 Enable Telemetry**
+6. Cell 13 - **4. Create the Agent**
+7. Cell 15 - **5. Query the Agent**
+8. Cell 17 - **6. Validate Traces in Log Analytics**
 
 ---
 
-## Key setup snippets
+## Key setup snippets (aligned to notebook headings)
 
-### 1) Windows-safe venv setup (Cell 3)
+### 0) Create/Re-use Virtual Environment & Register Kernel (Cell 3)
 
 ```python
 venv_dir = os.path.join(os.getcwd(), ".venv")
@@ -72,7 +105,7 @@ subprocess.check_call([
 ])
 ```
 
-### 2) Dependency install with pip + exporter safeguards (Cell 5)
+### 1) Install Dependencies (Cell 5)
 
 ```python
 outdated = subprocess.check_output(
@@ -91,7 +124,32 @@ Why this matters:
 - `pip` upgrades only when it is actually outdated.
 - Exporter is explicitly updated to avoid OpenTelemetry import mismatches.
 
-### 3) Azure CLI / PowerShell identity hint (Cell 9)
+### 2) Import Libraries (Cell 7)
+
+This section verifies imports for:
+
+- `DefaultAzureCredential`
+- `AIProjectClient`
+- `PromptAgentDefinition`
+- `AIProjectInstrumentor`
+
+and prints platform and Python version diagnostics.
+
+### 3) Configure the Project Client (Cell 9)
+
+Cell 9 now includes a full authentication hardening flow:
+
+- Tries `DefaultAzureCredential` token acquisition first.
+- If authentication fails, checks for Azure CLI (`az.cmd` on Windows).
+- Attempts Azure CLI install with `winget` if missing.
+- Triggers interactive `az login` if no active CLI session exists.
+- Rebuilds `DefaultAzureCredential` and retries token acquisition.
+- Creates `AIProjectClient` only after successful authentication.
+
+It also prints the selected successful credential and tries to resolve signed-in identity details for:
+
+- `AzureCliCredential` via `az.cmd account show --query user.name -o tsv`
+- `AzurePowerShellCredential` via `pwsh` and `Get-AzContext`
 
 ```python
 def _resolve_identity_hint(credential_name: str) -> str | None:
@@ -113,7 +171,14 @@ Expected output:
 👤 Signed-in account: agent007@BondEnterprises.onmicrosoft.com
 ```
 
-### 4) Telemetry enablement (Cell 11)
+### 3.5) Enable Telemetry (Cell 11)
+
+Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects#tracing):
+
+1. **`configure_azure_monitor`** — Sets up the full OpenTelemetry pipeline (TracerProvider, exporter, span processors) to send traces to Application Insights.
+2. **`AIProjectInstrumentor`** — Instruments all `azure-ai-projects` SDK operations (agent create/version, list, etc.) and automatically instruments OpenAI responses/conversations operations.
+
+> **Note:** `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` must be set **before** calling `instrument()`. Content recording is controlled by `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
 
 ```python
 os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
@@ -128,9 +193,25 @@ configure_azure_monitor(connection_string=application_insights_connection_string
 AIProjectInstrumentor().instrument(enable_content_recording=True)
 ```
 
-### 5) Query and persist results (Cell 15)
+### 4) Create the Agent (Cell 13)
 
-The notebook queries the agent through the OpenAI-compatible client and appends each result to `stories.json` with:
+Define and create a versioned agent. Replace `<your-agent-name>` and `<your-model-deployment-name>` with your actual values.
+
+- `create_version` will create a new agent or bump the version if the parameters have changed.
+- The agent is given a **storytelling** persona via the `instructions` field.
+
+The code wraps creation with `project_client.agents.create_version(...)` and sets tracing attributes such as:
+
+- `agent.name`
+- `gen_ai.request.model`
+- `agent.version`
+- `agent.id`
+
+### 5) Query the Agent (Cell 15)
+
+Use the OpenAI-compatible client from the project to send a prompt to the agent and retrieve a response. The agent is referenced by name using `agent_reference`. Each response is appended to `stories.json` as a new object in the array.
+
+Saved fields include:
 
 - `timestamp`
 - `agent`
@@ -138,6 +219,21 @@ The notebook queries the agent through the OpenAI-compatible client and appends 
 - `prompt`
 - `story`
 - incremented `id`
+
+### 6) Validate Traces in Log Analytics (Cell 17)
+
+Use this section to validate that telemetry from the notebook is landing in the Log Analytics workspace hosted in the Security subscription.
+
+- Workspace resource ID pattern: `/subscriptions/<subscription-id>/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/<Log-Analytics-Workspace-Name>`
+- The Azure CLI extension command `az monitor log-analytics query` may fail in some environments due to extension/runtime mismatch.
+- The code cell uses `az rest` against `api.loganalytics.io` as a reliable fallback.
+
+The notebook runs two KQL queries against `api.loganalytics.io` using `DefaultAzureCredential` token auth:
+
+- End-to-end view (dependencies + trace context fields)
+- Runs-only trend (calls, failures, avg/p95 duration)
+
+This path is used as a reliable fallback when `az monitor log-analytics query` is impacted by extension/runtime mismatch.
 
 ---
 
