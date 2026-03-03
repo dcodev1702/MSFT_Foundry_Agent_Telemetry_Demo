@@ -234,6 +234,13 @@ The code wraps creation with `project_client.agents.create_version(...)` and set
 - `gen_ai.request.model`
 - `agent.version`
 - `agent.id`
+- `demo.run_id` (shared correlation id used across Steps 4 and 5)
+
+Additional observability added in Step 4:
+
+- Span lifecycle events (`agent.create_version.start`, `agent.create_version.success`, `agent.create_version.failure`)
+- Tool metadata (`agent.tools.count`, `agent.tools.labels`)
+- Explicit exception telemetry via `record_exception(...)` and error status on failure
 
 ### 5. Query the Agent
 
@@ -265,8 +272,8 @@ Use this section to validate that telemetry from the notebook is landing in the 
 
 The notebook runs two KQL queries against `api.loganalytics.io` using `DefaultAzureCredential` token auth:
 
-- End-to-end view (dependencies + trace context fields)
-- Runs-only trend (calls, failures, avg/p95 duration)
+- End-to-end view (dependencies + trace context fields), now including `agent-creation`
+- Runs-only trend (calls, failures, avg/p95 duration), grouped by `demo_run_id`
 
 This path is used as a reliable fallback when `az monitor log-analytics query` is impacted by extension/runtime mismatch.
 
