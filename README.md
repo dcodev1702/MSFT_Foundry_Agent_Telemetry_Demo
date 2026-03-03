@@ -219,16 +219,6 @@ AIProjectInstrumentor().instrument(enable_content_recording=True)
 # -----------------------------------------------------------------------------
 tracer = trace.get_tracer(__name__)
 
-project_name = user_endpoint.rstrip("/").split("/")[-1] if "user_endpoint" in globals() else "unknown-project"
-ansi_cyan = "\033[96m"
-ansi_magenta = "\033[95m"
-ansi_reset = "\033[0m"
-project_name_color = ansi_magenta  # change to ansi_cyan if you prefer cyan
-project_name_colored = f"{project_name_color}{project_name}{ansi_reset}"
-foundry_label_colored = f"{project_name_color}Microsoft Foundry{ansi_reset}"
-
-print(f"Tracing enabled → Application Insights for project: '{project_name_colored}'")
-print(f"- [connection string retrieved from: {foundry_label_colored}]")
 ```
 
 ### 3.2. Configure MSFT Learn MCP Tool
