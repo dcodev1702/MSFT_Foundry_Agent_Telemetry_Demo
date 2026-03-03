@@ -1,14 +1,14 @@
 # Microsoft Foundry - AI Agent Telemetry Notebook Guide
 > (`zolab-ai-agent-demo-win11.ipynb`)
 
-This document reflects the current Windows 11 notebook flow for creating and querying an Azure AI Foundry agent with end-to-end telemetry.
+This document reflects the current Windows 11 notebook flow for creating and querying a Microsoft Foundry agent with end-to-end telemetry.
 
 ## Quick Start
 
 1. Open `zolab-ai-agent-demo-win11.ipynb`.
 2. Run Cell 3, then switch kernel to **AI Agent Demo (.venv)**.
 3. Run Cells 5, 7, 9, and 11 in order to install dependencies, authenticate, and enable tracing.
-4. Run Cell 13 (create/version agent), Cell 15 (query + save `stories.json`), and Cell 17 (validate Log Analytics traces).
+4. Run Cell 13 (configure MSFT Learn MCP tool), Cell 15 (create/version agent), Cell 17 (query + save `stories.json`), and Cell 19 (validate Log Analytics traces).
 5. Go to your Azure portal and observe the telemetry & traces in: Application Insights, Foundry (e.g. Traces), and Log Analytics
 
 ![image](https://github.com/user-attachments/assets/4cf6c5e7-036c-4020-aaf6-d67d8a286ebb)
@@ -34,9 +34,9 @@ After installing, sign in and verify your session:
 az login
 az account show
 ```
-Your Entra ID identity must have **Contributor** (or equivalent) access to the Azure AI Foundry project and the associated Application Insights resource.
+Your Entra ID identity must have **Contributor** (or equivalent) access to the Microsoft Foundry project and the associated Application Insights resource.
 
-### 3. Azure AI Foundry Project with Application Insights
+### 3. Microsoft Foundry Project with Application Insights
 You need a project provisioned in **Microsoft Foundry** that is connected to an **Application Insights** instance backed by a **Log Analytics workspace**. The notebook retrieves the Application Insights connection string from the project at runtime to enable telemetry export.
 
 ---
@@ -49,8 +49,9 @@ The notebook walks through a complete run:
 2. Install Azure AI and telemetry dependencies with compatibility safeguards.
 3. Build `AIProjectClient` with `DefaultAzureCredential`.
 4. Enable OpenTelemetry + Azure Monitor tracing.
-5. Create an agent version and query it.
-6. Validate traces in the following:
+5. Configure the MSFT Learn MCP tool spec.
+6. Create an agent version and query it.
+7. Validate traces in the following:
     - **Microsoft Foundry (Traces - Preview)**
     - **Application Insights**
     - **Log Analytics** (`AppDependencies` table)
@@ -74,9 +75,11 @@ After selecting the `AI Agent Demo (.venv)` kernel, run cells in order:
 3. Cell 7 - **2. Import Libraries**
 4. Cell 9 - **3. Configure the Project Client**
 5. Cell 11 - **3.5 Enable Telemetry**
-6. Cell 13 - **4. Create the Agent**
-7. Cell 15 - **5. Query the Agent**
-8. Cell 17 - **6. Validate Traces in Log Analytics**
+6. Cell 12 - **3.6 Configure MSFT Learn MCP Tool**
+7. Cell 13 - **MSFT Learn MCP Tool Spec (code block)**
+8. Cell 15 - **4. Create the Agent**
+9. Cell 17 - **5. Query the Agent**
+10. Cell 19 - **6. Validate Traces in Log Analytics**
 
 ---
 
@@ -196,12 +199,34 @@ configure_azure_monitor(connection_string=application_insights_connection_string
 AIProjectInstrumentor().instrument(enable_content_recording=True)
 ```
 
-### 4) Create the Agent (Cell 13)
+### 3.6) Configure MSFT Learn MCP Tool (Cells 12-13)
+
+Cell 12 introduces the MCP setup step, and Cell 13 creates the MCP tool spec used by agent creation in Step 4.
+
+- MSFT Learn MCP URL: `https://learn.microsoft.com/api/mcp`
+- MSFT Learn MCP documentation: [Azure MCP Server docs](https://learn.microsoft.com/azure/developer/azure-mcp-server/)
+- The code prints the URL for verification.
+- The code creates `mcp_tool_spec` and Step 4 passes it via `tools=[mcp_tool_spec]`.
+
+```python
+from azure.ai.projects.models import MCPTool
+
+msft_learn_mcp_url = "https://learn.microsoft.com/api/mcp"
+print(f"MSFT Learn MCP URL: {msft_learn_mcp_url}")
+
+mcp_tool_spec = MCPTool(
+    server_label="msft-learn",
+    server_url=msft_learn_mcp_url,
+)
+```
+
+### 4) Create the Agent (Cell 15)
 
 Define and create a versioned agent. Replace `<your-agent-name>` and `<your-model-deployment-name>` with your actual values.
 
 - `create_version` will create a new agent or bump the version if the parameters have changed.
 - The agent is given a **storytelling** persona via the `instructions` field.
+- The MSFT Learn MCP tool is available to the agent via `mcp_tool_spec` in `tools=[mcp_tool_spec]`.
 
 The code wraps creation with `project_client.agents.create_version(...)` and sets tracing attributes such as:
 
@@ -210,7 +235,7 @@ The code wraps creation with `project_client.agents.create_version(...)` and set
 - `agent.version`
 - `agent.id`
 
-### 5) Query the Agent (Cell 15)
+### 5) Query the Agent (Cell 17)
 
 Use the OpenAI-compatible client from the project to send a prompt to the agent and retrieve a response. The agent is referenced by name using `agent_reference`. Each response is appended to `stories.json` as a new object in the array.
 
@@ -223,7 +248,7 @@ Saved fields include:
 - `story`
 - incremented `id`
 
-### 6) Validate Traces in Log Analytics (Cell 17)
+### 6) Validate Traces in Log Analytics (Cell 19)
 
 Use this section to validate that telemetry from the notebook is landing in the Log Analytics workspace hosted in the Security subscription.
 
@@ -259,10 +284,10 @@ Restart the notebook kernel and rerun from Cell 5 through Cell 11.
 ## Validation checklist
 
 1. Cell 9 prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
-2. Cell 11 prints `Tracing enabled -> Application Insights (connection string retrieved from project)`.
-3. Cell 13 creates or versions the agent successfully.
-4. Cell 15 returns a response and appends a new record in `stories.json`.
-5. Cell 17 returns data for end-to-end and trend KQL queries.
+2. Cell 13 prints `MSFT Learn MCP URL: https://learn.microsoft.com/api/mcp`.
+3. Cell 15 creates or versions the agent successfully.
+4. Cell 17 returns a response and appends a new record in `stories.json`.
+5. Cell 19 returns data for end-to-end and trend KQL queries.
 
 ---
 
