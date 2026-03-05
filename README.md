@@ -82,7 +82,7 @@ The notebook produces traces across three observability surfaces:
 
 **Microsoft Foundry Traces (Preview)**
 
-![Microsoft Foundry traces view for agent execution](https://github.com/user-attachments/assets/2f1886f2-8e5d-47e3-b014-0eb8bf1cbe4c)
+![Microsoft Foundry traces view for agent execution](https://github.com/user-attachments/assets/cb347a74-9f66-4ab5-ae3f-a505c5d0ef5c)
 
 **Application Insights**
 
