@@ -1,338 +1,133 @@
-# Microsoft Foundry - AI Agent (client-side) Observability PoC
-> (`zolab-ai-agent-demo-win11.ipynb`)
+# 🤖 Microsoft Foundry — AI Agent Observability PoC
 
-A Jupyter Notebook (Python 3.13) running on Windows 11 that creates and queries a Microsoft Foundry client-side AI agent demonstrating end-to-end observability.
-
-## Quick Start
-
-1. Open `zolab-ai-agent-demo-win11.ipynb`.
-2. Run **0. Create or Reuse Virtual Environment & Register Kernel**, then switch kernel to **AI Agent Demo (.venv)**.
-3. Run **1. Install Dependencies**, **2. Import Libraries**, **3. Configure the Project Client**, and **3.1 Enable Telemetry** in order.
-4. Run **3.2 Configure MSFT Learn MCP Tool**, **4. Create the Agent**, **5. Query the Agent**, and **6. Validate Traces in Log Analytics**.
-5. Go to your Azure portal and observe the telemetry & traces in: Application Insights, Microsoft Foundry (for example, Traces), and Log Analytics
+A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI agent with **end-to-end observability** — tracing agent creation, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/4cf6c5e7-036c-4020-aaf6-d67d8a286ebb)
 
 ---
 
-## Prerequisites
+## 📋 Prerequisites
 
-Before running this notebook, ensure the following are in place:
-
-### 1. Azure CLI Installed
-The notebook uses `DefaultAzureCredential`, which relies on Azure CLI for local authentication.
-
-- **Install via winget (Windows):**
-    ```powershell
-    winget install --id Microsoft.AzureCLI -e --accept-source-agreements --accept-package-agreements
-    ```
-- **Other platforms / manual install:** [Install Azure CLI](https://aka.ms/installazurecli)
-
-### 2. Logged in via Azure CLI with Appropriate Permissions
-After installing, sign in and verify your session:
-```bash
-az login
-az account show
-```
-Your Entra ID identity must have **Contributor** (or equivalent) access to the Microsoft Foundry project and the associated Application Insights resource.
-
-### 3. Microsoft Foundry Project with Application Insights
-You need a project provisioned in **Microsoft Foundry** that is connected to an **Application Insights** instance backed by a **Log Analytics workspace**. The notebook retrieves the Application Insights connection string from the project at runtime to enable telemetry export.
+| Requirement | Details |
+|---|---|
+| **Azure CLI** | Installed and authenticated (`az login`) — [Install Azure CLI](https://aka.ms/installazurecli) |
+| **Entra ID Permissions** | `Contributor` (or equivalent) on the Foundry project and Application Insights resource |
+| **Microsoft Foundry Project** | Connected to an **Application Insights** instance backed by a **Log Analytics workspace** |
+| **Python 3.13+** | With `venv` support |
+| **Jupyter Notebook** | VS Code with Jupyter extension or JupyterLab |
 
 ---
 
-## What this notebook does
+## 🚀 Quick Start
 
-The notebook walks through a complete run:
+1. Open `zolab-ai-agent-demo-win11.ipynb`
+2. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
+3. Switch to the **AI Agent Demo (.venv)** kernel
+4. Run sections **1 → 6** in order
+5. Observe telemetry in the Azure Portal:
+   - 📊 **Application Insights** — request/dependency traces
+   - 🔍 **Microsoft Foundry** — agent execution traces
+   - 📡 **Log Analytics** — `AppDependencies` table queries
 
-1. Create or reuse a local `.venv` and register a Jupyter kernel.
-2. Install Azure AI and telemetry dependencies with compatibility safeguards.
-3. Build `AIProjectClient` with `DefaultAzureCredential`.
-4. Enable OpenTelemetry + Azure Monitor tracing.
-5. Configure the MSFT Learn MCP Tool Spec.
-6. Create an agent version and query it.
-7. Validate traces in the following:
-    - **Microsoft Foundry (Traces - Preview)**
-    - **Application Insights**
-    - **Log Analytics** (`AppDependencies` table)
+---
+
+## 📓 Notebook Sections
+
+After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
+
+| # | Section | What It Does |
+|---|---|---|
+| **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
+| **1** | Install Dependencies | Installs Azure AI, OpenTelemetry, and Azure Monitor packages with compatibility safeguards |
+| **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `PromptAgentDefinition`, `AIProjectInstrumentor` |
+| **3** | Configure the Project Client | Full auth hardening — tries `DefaultAzureCredential`, falls back to CLI install/login if needed |
+| **3.1** | Enable Telemetry | Configures OpenTelemetry + Azure Monitor tracing pipeline and instruments the SDK |
+| **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a tool for the agent |
+| **4** | Create the Agent | Defines a versioned agent with storytelling persona and MCP tool access |
+| **5** | Query the Agent | Two passes — fiction story generation + MCP-powered Foundry guidance; results saved to `stories.json` |
+| **6** | Validate Traces in Log Analytics | Runs KQL queries against `api.loganalytics.io` to verify end-to-end telemetry |
+
+---
+
+## 🔑 Key Configuration
+
+### Telemetry Environment Variables
+
+These **must** be set before calling `instrument()`:
+
+```python
+os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
+os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
+os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
+os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
+```
+
+### MCP Tool Setup
+
+```python
+from azure.ai.projects.models import MCPTool
+
+mcp_tool_spec = MCPTool(
+    server_label="msft-learn",
+    server_url="https://learn.microsoft.com/api/mcp",
+)
+```
+
+---
+
+## 📊 Observability Flow
+
+The notebook produces traces across three observability surfaces:
+
+**Microsoft Foundry Traces (Preview)**
 
 ![Microsoft Foundry traces view for agent execution](https://github.com/user-attachments/assets/2f1886f2-8e5d-47e3-b014-0eb8bf1cbe4c)
 
+**Application Insights**
+
 ![Application Insights telemetry view for traced operations](https://github.com/user-attachments/assets/1e7146ef-c44f-4f51-b841-29318fb47a38)
 
+**Log Analytics**
+
 ![Log Analytics query results for AppDependencies telemetry](https://github.com/user-attachments/assets/81c0ca29-e9f8-4ee8-80d0-f62f08ff0c50)
+
+**End-to-End Trace Correlation**
 
 ![End-to-end trace correlation view across observability tools](https://github.com/user-attachments/assets/5334d116-c5cd-4d2a-b3e1-dbe839a9874f)
 
 ---
 
-## Notebook Section Map
+## 🏗️ Infrastructure
 
-After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
-
-- **0. Create or Reuse Virtual Environment & Register Kernel**
-- **1. Install Dependencies**
-- **2. Import Libraries**
-- **3. Configure the Project Client**
-    - **3.1 Enable Telemetry**
-    - **3.2 Configure MSFT Learn MCP Tool**
-        - **MSFT Learn MCP Tool Spec (code block)**
-- **4. Create the Agent**
-- **5. Query the Agent**
-- **6. Validate Traces in Log Analytics**
+The `deployment/` directory contains Bicep IaC to provision the full AI Foundry environment — see [`deployment/README.md`](deployment/README.md) for details.
 
 ---
 
-## Key setup snippets (aligned to notebook headings)
+## 🔧 Troubleshooting
 
-### 0. Create or Reuse Virtual Environment & Register Kernel
-
-```python
-venv_dir = os.path.join(os.getcwd(), ".venv")
-subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
-
-venv_python = (
-    os.path.join(venv_dir, "Scripts", "python.exe")
-    if os.name == "nt"
-    else os.path.join(venv_dir, "bin", "python")
-)
-
-subprocess.check_call([venv_python, "-m", "pip", "install", "--upgrade", "ipykernel"])
-subprocess.check_call([
-    venv_python,
-    "-m",
-    "ipykernel",
-    "install",
-    "--user",
-    "--name",
-    "ai-agent-demo",
-    "--display-name",
-    "AI Agent Demo (.venv)",
-])
-```
-
-### 1. Install Dependencies
-
-```python
-outdated = subprocess.check_output(
-    [sys.executable, "-m", "pip", "list", "--outdated", "--format=json"],
-    text=True,
-)
-if any(pkg["name"].lower() == "pip" for pkg in json.loads(outdated)):
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
-
-%pip --disable-pip-version-check install --upgrade --pre azure-monitor-opentelemetry-exporter
-%pip --disable-pip-version-check install --pre "azure-ai-projects>=2.0.0b4"
-%pip --disable-pip-version-check install azure-identity azure-monitor-opentelemetry azure-core-tracing-opentelemetry
-```
-
-Why this matters:
-- `pip` upgrades only when it is actually outdated.
-- Exporter is explicitly updated to avoid OpenTelemetry import mismatches.
-
-### 2. Import Libraries
-
-This section verifies imports for:
-
-- `DefaultAzureCredential`
-- `AIProjectClient`
-- `PromptAgentDefinition`
-- `AIProjectInstrumentor`
-
-and prints platform and Python version diagnostics.
-
-### 3. Configure the Project Client
-
-This section includes a full authentication hardening flow:
-
-- Tries `DefaultAzureCredential` token acquisition first.
-- If authentication fails, checks for Azure CLI (`az.cmd` on Windows).
-- Attempts Azure CLI install with `winget` if missing.
-- Triggers interactive `az login` if no active CLI session exists.
-- Rebuilds `DefaultAzureCredential` and retries token acquisition.
-- Creates `AIProjectClient` only after successful authentication.
-
-It also prints the selected successful credential and tries to resolve signed-in identity details for:
-
-- `AzureCliCredential` via `az.cmd account show --query user.name -o tsv`
-- `AzurePowerShellCredential` via `pwsh` and `Get-AzContext`
-
-```python
-def _resolve_identity_hint(credential_name: str) -> str | None:
-    if credential_name == "AzureCliCredential":
-        az_exe = "az.cmd" if os.name == "nt" else "az"
-        return _run_command([az_exe, "account", "show", "--query", "user.name", "-o", "tsv"])
-    if credential_name == "AzurePowerShellCredential":
-        powershell_cmd = "$ctx = Get-AzContext; if ($ctx -and $ctx.Account) { $ctx.Account.Id }"
-        return _run_command(["pwsh", "-NoProfile", "-Command", powershell_cmd])
-    return None
-```
-
-This is the Windows fix for Azure CLI account resolution from Python subprocess (`az.cmd` instead of `az`).
-
-Expected output:
-
-```text
-🔐 Credential used: AzureCliCredential
-👤 Signed-in account: agent007@BondEnterprises.onmicrosoft.com
-```
-
-### 3.1. Enable Telemetry
-
-Configure tracing per the [azure-ai-projects SDK tracing guide](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects#tracing):
-
-1. **`configure_azure_monitor`** — Sets up the full OpenTelemetry pipeline (TracerProvider, exporter, span processors) to send traces to Application Insights.
-2. **`AIProjectInstrumentor`** — Instruments all `azure-ai-projects` SDK operations (agent create/version, list, etc.) and automatically instruments OpenAI responses/conversations operations.
-
-> [!NOTE]
-> `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` and additional variables must be set **before** calling `instrument()`. </br>
-> Content recording is controlled by `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
-
-```python
-from opentelemetry import trace
-from azure.monitor.opentelemetry import configure_azure_monitor
-
-# ---------------------------------------------------------------------------
-# Phase 1: Trace settings (must be set before instrumentation)
-# ---------------------------------------------------------------------------
-os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
-os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
-
-# Enable end-to-end correlation between client and service spans
-os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
-os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
-
-# -----------------------------------------------------------------------------
-# Phase 2: Backend setup (Microsoft Foundry -> Application Insights connection)
-# -----------------------------------------------------------------------------
-application_insights_connection_string = project_client.telemetry.get_application_insights_connection_string()
-
-# Configure Azure Monitor as the tracing backend (one-liner per SDK docs)
-configure_azure_monitor(connection_string=application_insights_connection_string)
-
-# -----------------------------------------------------------------------------
-# Phase 3: SDK instrumentation
-# Instrument azure-ai-projects SDK + OpenAI responses/conversations automatically
-# -----------------------------------------------------------------------------
-AIProjectInstrumentor().instrument(enable_content_recording=True)
-
-# -----------------------------------------------------------------------------
-# Phase 4: Tracer handle for custom spans in later sections
-# -----------------------------------------------------------------------------
-tracer = trace.get_tracer(__name__)
-
-```
-
-### 3.2. Configure MSFT Learn MCP Tool
-
-This section introduces the MCP setup step and creates the MCP tool spec used by agent creation in Step 4.
-
-- MSFT Learn MCP URL: [Microsoft Learn MCP Endpoint](https://learn.microsoft.com/api/mcp)
-- MSFT Learn MCP documentation: [Azure MCP Server docs](https://learn.microsoft.com/azure/developer/azure-mcp-server/)
-- The code prints the URL for verification.
-- The code creates `mcp_tool_spec` and Step 4 passes it via `tools=[mcp_tool_spec]`.
-
-```python
-from azure.ai.projects.models import MCPTool
-
-msft_learn_mcp_url = "https://learn.microsoft.com/api/mcp"
-print(f"MSFT Learn MCP URL: {msft_learn_mcp_url}")
-
-mcp_tool_spec = MCPTool(
-    server_label="msft-learn",
-    server_url=msft_learn_mcp_url,
-)
-```
-
-### 4. Create the Agent
-
-Define and create a versioned agent. Replace `<your-agent-name>` and `<your-model-deployment-name>` with your actual values.
-
-- `create_version` will create a new agent or bump the version if the parameters have changed.
-- The agent is given a **storytelling** persona via the `instructions` field.
-- The MSFT Learn MCP tool is available to the agent via `mcp_tool_spec` in `tools=[mcp_tool_spec]`.
-
-The code wraps creation with `project_client.agents.create_version(...)` and sets tracing attributes such as:
-
-- `agent.name`
-- `gen_ai.request.model`
-- `agent.version`
-- `agent.id`
-- `demo.run_id` (shared correlation id used across Steps 4 and 5)
-
-Additional observability added in Step 4:
-
-- Span lifecycle events (`agent.create_version.start`, `agent.create_version.success`, `agent.create_version.failure`)
-- Tool metadata (`agent.tools.count`, `agent.tools.labels`)
-- Explicit exception telemetry via `record_exception(...)` and error status on failure
-
-### 5. Query the Agent
-
-Use the OpenAI-compatible client from the project to send prompts to the agent and retrieve responses. The section runs two independent passes:
-
-- **Pass 1 (fiction):** Generates a six-sentence fictional story only.
-- **Pass 2 (facts):** Uses the MSFT Learn MCP tool for concise Microsoft Foundry guidance.
-
-The agent is referenced by name using `agent_reference`. MCP approvals are handled automatically when `mcp_approval_request` items are returned, by submitting `mcp_approval_response` payloads until text is produced (or max rounds are reached).
-
-Each run is appended to `stories.json` with these fields:
-
-- `id` (incremented)
-- `timestamp`
-- `agent`
-- `model`
-- `prompt`
-- `story`
-- `msft_learn_insights`
-- `combined_output`
-
-### 6. Validate Traces in Log Analytics
-
-Use this section to validate that telemetry from the notebook is landing in the Log Analytics workspace hosted in the Security subscription.
-
-- Workspace resource ID pattern: `/subscriptions/<subscription-id>/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/<Log-Analytics-Workspace-Name>`
-- The Azure CLI extension command `az monitor log-analytics query` may fail in some environments due to extension/runtime mismatch.
-- The code cell uses direct HTTPS calls to `api.loganalytics.io` with a `DefaultAzureCredential` bearer token (`urllib.request`) as a reliable fallback.
-
-The notebook runs two KQL queries against `api.loganalytics.io` using `DefaultAzureCredential` token auth:
-
-- End-to-end view (dependencies + trace context fields), now including `agent-creation`
-- Runs-only trend (calls, failures, avg/p95 duration), grouped by `demo_run_id`
-
-This path is used as a reliable fallback when `az monitor log-analytics query` is impacted by extension/runtime mismatch.
+| Issue | Fix |
+|---|---|
+| `ImportError: cannot import name 'LogData'` | Rerun **Section 1 — Install Dependencies** to resolve exporter compatibility |
+| Signed-in account shows as unavailable | Rerun **Section 3 — Configure the Project Client** (uses `az.cmd` on Windows) |
+| Telemetry cell fails after dependency changes | Restart kernel, rerun from **Section 1** through **Section 3.1** |
 
 ---
 
-## Troubleshooting notes
+## ✅ Validation Checklist
 
-### ImportError: `cannot import name 'LogData'`
-
-If you hit this while importing Azure Monitor telemetry modules, rerun **1. Install Dependencies**. The exporter upgrade line is intended to resolve this compatibility issue.
-
-### Signed-in account shows as unavailable
-
-If `DefaultAzureCredential` reports `AzureCliCredential` but no user is shown, rerun **3. Configure the Project Client**. On Windows the notebook now uses `az.cmd` specifically for this lookup.
-
-### Telemetry cell fails after dependency changes
-
-Restart the notebook kernel and rerun from **1. Install Dependencies** through **3.1 Enable Telemetry**.
+- [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
+- [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)
+- [ ] **Section 4** creates or versions the agent successfully
+- [ ] **Section 5** returns a response and appends to `stories.json`
+- [ ] **Section 6** returns data for end-to-end and trend KQL queries
 
 ---
 
-## Validation checklist
-
-- **3. Configure the Project Client** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`.
-- **3.2 Configure MSFT Learn MCP Tool** prints the MSFT Learn MCP URL ([Microsoft Learn MCP Endpoint](https://learn.microsoft.com/api/mcp)).
-- **4. Create the Agent** creates or versions the agent successfully.
-- **5. Query the Agent** returns a response and appends a new record in `stories.json`.
-- **6. Validate Traces in Log Analytics** returns data for end-to-end and trend KQL queries.
-
----
-
-## References
+## 📚 References
 
 - [Microsoft Foundry SDK Overview (Python)](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview?pivots=programming-language-python#foundry-tools-sdks)
 - [Microsoft Foundry Observability: Trace Agent Setup](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup?view=foundry)
 - [OpenTelemetry for Python: Instrumentation Guide](https://opentelemetry.io/docs/languages/python/instrumentation/)
 - [Azure AI Projects SDK Tracing (GitHub)](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects#tracing)
 - [Azure AI Projects Agent Telemetry Samples (GitHub)](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects/samples/agents/telemetry)
+- [Azure MCP Server Documentation](https://learn.microsoft.com/azure/developer/azure-mcp-server/)
