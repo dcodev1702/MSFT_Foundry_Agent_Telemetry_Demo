@@ -138,7 +138,70 @@ resource aiFoundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06
 }
 
 // ════════════════════════════════════════════════════════════════
-//  RBAC – zolab-ai-dev Entra group
+//  DIAGNOSTIC SETTINGS
+// ════════════════════════════════════════════════════════════════
+
+// ── Key Vault Diagnostic Settings (allLogs → DIBSecCom LAW) ──
+resource kvDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: '${keyVaultName}-audit'
+  scope: keyVault
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logAnalyticsDestinationType: 'AzureDiagnostics'
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+      {
+        categoryGroup: 'audit'
+        enabled: false
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: false
+      }
+    ]
+  }
+}
+
+// ── Blob Storage Diagnostic Settings (allLogs → DIBSecCom LAW) ──
+resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2024-01-01' existing = {
+  parent: storageAccount
+  name: 'default'
+}
+
+resource blobDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: '${storageAccountName}-blob-audit'
+  scope: blobService
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+      {
+        categoryGroup: 'audit'
+        enabled: false
+      }
+    ]
+    metrics: [
+      {
+        category: 'Capacity'
+        enabled: false
+      }
+      {
+        category: 'Transaction'
+        enabled: false
+      }
+    ]
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
 // ════════════════════════════════════════════════════════════════
 
 resource aiDevRoleAIDeveloper 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
