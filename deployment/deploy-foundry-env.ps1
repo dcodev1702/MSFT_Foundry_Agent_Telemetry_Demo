@@ -62,6 +62,17 @@ if ($Cleanup) {
                 -ErrorAction SilentlyContinue
         }
         if (-not $assignments) { Write-Host "  No role assignments found." }
+
+        # ── Remove the deploying user from the group ──
+        $currentUser = Get-MgContext
+        $userId = (Get-MgUser -UserId $currentUser.Account).Id
+        $isMember = Get-MgGroupMember -GroupId $groupObjectId | Where-Object { $_.Id -eq $userId }
+        if ($isMember) {
+            Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
+            Write-Host "Removed current user ($($currentUser.Account)) from '$groupDisplayName'"
+        } else {
+            Write-Host "Current user ($($currentUser.Account)) is not a member of '$groupDisplayName'"
+        }
     } else {
         Write-Host "Entra group '$groupDisplayName' not found — skipping RBAC cleanup."
     }
