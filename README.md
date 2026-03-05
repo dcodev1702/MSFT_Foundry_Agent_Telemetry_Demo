@@ -2,7 +2,7 @@
 
 A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI agent with **end-to-end observability** — tracing agent creation, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
 
-![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/4cf6c5e7-036c-4020-aaf6-d67d8a286ebb)
+![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
 ---
 
