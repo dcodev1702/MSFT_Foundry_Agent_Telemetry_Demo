@@ -39,6 +39,12 @@ Before running the deployment, ensure the following are in place:
 | 🔐 Key Vault | `allLogs` | DIBSecCom LAW (Security subscription) |
 | 🗄️ Blob Storage | `allLogs` | DIBSecCom LAW (Security subscription) |
 
+### Connections
+
+| Connection | Type | Purpose |
+|---|---|---|
+| 📊 Application Insights | `AppInsights` | Auto-connected to AI Foundry — enables Traces (preview) without manual portal setup |
+
 ### RBAC Role Assignments
 
 **`zolab-ai-dev` Entra Security Group →**
