@@ -90,7 +90,7 @@ The notebook produces traces across three observability surfaces:
 
 **Application Insights**
 
-![Application Insights results for AppDependencies telemetry](https://github.com/user-attachments/assets/4a164556-3265-4278-a6a4-8134e6c80118)
+![Application Insights results for AppDependencies telemetry](https://github.com/user-attachments/assets/6eb98f3b-92f8-4508-b05c-0fc0811fcf00)
 
 **Log Analytics - End-to-End Trace Correlation**
 
