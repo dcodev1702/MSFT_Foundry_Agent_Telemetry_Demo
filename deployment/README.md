@@ -1,4 +1,4 @@
-# 🚀 Azure AI Foundry — Bicep Deployment
+# 🚀 Microsoft Foundry — Bicep Deployment
 
 Infrastructure-as-Code deployment for an Azure AI Foundry environment with full RBAC, diagnostic settings, and cross-subscription Log Analytics integration.
 
