@@ -89,10 +89,12 @@ The script will:
 
 1. 🔑 Resolve subscription IDs dynamically by name (`zolab` and `Security`)
 2. 👥 Create the `zolab-ai-dev` Entra security group (or reuse if it exists)
-3. 🏗️ Deploy all Foundry resources via Bicep to a new `zolab-ai-<suffix>` resource group
-4. 🔒 Assign RBAC roles to the `zolab-ai-dev` group and the Foundry managed identity
-5. 📊 Configure diagnostic settings on Key Vault and Blob Storage
-6. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
+3. 👤 Add the deploying user to the `zolab-ai-dev` group (if not already a member)
+4. 🎲 Generate a random 6-char alphanumeric suffix (supports multiple deployments per subscription)
+5. 🏗️ Deploy all Foundry resources via Bicep to a new `zolab-ai-<suffix>` resource group
+6. 🔒 Assign RBAC roles to the `zolab-ai-dev` group and the Foundry managed identity
+7. 📊 Configure diagnostic settings on Key Vault and Blob Storage
+8. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
 
 A unique 6-character suffix is generated deterministically from the subscription ID, ensuring consistent naming across re-deployments.
 
@@ -132,7 +134,8 @@ No hardcoded subscription GUIDs — subscriptions are looked up by display name.
 
 ## 📝 Notes
 
-- The resource group suffix is generated via Bicep's `uniqueString()` and is **deterministic** — re-running the deployment against the same subscription produces the same suffix.
+- The resource group suffix is **randomly generated** at deploy time — each run creates a unique environment, allowing multiple deployments within a single subscription.
+- The deploying user is automatically added to the `zolab-ai-dev` Entra group.
 - The `zolab-ai-dev` group is created once and persists across cleanup/redeploy cycles.
 - Diagnostic settings send **all logs** (not metrics) to the centralized DIBSecCom Log Analytics Workspace for security observability.
 - Key Vault uses `AzureDiagnostics` destination type for compatibility with Sentinel analytics rules.

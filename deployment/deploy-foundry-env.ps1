@@ -150,14 +150,30 @@ if ($existingGroup) {
     Write-Host "Created group '$groupDisplayName' — ObjectId: $groupObjectId"
 }
 
+# ── Add the deploying user to the zolab-ai-dev group ──
+$currentUser = Get-MgContext
+$userId = (Get-MgUser -UserId $currentUser.Account).Id
+$isMember = Get-MgGroupMember -GroupId $groupObjectId | Where-Object { $_.Id -eq $userId }
+if ($isMember) {
+    Write-Host "Current user ($($currentUser.Account)) is already a member of '$groupDisplayName'"
+} else {
+    New-MgGroupMember -GroupId $groupObjectId -DirectoryObjectId $userId
+    Write-Host "Added current user ($($currentUser.Account)) to '$groupDisplayName'"
+}
+
+# ── Generate random 6-char alphanumeric suffix ──
+$suffix = -join ((48..57) + (97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
+Write-Host "Generated suffix: $suffix"
+Write-Host "Resource group will be: zolab-ai-$suffix"
+
 # ── Deploy Bicep (subscription-scoped via az cli) ──
 Write-Host ""
 Write-Host "Deploying AI Foundry environment..."
 $deployOutput = az deployment sub create `
     --location $location `
     --template-file "$PSScriptRoot\main.bicep" `
-    --name "foundry-ai-env-deployment" `
-    --parameters aiDevGroupObjectId=$groupObjectId securitySubscriptionId=$securitySubscriptionId `
+    --name "foundry-ai-env-$suffix" `
+    --parameters aiDevGroupObjectId=$groupObjectId securitySubscriptionId=$securitySubscriptionId suffix=$suffix `
     --output json 2>&1
 
 # Separate warnings/stderr from JSON output
