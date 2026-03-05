@@ -57,8 +57,15 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 These **must** be set before calling `instrument()`:
 
 ```python
+# ---------------------------------------------------------------------------
+# Phase 1: Trace settings (must be set before instrumentation)
+# ---------------------------------------------------------------------------
 os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
+os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = "gen_ai_latest_experimental"
 os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
+os.environ.setdefault("OTEL_SERVICE_NAME", "foundry-ai-agent-demo")
+
+# Enable end-to-end correlation between client and service spans
 os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
 os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
 ```
