@@ -157,7 +157,7 @@ $deployOutput = az deployment sub create `
     --location $location `
     --template-file "$PSScriptRoot\main.bicep" `
     --name "foundry-ai-env-deployment" `
-    --parameters aiDevGroupObjectId=$groupObjectId `
+    --parameters aiDevGroupObjectId=$groupObjectId securitySubscriptionId=$securitySubscriptionId `
     --output json 2>&1
 
 # Separate warnings/stderr from JSON output

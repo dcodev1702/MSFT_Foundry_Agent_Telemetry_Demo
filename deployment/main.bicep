@@ -8,6 +8,9 @@ targetScope = 'subscription'
 @description('Object ID of the zolab-ai-dev Entra ID security group')
 param aiDevGroupObjectId string
 
+@description('Subscription ID of the Security subscription (hosts DIBSecCom LAW)')
+param securitySubscriptionId string
+
 @description('Location for all resources')
 param location string = 'eastus2'
 
@@ -27,7 +30,7 @@ module resources 'modules/resources.bicep' = {
     location: location
     suffix: suffix
     aiDevGroupObjectId: aiDevGroupObjectId
-    logAnalyticsWorkspaceId: '/subscriptions/192ad012-896e-4f14-8525-c37a2a9640f9/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom'
+    logAnalyticsWorkspaceId: '/subscriptions/${securitySubscriptionId}/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom'
   }
 }
 
