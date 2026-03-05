@@ -10,10 +10,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 # ── Configuration ──
-$subscriptionId         = "08fdc492-f5aa-4601-84ae-03a37449c2ba"   # zolab
-$securitySubscriptionId = "192ad012-896e-4f14-8525-c37a2a9640f9"   # Security (hosts DIBSecCom LAW)
+$subscriptionId         = (Get-AzSubscription -SubscriptionName "zolab").Id
+$securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id
 $location               = "eastus2"
 $groupDisplayName       = "zolab-ai-dev"
+
+Write-Host "Resolved subscriptions:"
+Write-Host "  zolab    : $subscriptionId"
+Write-Host "  Security : $securitySubscriptionId"
 
 # ── 1. Ensure Microsoft.Graph.Groups module ──
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Groups)) {
