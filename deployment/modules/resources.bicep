@@ -161,7 +161,7 @@ resource gpt53chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   parent: aiFoundry
   name: 'gpt-5.3-chat'
   sku: {
-    name: 'Standard'
+    name: 'GlobalStandard'
     capacity: 250
   }
   properties: {
