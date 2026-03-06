@@ -263,6 +263,14 @@ if ($Cleanup) {
     # Restore zolab context
     Set-AzContext -SubscriptionId $subscriptionId | Out-Null
 
+    $buildInfoPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'build_info.json'
+    if (Test-Path -LiteralPath $buildInfoPath) {
+        Remove-Item -LiteralPath $buildInfoPath -Force
+        Write-Host "Removed stale build info file '$buildInfoPath'."
+    } else {
+        Write-Host "No build_info.json file found to remove."
+    }
+
     Write-Host ""
     Write-Host "=== Cleanup complete ==="
     exit 0
