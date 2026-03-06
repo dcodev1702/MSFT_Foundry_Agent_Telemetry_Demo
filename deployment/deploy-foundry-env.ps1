@@ -15,6 +15,80 @@ $securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id
 $location               = "eastus2"
 $groupDisplayName       = "zolab-ai-dev"
 
+function Write-BuildStatus {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory)]
+        [string]$KeyVaultName,
+
+        [Parameter(Mandatory)]
+        [string]$AppInsightsName,
+
+        [Parameter(Mandatory)]
+        [string]$AiFoundryName,
+
+        [Parameter(Mandatory)]
+        [string]$AiProjectName,
+
+        [Parameter(Mandatory)]
+        [string]$FoundryProjectEndpoint,
+
+        [Parameter(Mandatory)]
+        [string]$AzureOpenAIEndpoint,
+
+        [Parameter(Mandatory)]
+        [string]$AppInsightsConnectionStatus,
+
+        [Parameter(Mandatory)]
+        [string]$LawRbacStatus,
+
+        [Parameter(Mandatory)]
+        [string]$UserStatus
+    )
+
+    $rows = @(
+        @{ Item = '☁️ Resource Group'; Status = "✅ $ResourceGroupName" },
+        @{ Item = '🗄️ Storage'; Status = $StorageAccountName },
+        @{ Item = '🔐 Key Vault'; Status = $KeyVaultName },
+        @{ Item = '📊 App Insights'; Status = $AppInsightsName },
+        @{ Item = '🤖 AI Foundry'; Status = $AiFoundryName },
+        @{ Item = '🏢 AI Project'; Status = $AiProjectName },
+        @{ Item = '🧠 Model'; Status = 'gpt-5.3-chat (GlobalStandard)' },
+        @{ Item = '🔗 App Insights Connection'; Status = $AppInsightsConnectionStatus },
+        @{ Item = '📡 LAW RBAC'; Status = $LawRbacStatus },
+        @{ Item = '👤 User'; Status = $UserStatus },
+        @{ Item = '🔌 Foundry Project Endpoint'; Status = $FoundryProjectEndpoint },
+        @{ Item = '🤖 Azure OpenAI Endpoint'; Status = $AzureOpenAIEndpoint }
+    )
+
+    $itemWidth = [Math]::Max(29, (($rows | ForEach-Object { $_.Item.Length } | Measure-Object -Maximum).Maximum + 2))
+    $statusWidth = [Math]::Max(78, (($rows | ForEach-Object { $_.Status.Length } | Measure-Object -Maximum).Maximum + 2))
+
+    $lines = @(
+        ''
+        '● ☁️🎉🚀 Fresh build — all green!'
+        ''
+        ("┌" + ("─" * $itemWidth) + "┬" + ("─" * $statusWidth) + "┐")
+        ("│" + " Item".PadRight($itemWidth) + "│" + " Status".PadRight($statusWidth) + "│")
+        ("├" + ("─" * $itemWidth) + "┼" + ("─" * $statusWidth) + "┤")
+    )
+
+    foreach ($row in $rows) {
+        $lines += ("│" + (" " + $row.Item).PadRight($itemWidth) + "│" + (" " + $row.Status).PadRight($statusWidth) + "│")
+    }
+
+    $lines += ("└" + ("─" * $itemWidth) + "┴" + ("─" * $statusWidth) + "┘")
+    $lines += ''
+    $lines += 'Ready for the notebook! 🎯'
+
+    $lines
+}
+
 Write-Host "Resolved subscriptions:"
 Write-Host "  zolab    : $subscriptionId"
 Write-Host "  Security : $securitySubscriptionId"
@@ -251,3 +325,33 @@ if ($lawExitCode -ne 0) {
 }
 
 Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on DIBSecCom workspace."
+
+$connectionId = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/providers/Microsoft.CognitiveServices/accounts/$($result.properties.outputs.aiFoundryName.value)/projects/$($result.properties.outputs.aiProjectName.value)/connections/$($result.properties.outputs.aiFoundryName.value)-appinsights"
+$connectionSharedToAll = az resource show `
+    --ids $connectionId `
+    --api-version 2025-06-01 `
+    --query properties.isSharedToAll `
+    --output tsv 2>&1
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Failed to resolve App Insights connection scope:`n$($connectionSharedToAll -join "`n")"
+    exit 1
+}
+
+$appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLowerInvariant() -eq 'true') {
+    'Shared to all projects ✅'
+} else {
+    'This project only ✅'
+}
+
+Write-BuildStatus `
+    -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
+    -StorageAccountName $result.properties.outputs.storageAccountName.value `
+    -KeyVaultName $result.properties.outputs.keyVaultName.value `
+    -AppInsightsName $result.properties.outputs.appInsightsName.value `
+    -AiFoundryName $result.properties.outputs.aiFoundryName.value `
+    -AiProjectName $result.properties.outputs.aiProjectName.value `
+    -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
+    -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
+    -AppInsightsConnectionStatus $appInsightsConnectionStatus `
+    -LawRbacStatus 'Log Analytics Reader on DIBSecCom ✅' `
+    -UserStatus "$($currentUser.Account) added to $groupDisplayName ✅"
