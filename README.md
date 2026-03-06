@@ -42,7 +42,7 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
 | **1** | Install Dependencies | Installs Azure AI, OpenTelemetry, and Azure Monitor packages with compatibility safeguards |
-| **1 → Deployment Check** | Confirm Existing Deployment | Loads `build_info.json` and prints the current infrastructure summary before SDK imports |
+| **1.1** | Confirm Existing Deployment | Loads `build_info.json` and prints the current infrastructure summary before SDK imports |
 | **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `PromptAgentDefinition`, `AIProjectInstrumentor` |
 | **3** | Configure the Project Client | Reuses the deployment values loaded from `build_info.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
 | **3.1** | Enable Telemetry | Configures OpenTelemetry + Azure Monitor tracing pipeline and instruments the SDK |
