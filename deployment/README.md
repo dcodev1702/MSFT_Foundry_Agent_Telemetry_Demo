@@ -49,9 +49,14 @@ Before running the deployment, ensure the following are in place:
 
 ### Model Deployments
 
-| Model | Version | Format | SKU | Capacity |
+The deployment script requires an AI model selection and only allows these options:
+
+| Menu Choice | Resolved Model Name | Version Selection | SKU Selection | Capacity |
 |---|---|---|---|---|
-| 🧠 `gpt-5.3-chat` | `2026-03-03` | OpenAI | Standard | 250 |
+| 🧠 `gpt-4.1-mini` | `gpt-4.1-mini` | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
+| 🧠 `gpt-5.3` | `gpt-5.3*` (for example `gpt-5.3-chat`) | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
+| 🧠 `gpt-5.4` | `gpt-5.4*` (if available in target region) | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
+| 🧠 `grok-4-1-fast-reasoning` | `grok-4-1-fast-reasoning` | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
 
 ### RBAC Role Assignments
 
@@ -104,16 +109,18 @@ The script will:
 1. 🔑 Resolve subscription IDs dynamically by name (`zolab` and `Security`)
 2. 👥 Create the `zolab-ai-dev` Entra security group (or reuse if it exists)
 3. 👤 Add the deploying user to the `zolab-ai-dev` group (if not already a member)
-4. 🎲 Generate a random 6-char alphanumeric suffix (supports multiple deployments per subscription)
-5. 🏗️ Deploy all Foundry resources via Bicep to a new `zolab-ai-<suffix>` resource group
-6. 🔒 Assign RBAC roles to the `zolab-ai-dev` group and the Foundry managed identity
-7. 📊 Configure diagnostic settings on Key Vault and Blob Storage
-8. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
+4. 🧠 Prompt the user to choose one of four allowed AI model choices (`gpt-4.1-mini`, `gpt-5.3`, `gpt-5.4`, `grok-4-1-fast-reasoning`) from a menu
+5. ✅ Validate the selected model against regional availability before deployment, prompting again from the remaining options if needed
+6. 🎲 Generate a random 6-char alphanumeric suffix (supports multiple deployments per subscription)
+7. 🏗️ Deploy all Foundry resources via Bicep to a new `zolab-ai-<suffix>` resource group
+8. 🔒 Assign RBAC roles to the `zolab-ai-dev` group and the Foundry managed identity
+9. 📊 Configure diagnostic settings on Key Vault and Blob Storage
+10. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
 
 Upon completion, the script outputs all resource names and writes `build_info.json` at the repo root for notebook configuration.
 
 - 🌐 **Foundry Project Endpoint** — stored in `build_info.json` as `foundry_project_endpoint` and loaded by the Win11 notebook into `foundry_proj_ep`
-- 🤖 **Azure OpenAI Endpoint** — stored in `build_info.json` as `azure_openai_endpoint`
+- 🤖 **Model Endpoint** — stored in `build_info.json` as `azure_openai_endpoint`
 - 🧠 **Model Name** — stored in `build_info.json` as `genai_model` and used by the notebook when creating the agent
 
 The generated `build_info.json` includes:

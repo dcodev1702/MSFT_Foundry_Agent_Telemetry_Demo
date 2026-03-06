@@ -15,6 +15,24 @@ param aiDevGroupObjectId string
 @description('Full resource ID of the Log Analytics Workspace (DIBSecCom in Security sub)')
 param logAnalyticsWorkspaceId string
 
+@description('Deployment name to create for the selected AI model')
+param aiModelDeploymentName string
+
+@description('AI model name resolved for the selected deployment')
+param aiModelName string
+
+@description('Model format resolved for the selected deployment')
+param aiModelFormat string
+
+@description('Azure OpenAI model version resolved for the selected deployment')
+param aiModelVersion string
+
+@description('SKU name for the selected AI model deployment')
+param aiModelSkuName string
+
+@description('SKU capacity for the selected AI model deployment')
+param aiModelSkuCapacity int
+
 // ── Resource Names ──
 var storageAccountName = 'zolabaifndrysa${suffix}'
 var keyVaultName = 'zolabaifndrykv${suffix}'
@@ -158,19 +176,19 @@ resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/projects/co
   }
 }
 
-// ── Model Deployment (gpt-5.3-chat) ──
-resource gpt53chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+// ── Model Deployment (selected at deploy time) ──
+resource aiModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
   parent: aiFoundry
-  name: 'gpt-5.3-chat'
+  name: aiModelDeploymentName
   sku: {
-    name: 'GlobalStandard'
-    capacity: 250
+    name: aiModelSkuName
+    capacity: aiModelSkuCapacity
   }
   properties: {
     model: {
-      format: 'OpenAI'
-      name: 'gpt-5.3-chat'
-      version: '2026-03-03'
+      format: aiModelFormat
+      name: aiModelName
+      version: aiModelVersion
     }
   }
 }
@@ -336,6 +354,7 @@ output keyVaultName string = keyVault.name
 output appInsightsName string = appInsights.name
 output aiFoundryName string = aiFoundry.name
 output aiProjectName string = aiFoundryProject.name
+output aiModelDeploymentName string = aiModelDeployment.name
 output aiFoundryPrincipalId string = aiFoundry.identity.principalId
 output foundryProjectEndpoint string = aiFoundryProject.properties.endpoints['AI Foundry API']
 output azureOpenAIEndpoint string = aiFoundry.properties.endpoint

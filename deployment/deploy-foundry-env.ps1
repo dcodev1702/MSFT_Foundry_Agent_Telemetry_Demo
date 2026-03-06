@@ -14,8 +14,7 @@ $subscriptionId         = (Get-AzSubscription -SubscriptionName "zolab").Id
 $securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id
 $location               = "eastus2"
 $groupDisplayName       = "zolab-ai-dev"
-$genAiModelName         = "gpt-5.3-chat"
-$genAiModelSku          = "GlobalStandard"
+$defaultModelCapacity   = 250
 
 function Write-BuildStatus {
     param(
@@ -140,6 +139,319 @@ function Write-BuildInfoJson {
     }
 
     $buildInfo | ConvertTo-Json | Set-Content -Path $OutputPath -Encoding utf8
+}
+
+function Get-AllowedAiModelChoices {
+    @(
+        "gpt-4.1-mini"
+        "gpt-5.3"
+        "gpt-5.4"
+        "grok-4-1-fast-reasoning"
+    )
+}
+
+function Read-AiModelSelection {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Choices
+    )
+
+    if (-not $Choices) {
+        throw "No AI model choices are available."
+    }
+
+    $options = for ($i = 0; $i -lt $Choices.Count; $i++) {
+        [System.Management.Automation.Host.ChoiceDescription]::new(
+            "&$($i + 1) $($Choices[$i])",
+            "Deploy $($Choices[$i])"
+        )
+    }
+
+    $selectionIndex = $Host.UI.PromptForChoice(
+        "Select AI model",
+        "Choose one of the allowed AI models for deployment.",
+        $options,
+        0
+    )
+
+    $Choices[$selectionIndex]
+}
+
+function Get-LocationModelCatalog {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    if (
+        $script:locationModelCatalog -and
+        $script:locationModelCatalogLocation -eq $Location -and
+        $script:locationModelCatalogSubscriptionId -eq $SubscriptionId
+    ) {
+        return $script:locationModelCatalog
+    }
+
+    $catalogJson = az cognitiveservices model list `
+        --location $Location `
+        --subscription $SubscriptionId `
+        --only-show-errors `
+        --output json 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to list available AI models in $($Location):`n$($catalogJson -join "`n")"
+    }
+
+    $script:locationModelCatalog = $catalogJson | ConvertFrom-Json
+    $script:locationModelCatalogLocation = $Location
+    $script:locationModelCatalogSubscriptionId = $SubscriptionId
+
+    $script:locationModelCatalog
+}
+
+function Get-AiModelMatchPattern {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ModelChoice
+    )
+
+    switch ($ModelChoice) {
+        "gpt-4.1-mini" { '^gpt-4\.1-mini$' }
+        "gpt-5.3" { '^gpt-5\.3($|-)' }
+        "gpt-5.4" { '^gpt-5\.4($|-)' }
+        "grok-4-1-fast-reasoning" { '^grok-4-1-fast-reasoning$' }
+        default { throw "Unsupported AI model choice '$ModelChoice'." }
+    }
+}
+
+function Get-AiModelFormat {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ModelChoice
+    )
+
+    switch ($ModelChoice) {
+        "grok-4-1-fast-reasoning" { 'xAI' }
+        default { 'OpenAI' }
+    }
+}
+
+function Get-AiModelCandidate {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ModelChoice,
+
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    $matchPattern = Get-AiModelMatchPattern -ModelChoice $ModelChoice
+    $modelFormat = Get-AiModelFormat -ModelChoice $ModelChoice
+    $catalog = Get-LocationModelCatalog -Location $Location -SubscriptionId $SubscriptionId
+
+    $catalog |
+        Where-Object {
+            $_.kind -eq 'AIServices' -and
+            $_.model.format -eq $modelFormat -and
+            $_.lifecycleStatus -ne 'Deprecated' -and
+            $_.model.name -match $matchPattern
+        } |
+        Sort-Object `
+            @{ Expression = { if ($_.model.name -eq $ModelChoice) { 0 } else { 1 } } }, `
+            @{ Expression = { $_.model.version }; Descending = $true } |
+        Select-Object -First 1
+}
+
+function Get-AiModelCapacityOptions {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string]$ModelFormat,
+
+        [Parameter(Mandatory)]
+        [string]$ModelName,
+
+        [Parameter(Mandatory)]
+        [string]$ModelVersion
+    )
+
+    $armToken = az account get-access-token `
+        --resource https://management.azure.com `
+        --query accessToken `
+        --output tsv `
+        --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to acquire Azure Resource Manager token:`n$($armToken -join "`n")"
+    }
+
+    $headers = @{
+        Authorization = "Bearer $($armToken -join '')"
+    }
+
+    $url = "https://management.azure.com/subscriptions/$SubscriptionId/providers/Microsoft.CognitiveServices/locations/$Location/modelCapacities?api-version=2024-10-01&modelFormat=$([uri]::EscapeDataString($ModelFormat))&modelName=$([uri]::EscapeDataString($ModelName))&modelVersion=$([uri]::EscapeDataString($ModelVersion))"
+    $response = Invoke-RestMethod -Method Get -Uri $url -Headers $headers
+
+    @($response.value)
+}
+
+function Select-AiModelSku {
+    param(
+        [Parameter(Mandatory)]
+        [object[]]$CapacityOptions,
+
+        [Parameter(Mandatory)]
+        [int]$DefaultCapacity
+    )
+
+    $availableOptions = @(
+        $CapacityOptions |
+            Where-Object { $_.properties.availableCapacity -gt 0 }
+    )
+
+    if (-not $availableOptions) {
+        return $null
+    }
+
+    $preferredSkuNames = @("GlobalStandard", "Standard")
+    $chosenOption = $null
+
+    foreach ($preferredSkuName in $preferredSkuNames) {
+        $chosenOption = $availableOptions |
+            Where-Object { $_.properties.skuName -eq $preferredSkuName } |
+            Sort-Object @{ Expression = { $_.properties.availableCapacity }; Descending = $true } |
+            Select-Object -First 1
+
+        if ($chosenOption) {
+            break
+        }
+    }
+
+    if (-not $chosenOption) {
+        $chosenOption = $availableOptions |
+            Sort-Object @{ Expression = { $_.properties.availableCapacity }; Descending = $true } |
+            Select-Object -First 1
+    }
+
+    $deployCapacity = [Math]::Max(
+        1,
+        [Math]::Min($DefaultCapacity, [int][Math]::Floor($chosenOption.properties.availableCapacity))
+    )
+
+    [pscustomobject]@{
+        SkuName   = $chosenOption.properties.skuName
+        Capacity  = $deployCapacity
+        Available = [int][Math]::Floor($chosenOption.properties.availableCapacity)
+    }
+}
+
+function Resolve-AiModelSpecification {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ModelChoice,
+
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory)]
+        [int]$DefaultCapacity
+    )
+
+    $candidate = Get-AiModelCandidate `
+        -ModelChoice $ModelChoice `
+        -Location $Location `
+        -SubscriptionId $SubscriptionId
+
+    if (-not $candidate) {
+        return $null
+    }
+
+    $modelFormat = Get-AiModelFormat -ModelChoice $ModelChoice
+
+    $capacitySelection = Select-AiModelSku `
+        -CapacityOptions (Get-AiModelCapacityOptions `
+            -Location $Location `
+            -SubscriptionId $SubscriptionId `
+            -ModelFormat $modelFormat `
+            -ModelName $candidate.model.name `
+            -ModelVersion $candidate.model.version) `
+        -DefaultCapacity $DefaultCapacity
+
+    if (-not $capacitySelection) {
+        return $null
+    }
+
+    [pscustomobject]@{
+        RequestedChoice = $ModelChoice
+        DeploymentName  = $ModelChoice
+        ModelFormat     = $modelFormat
+        ModelName       = $candidate.model.name
+        ModelVersion    = $candidate.model.version
+        SkuName         = $capacitySelection.SkuName
+        SkuCapacity     = $capacitySelection.Capacity
+        AvailableCapacity = $capacitySelection.Available
+        LifecycleStatus = $candidate.lifecycleStatus
+    }
+}
+
+function Select-DeployableAiModel {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$AllowedChoices,
+
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory)]
+        [int]$DefaultCapacity
+    )
+
+    $remainingChoices = [System.Collections.Generic.List[string]]::new()
+    foreach ($choice in $AllowedChoices) {
+        [void]$remainingChoices.Add($choice)
+    }
+
+    $currentChoice = $null
+
+    while ($remainingChoices.Count -gt 0) {
+        if (-not $currentChoice) {
+            $currentChoice = Read-AiModelSelection -Choices $remainingChoices.ToArray()
+        }
+
+        Write-Host "Checking AI model availability for '$currentChoice' in $Location..."
+
+        $modelSpec = Resolve-AiModelSpecification `
+            -ModelChoice $currentChoice `
+            -Location $Location `
+            -SubscriptionId $SubscriptionId `
+            -DefaultCapacity $DefaultCapacity
+
+        if ($modelSpec) {
+            return $modelSpec
+        }
+
+        Write-Warning "'$currentChoice' is not currently deployable in $Location. Choose another model."
+        [void]$remainingChoices.Remove($currentChoice)
+        $currentChoice = $null
+    }
+
+    throw "None of the allowed AI models are currently deployable in $Location."
 }
 
 Write-Host "Resolved subscriptions:"
@@ -307,6 +619,18 @@ if ($isMember) {
     Write-Host "Added current user ($($currentUser.Account)) to '$groupDisplayName'"
 }
 
+# ── Select and validate AI model ──
+$selectedAiModelSpec = Select-DeployableAiModel `
+    -AllowedChoices (Get-AllowedAiModelChoices) `
+    -Location $location `
+    -SubscriptionId $subscriptionId `
+    -DefaultCapacity $defaultModelCapacity
+
+Write-Host "AI model selection:"
+Write-Host "  Requested option : $($selectedAiModelSpec.RequestedChoice)"
+Write-Host "  Resolved model   : $($selectedAiModelSpec.ModelName) [$($selectedAiModelSpec.ModelFormat)] $($selectedAiModelSpec.ModelVersion)"
+Write-Host "  Deployment SKU   : $($selectedAiModelSpec.SkuName) x $($selectedAiModelSpec.SkuCapacity)"
+
 # ── Generate random 6-char alphanumeric suffix ──
 $suffix = -join ((48..57) + (97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
 Write-Host "Generated suffix: $suffix"
@@ -319,7 +643,16 @@ $deployOutput = az deployment sub create `
     --location $location `
     --template-file "$PSScriptRoot\main.bicep" `
     --name "foundry-ai-env-$suffix" `
-    --parameters aiDevGroupObjectId=$groupObjectId securitySubscriptionId=$securitySubscriptionId suffix=$suffix `
+    --parameters `
+        aiDevGroupObjectId=$groupObjectId `
+        securitySubscriptionId=$securitySubscriptionId `
+        suffix=$suffix `
+        aiModelDeploymentName=$($selectedAiModelSpec.DeploymentName) `
+        aiModelName=$($selectedAiModelSpec.ModelName) `
+        aiModelFormat=$($selectedAiModelSpec.ModelFormat) `
+        aiModelVersion=$($selectedAiModelSpec.ModelVersion) `
+        aiModelSkuName=$($selectedAiModelSpec.SkuName) `
+        aiModelSkuCapacity=$($selectedAiModelSpec.SkuCapacity) `
     --output json 2>&1
 
 # Separate warnings/stderr from JSON output
@@ -351,6 +684,7 @@ Write-Host "Key Vault                : $($result.properties.outputs.keyVaultName
 Write-Host "App Insights             : $($result.properties.outputs.appInsightsName.value)"
 Write-Host "AI Foundry               : $($result.properties.outputs.aiFoundryName.value)"
 Write-Host "AI Project               : $($result.properties.outputs.aiProjectName.value)"
+Write-Host "AI Model Deployment      : $($result.properties.outputs.aiModelDeploymentName.value)"
 Write-Host "Foundry Project Endpoint : $($result.properties.outputs.foundryProjectEndpoint.value)"
 Write-Host "Azure OpenAI Endpoint    : $($result.properties.outputs.azureOpenAIEndpoint.value)"
 Write-Host ""
@@ -413,7 +747,7 @@ Write-BuildInfoJson `
     -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
     -StorageAccountName $result.properties.outputs.storageAccountName.value `
     -KeyVaultName $result.properties.outputs.keyVaultName.value `
-    -GenAiModel $genAiModelName `
+    -GenAiModel $selectedAiModelSpec.DeploymentName `
     -AiFoundryName $result.properties.outputs.aiFoundryName.value `
     -AiProjectName $result.properties.outputs.aiProjectName.value
 Write-Host "📝 Build info written to $buildInfoPath"
@@ -425,7 +759,7 @@ Write-BuildStatus `
     -AppInsightsName $result.properties.outputs.appInsightsName.value `
     -AiFoundryName $result.properties.outputs.aiFoundryName.value `
     -AiProjectName $result.properties.outputs.aiProjectName.value `
-    -GenAiModelDisplay "$genAiModelName ($genAiModelSku)" `
+    -GenAiModelDisplay "$($selectedAiModelSpec.DeploymentName) ($($selectedAiModelSpec.SkuName))" `
     -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
     -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
     -AppInsightsConnectionStatus $appInsightsConnectionStatus `
