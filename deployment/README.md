@@ -44,6 +44,8 @@ Before running the deployment, ensure the following are in place:
 | Connection | Type | Purpose |
 |---|---|---|
 | 📊 Application Insights | `AppInsights` | Auto-connected to AI Foundry — enables Traces (preview) without manual portal setup |
+| 🌐 Foundry Project Endpoint | `AIServices Endpoint` | Project endpoint used as the `endpoint` in `AIProjectClient` |
+| 🤖 Azure OpenAI Endpoint | `Cognitive Services Endpoint` | Endpoint used for Azure OpenAI model inference calls |
 
 ### Model Deployments
 

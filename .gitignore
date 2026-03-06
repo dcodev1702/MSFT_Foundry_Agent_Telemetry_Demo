@@ -1,3 +1,9 @@
 .venv/
 stories.json
 .ipynb_checkpoints/
+*.jpg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.ico
