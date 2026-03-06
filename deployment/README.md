@@ -45,6 +45,12 @@ Before running the deployment, ensure the following are in place:
 |---|---|---|
 | 📊 Application Insights | `AppInsights` | Auto-connected to AI Foundry — enables Traces (preview) without manual portal setup |
 
+### Model Deployments
+
+| Model | Version | Format | SKU | Capacity |
+|---|---|---|---|---|
+| 🧠 `gpt-5.3-chat` | `2026-03-03` | OpenAI | Standard | 250 |
+
 ### RBAC Role Assignments
 
 **`zolab-ai-dev` Entra Security Group →**

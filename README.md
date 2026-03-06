@@ -14,6 +14,7 @@ A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI
 | **Azure CLI** | Installed and authenticated (`az login`) — [Install Azure CLI](https://aka.ms/installazurecli) |
 | **Entra ID Permissions** | `Contributor` (or equivalent) on the Foundry project and Application Insights resource |
 | **Microsoft Foundry Project** | Connected to an **Application Insights** instance backed by a **Log Analytics workspace** |
+| **Model Deployment** | `gpt-5.3-chat` is auto-deployed by the [Bicep deployment](deployment/README.md) — no manual setup needed |
 | **Python 3.13+** | With `venv` support |
 | **Jupyter Notebook** | VS Code with Jupyter extension or JupyterLab |
 
