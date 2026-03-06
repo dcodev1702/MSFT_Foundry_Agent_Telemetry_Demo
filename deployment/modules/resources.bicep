@@ -138,10 +138,10 @@ resource aiFoundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06
 }
 
 // ── Application Insights Connection (links Foundry Traces → App Insights) ──
-// The target must be the App Insights resource ID (not the connection string).
-// Foundry resolves the connection string internally from the resource ID.
-resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/connections@2025-06-01' = {
-  parent: aiFoundry
+// Use a project-scoped connection so Foundry shows "This project only" while
+// keeping the same target resource and connection-string-backed credentials.
+resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
+  parent: aiFoundryProject
   name: '${aiFoundryName}-appinsights'
   properties: {
     authType: 'ApiKey'
