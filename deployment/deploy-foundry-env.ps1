@@ -30,7 +30,7 @@ Import-Module Microsoft.Graph.Groups
 $ctx = Get-MgContext
 if (-not $ctx) {
     Write-Host "Connecting to Microsoft Graph..."
-    Connect-MgGraph -Scopes "Group.ReadWrite.All"
+    Connect-MgGraph -Scopes "Group.ReadWrite.All","GroupMember.ReadWrite.All"
 }
 
 # ── 3. Set Azure subscription context (both Az PowerShell and az CLI) ──

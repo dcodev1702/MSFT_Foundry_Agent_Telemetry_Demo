@@ -12,7 +12,7 @@ Before running the deployment, ensure the following are in place:
 |---|---|
 | **Azure Subscriptions** | Access to both the `zolab` (workload) and `Security` (monitoring) subscriptions |
 | **Azure RBAC Permissions** | `Owner` or `Contributor` + `User Access Administrator` on the `zolab` subscription; `Contributor` on the `Security` subscription's `Sentinel` resource group |
-| **Microsoft Entra ID Permissions** | Ability to create security groups (`Group.ReadWrite.All` in Microsoft Graph) |
+| **Microsoft Entra ID Permissions** | Ability to create security groups and manage members (`Group.ReadWrite.All`, `GroupMember.ReadWrite.All` in Microsoft Graph) |
 | **Azure CLI** | Installed and authenticated — [Install Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) |
 | **Bicep CLI** | Installed via `az bicep install` — [Install Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/install) |
 | **Az PowerShell Module** | Installed and authenticated — `Install-Module Az -Scope CurrentUser` |
