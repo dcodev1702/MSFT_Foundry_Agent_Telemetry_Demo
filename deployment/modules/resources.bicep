@@ -147,7 +147,7 @@ resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/connections
     isSharedToAll: true
     target: appInsights.properties.ConnectionString
     credentials: {
-      key: appInsights.properties.InstrumentationKey
+      key: appInsights.properties.ConnectionString
     }
     metadata: {
       ApiType: 'Azure'
