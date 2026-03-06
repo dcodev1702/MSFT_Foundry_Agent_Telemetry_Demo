@@ -42,8 +42,9 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
 | **1** | Install Dependencies | Installs Azure AI, OpenTelemetry, and Azure Monitor packages with compatibility safeguards |
+| **1 → Deployment Check** | Confirm Existing Deployment | Loads `build_info.json` and prints the current infrastructure summary before SDK imports |
 | **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `PromptAgentDefinition`, `AIProjectInstrumentor` |
-| **3** | Configure the Project Client | Loads `foundry_proj_ep` and `genai_model` from `build_info.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
+| **3** | Configure the Project Client | Reuses the deployment values loaded from `build_info.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
 | **3.1** | Enable Telemetry | Configures OpenTelemetry + Azure Monitor tracing pipeline and instruments the SDK |
 | **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a tool for the agent |
 | **4** | Create the Agent | Defines a versioned agent with storytelling persona and MCP tool access |
@@ -56,7 +57,7 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 
 ### Build-Time Notebook Configuration
 
-The deployment script writes a repo-local `build_info.json` file at build time. The Win11 notebook reads this file in **Section 3** and uses it to populate:
+The deployment script writes a repo-local `build_info.json` file at build time. The Win11 notebook reads this file in the **Confirm Existing Deployment** section and reuses it in **Section 3** to populate:
 
 - `foundry_proj_ep` → the Microsoft Foundry project endpoint
 - `genai_model` → the model name used when creating the agent
