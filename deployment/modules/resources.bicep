@@ -337,3 +337,5 @@ output appInsightsName string = appInsights.name
 output aiFoundryName string = aiFoundry.name
 output aiProjectName string = aiFoundryProject.name
 output aiFoundryPrincipalId string = aiFoundry.identity.principalId
+output foundryProjectEndpoint string = aiFoundryProject.properties.endpoints['AI Foundry API']
+output azureOpenAIEndpoint string = aiFoundry.properties.endpoint

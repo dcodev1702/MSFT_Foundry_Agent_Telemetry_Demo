@@ -42,3 +42,5 @@ output keyVaultName string = resources.outputs.keyVaultName
 output appInsightsName string = resources.outputs.appInsightsName
 output aiFoundryName string = resources.outputs.aiFoundryName
 output aiProjectName string = resources.outputs.aiProjectName
+output foundryProjectEndpoint string = resources.outputs.foundryProjectEndpoint
+output azureOpenAIEndpoint string = resources.outputs.azureOpenAIEndpoint
