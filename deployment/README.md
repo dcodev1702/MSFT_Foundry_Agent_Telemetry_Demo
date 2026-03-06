@@ -110,10 +110,23 @@ The script will:
 7. 📊 Configure diagnostic settings on Key Vault and Blob Storage
 8. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
 
-Upon completion, the script outputs all resource names and two key endpoints needed for notebook configuration:
+Upon completion, the script outputs all resource names and writes `build_info.json` at the repo root for notebook configuration.
 
-- 🌐 **Foundry Project Endpoint** — used as the `endpoint` in `AIProjectClient`
-- 🤖 **Azure OpenAI Endpoint** — the Cognitive Services endpoint for model calls
+- 🌐 **Foundry Project Endpoint** — stored in `build_info.json` as `foundry_project_endpoint` and loaded by the Win11 notebook into `foundry_proj_ep`
+- 🤖 **Azure OpenAI Endpoint** — stored in `build_info.json` as `azure_openai_endpoint`
+- 🧠 **Model Name** — stored in `build_info.json` as `genai_model` and used by the notebook when creating the agent
+
+The generated `build_info.json` includes:
+
+- `rg`
+- `appinsights`
+- `foundry_project_endpoint`
+- `azure_openai_endpoint`
+- `storage_account`
+- `key_vault`
+- `genai_model`
+- `foundry_name`
+- `foundry_project_name`
 
 ---
 
