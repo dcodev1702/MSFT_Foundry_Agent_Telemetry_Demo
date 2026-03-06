@@ -137,14 +137,14 @@ resource aiFoundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06
   properties: {}
 }
 
-// ── Application Insights Connection (links Foundry Traces → App Insights) ──
-resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/connections@2025-06-01' = {
-  parent: aiFoundry
+// ── Application Insights Connection (project-scoped, links Foundry Traces → App Insights) ──
+resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
+  parent: aiFoundryProject
   name: '${aiFoundryName}-appinsights'
   properties: {
     authType: 'ApiKey'
     category: 'AppInsights'
-    isSharedToAll: true
+    isSharedToAll: false
     target: appInsights.properties.ConnectionString
     credentials: {
       key: appInsights.properties.ConnectionString
