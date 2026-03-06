@@ -108,7 +108,10 @@ The script will:
 7. 📊 Configure diagnostic settings on Key Vault and Blob Storage
 8. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
 
-A unique 6-character suffix is generated deterministically from the subscription ID, ensuring consistent naming across re-deployments.
+Upon completion, the script outputs all resource names and two key endpoints needed for notebook configuration:
+
+- 🌐 **Foundry Project Endpoint** — used as the `endpoint` in `AIProjectClient`
+- 🤖 **Azure OpenAI Endpoint** — the Cognitive Services endpoint for model calls
 
 ---
 

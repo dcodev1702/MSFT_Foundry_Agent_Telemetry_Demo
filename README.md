@@ -23,9 +23,10 @@ A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI
 ## 🚀 Quick Start
 
 1. Open `zolab-ai-agent-demo-win11.ipynb`
-2. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
-3. Switch to the **AI Agent Demo (.venv)** kernel
-4. Run sections **1 → 6** in order
+2. Copy the **Foundry Project Endpoint** from the deployment output (see [`deployment/README.md`](deployment/README.md))
+3. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
+4. Switch to the **AI Agent Demo (.venv)** kernel
+5. Run sections **1 → 6** in order
 5. Observe telemetry in the Azure Portal:
    - 📊 **Application Insights** — request/dependency traces
    - 🔍 **Microsoft Foundry** — agent execution traces
