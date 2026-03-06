@@ -7,3 +7,4 @@ stories.json
 *.bmp
 *.tiff
 *.ico
+build_info.json

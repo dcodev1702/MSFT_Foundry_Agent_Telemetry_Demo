@@ -14,6 +14,8 @@ $subscriptionId         = (Get-AzSubscription -SubscriptionName "zolab").Id
 $securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id
 $location               = "eastus2"
 $groupDisplayName       = "zolab-ai-dev"
+$genAiModelName         = "gpt-5.3-chat"
+$genAiModelSku          = "GlobalStandard"
 
 function Write-BuildStatus {
     param(
@@ -34,6 +36,9 @@ function Write-BuildStatus {
 
         [Parameter(Mandatory)]
         [string]$AiProjectName,
+
+        [Parameter(Mandatory)]
+        [string]$GenAiModelDisplay,
 
         [Parameter(Mandatory)]
         [string]$FoundryProjectEndpoint,
@@ -58,7 +63,7 @@ function Write-BuildStatus {
         @{ Item = '📊 App Insights'; Status = $AppInsightsName },
         @{ Item = '🤖 AI Foundry'; Status = $AiFoundryName },
         @{ Item = '🏢 AI Project'; Status = $AiProjectName },
-        @{ Item = '🧠 Model'; Status = 'gpt-5.3-chat (GlobalStandard)' },
+        @{ Item = '🧠 Model'; Status = $GenAiModelDisplay },
         @{ Item = '🔗 App Insights Connection'; Status = $AppInsightsConnectionStatus },
         @{ Item = '📡 LAW RBAC'; Status = $LawRbacStatus },
         @{ Item = '👤 User'; Status = $UserStatus },
@@ -87,6 +92,54 @@ function Write-BuildStatus {
     $lines += 'Ready for the notebook! 🎯'
 
     $lines
+}
+
+function Write-BuildInfoJson {
+    param(
+        [Parameter(Mandatory)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [string]$AppInsightsName,
+
+        [Parameter(Mandatory)]
+        [string]$FoundryProjectEndpoint,
+
+        [Parameter(Mandatory)]
+        [string]$AzureOpenAIEndpoint,
+
+        [Parameter(Mandatory)]
+        [string]$StorageAccountName,
+
+        [Parameter(Mandatory)]
+        [string]$KeyVaultName,
+
+        [Parameter(Mandatory)]
+        [string]$GenAiModel,
+
+        [Parameter(Mandatory)]
+        [string]$AiFoundryName,
+
+        [Parameter(Mandatory)]
+        [string]$AiProjectName
+    )
+
+    $buildInfo = [ordered]@{
+        rg                      = $ResourceGroupName
+        appinsights             = $AppInsightsName
+        foundry_project_endpoint = $FoundryProjectEndpoint
+        azure_openai_endpoint   = $AzureOpenAIEndpoint
+        storage_account         = $StorageAccountName
+        key_vault               = $KeyVaultName
+        genai_model             = $GenAiModel
+        foundry_name            = $AiFoundryName
+        foundry_project_name    = $AiProjectName
+    }
+
+    $buildInfo | ConvertTo-Json | Set-Content -Path $OutputPath -Encoding utf8
 }
 
 Write-Host "Resolved subscriptions:"
@@ -343,6 +396,20 @@ $appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLo
     'This project only ✅'
 }
 
+$buildInfoPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'build_info.json'
+Write-BuildInfoJson `
+    -OutputPath $buildInfoPath `
+    -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
+    -AppInsightsName $result.properties.outputs.appInsightsName.value `
+    -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
+    -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
+    -StorageAccountName $result.properties.outputs.storageAccountName.value `
+    -KeyVaultName $result.properties.outputs.keyVaultName.value `
+    -GenAiModel $genAiModelName `
+    -AiFoundryName $result.properties.outputs.aiFoundryName.value `
+    -AiProjectName $result.properties.outputs.aiProjectName.value
+Write-Host "📝 Build info written to $buildInfoPath"
+
 Write-BuildStatus `
     -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
     -StorageAccountName $result.properties.outputs.storageAccountName.value `
@@ -350,6 +417,7 @@ Write-BuildStatus `
     -AppInsightsName $result.properties.outputs.appInsightsName.value `
     -AiFoundryName $result.properties.outputs.aiFoundryName.value `
     -AiProjectName $result.properties.outputs.aiProjectName.value `
+    -GenAiModelDisplay "$genAiModelName ($genAiModelSku)" `
     -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
     -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
     -AppInsightsConnectionStatus $appInsightsConnectionStatus `
