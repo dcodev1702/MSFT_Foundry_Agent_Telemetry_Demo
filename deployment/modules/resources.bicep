@@ -153,6 +153,23 @@ resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/connections
   }
 }
 
+// ── Model Deployment (gpt-5.3-chat) ──
+resource gpt53chatDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: aiFoundry
+  name: 'gpt-5.3-chat'
+  sku: {
+    name: 'Standard'
+    capacity: 250
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'gpt-5.3-chat'
+      version: '2026-03-03'
+    }
+  }
+}
+
 // ════════════════════════════════════════════════════════════════
 //  DIAGNOSTIC SETTINGS
 // ════════════════════════════════════════════════════════════════
