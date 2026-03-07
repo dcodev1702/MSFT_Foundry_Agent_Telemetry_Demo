@@ -1,8 +1,13 @@
 function Convert-TeamsChatMessageToPlainText {
     param(
-        [Parameter(Mandatory)]
+        [AllowNull()]
+        [AllowEmptyString()]
         [string]$Content
     )
+
+    if ([string]::IsNullOrWhiteSpace($Content)) {
+        return ''
+    }
 
     $text = [System.Net.WebUtility]::HtmlDecode($Content)
     $text = [regex]::Replace($text, '<[^>]+>', ' ')
@@ -21,7 +26,7 @@ function Normalize-FoundryTeamsToken {
 
 function Resolve-FoundryTeamsChoiceFromMessage {
     param(
-        [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$MessageText,
 
         [Parameter(Mandatory)]
@@ -56,7 +61,7 @@ function Resolve-FoundryTeamsChoiceFromMessage {
 
 function Resolve-AiModelChoiceFromMessage {
     param(
-        [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$MessageText,
 
         [Parameter(Mandatory)]
@@ -68,7 +73,7 @@ function Resolve-AiModelChoiceFromMessage {
 
 function Resolve-FoundryTeamsCommandFromMessage {
     param(
-        [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string]$MessageText
     )
 
@@ -242,6 +247,9 @@ function Wait-FoundryTeamsChatChoice {
             }
 
             $messageText = Convert-TeamsChatMessageToPlainText -Content $message.Body.Content
+            if ([string]::IsNullOrWhiteSpace($messageText)) {
+                continue
+            }
             $resolvedChoice = Resolve-FoundryTeamsChoiceFromMessage -MessageText $messageText -AllowedChoices $AllowedChoices
             if ($resolvedChoice) {
                 return [pscustomobject]@{
@@ -325,6 +333,9 @@ function Wait-FoundryTeamsChatCommand {
             }
 
             $messageText = Convert-TeamsChatMessageToPlainText -Content $message.Body.Content
+            if ([string]::IsNullOrWhiteSpace($messageText)) {
+                continue
+            }
             $resolvedCommand = Resolve-FoundryTeamsCommandFromMessage -MessageText $messageText
             if ($resolvedCommand) {
                 return [pscustomobject]@{
