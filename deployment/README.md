@@ -19,6 +19,8 @@ Before running the deployment, ensure the following are in place:
 | **Az PowerShell Module** | Installed and authenticated — `Install-Module Az -Scope CurrentUser` |
 | **Microsoft.Graph PowerShell** | Auto-installed by the script if missing (`Microsoft.Graph.Groups`; `Microsoft.Graph.Teams` when `-UseTeamsChatFlow` is enabled) |
 
+Use `pwsh` (PowerShell 7) to launch the deployment and Teams listener scripts on Windows so UTF-8 output renders and parses consistently.
+
 ---
 
 ## 🏗️ What Gets Deployed
@@ -156,7 +158,7 @@ Helpful notes:
 
 ```powershell
 cd deployment
-.\teams-command-dispatch.ps1
+pwsh .\teams-command-dispatch.ps1
 ```
 
 Once the listener is running, send one of these commands in the Teams chat:

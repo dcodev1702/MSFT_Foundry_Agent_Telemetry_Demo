@@ -1,4 +1,4 @@
-# Listen for Teams chat commands and dispatch Foundry build or teardown actions.
+﻿# Listen for Teams chat commands and dispatch Foundry build or teardown actions.
 # Usage:
 #   .\teams-command-dispatch.ps1
 

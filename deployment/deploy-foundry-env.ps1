@@ -1,4 +1,4 @@
-# Deploy (or clean up) Azure AI Foundry Environment
+﻿# Deploy (or clean up) Azure AI Foundry Environment
 # Pre-req: Az PowerShell, Microsoft.Graph PowerShell, Azure CLI with Bicep
 # Usage:
 #   .\deploy-foundry-env.ps1              # deploy all resources + RBAC
