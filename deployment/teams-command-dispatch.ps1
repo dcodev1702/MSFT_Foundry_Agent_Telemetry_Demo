@@ -95,6 +95,7 @@ function Get-ListenerHelpLines {
         '- heartbeat'
         '- list builds'
         '- build status ''zolab-ai-xxxxxx'''
+        '- teardown'
         '- teardown ''zolab-ai-xxxxxx'''
         '- listener status'
         '- ?'
@@ -226,6 +227,90 @@ function Get-ListenerHeartbeatLines {
         "👤 Identity: $Account"
         "🕒 Checked at: $((Get-Date).ToUniversalTime().ToString('u'))"
     )
+}
+
+function Get-ListenerManagedTeardownTargets {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
+    @(Get-AzResourceGroup |
+        Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' } |
+        Sort-Object ResourceGroupName)
+}
+
+function Request-ListenerTeardownTargetSelection {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ChatId,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory)]
+        [int]$TimeoutMinutes,
+
+        [Parameter(Mandatory)]
+        [int]$PollIntervalSeconds
+    )
+
+    $targets = @(Get-ListenerManagedTeardownTargets -SubscriptionId $SubscriptionId)
+    if (-not $targets) {
+        return [pscustomobject]@{
+            Outcome           = 'none-available'
+            ResourceGroupName = $null
+        }
+    }
+
+    $allowedChoices = @($targets | ForEach-Object { $_.ResourceGroupName }) + 'none'
+    $promptLines = @(
+        'Teardown selection requested.'
+        'Reply with:'
+    )
+
+    for ($i = 0; $i -lt $targets.Count; $i++) {
+        $promptLines += "$($i + 1). $($targets[$i].ResourceGroupName)"
+    }
+
+    $promptLines += "$($targets.Count + 1). none"
+    $promptLines += ''
+    $promptLines += 'You can reply with the menu number or the resource group name.'
+    $promptLines += "This selection expires in $TimeoutMinutes minutes."
+
+    $selectionPrompt = Send-FoundryTeamsChatMessage -ChatId $ChatId -Message ($promptLines -join "`n")
+
+    try {
+        $selection = Wait-FoundryTeamsChatChoice `
+            -ChatId $ChatId `
+            -AllowedChoices $allowedChoices `
+            -PromptCreatedDateTime $selectionPrompt.CreatedDateTime `
+            -PromptMessageId $selectionPrompt.Id `
+            -TimeoutMinutes $TimeoutMinutes `
+            -PollIntervalSeconds $PollIntervalSeconds
+    } catch {
+        if ($_.Exception.Message -like 'Timed out waiting for a Teams response*') {
+            return [pscustomobject]@{
+                Outcome           = 'timed-out'
+                ResourceGroupName = $null
+            }
+        }
+
+        throw
+    }
+
+    if ($selection.Choice -eq 'none') {
+        return [pscustomobject]@{
+            Outcome           = 'aborted'
+            ResourceGroupName = $null
+        }
+    }
+
+    return [pscustomobject]@{
+        Outcome           = 'selected'
+        ResourceGroupName = $selection.Choice
+    }
 }
 
 try {
@@ -441,10 +526,42 @@ try {
             }
 
             'teardown' {
-                $targetResourceGroup = Get-AzResourceGroup -Name $command.ResourceGroupName -ErrorAction SilentlyContinue
+                $selectedResourceGroupName = $command.ResourceGroupName
+                if ([string]::IsNullOrWhiteSpace($selectedResourceGroupName)) {
+                    $selectionResult = Request-ListenerTeardownTargetSelection `
+                        -ChatId $chat.Id `
+                        -SubscriptionId $subscriptionId `
+                        -TimeoutMinutes $ConfirmationTimeoutMinutes `
+                        -PollIntervalSeconds $PollIntervalSeconds
+
+                    switch ($selectionResult.Outcome) {
+                        'none-available' {
+                            [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'No managed Foundry builds are currently available for teardown. Listener is still online.')
+                            Write-Host 'No managed Foundry builds are currently available for teardown.'
+                            continue
+                        }
+                        'timed-out' {
+                            [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection timed out. Listener is still online.')
+                            Write-Host 'Teardown selection timed out.'
+                            continue
+                        }
+                        'aborted' {
+                            [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection canceled. Listener is still online.')
+                            Write-Host 'Teardown selection canceled.'
+                            continue
+                        }
+                    }
+
+                    $selectedResourceGroupName = $selectionResult.ResourceGroupName
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown target selected: '$selectedResourceGroupName'.")
+                    Write-Host "Teardown target selected: '$selectedResourceGroupName'."
+                }
+
+                Set-AzContext -SubscriptionId $subscriptionId | Out-Null
+                $targetResourceGroup = Get-AzResourceGroup -Name $selectedResourceGroupName -ErrorAction SilentlyContinue
                 if (-not $targetResourceGroup) {
-                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Resource group '$($command.ResourceGroupName)' was not found in the zolab subscription. Send another command.")
-                    Write-Host "Resource group '$($command.ResourceGroupName)' was not found. Waiting for another command."
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Resource group '$selectedResourceGroupName' was not found in the zolab subscription. Send another command.")
+                    Write-Host "Resource group '$selectedResourceGroupName' was not found. Waiting for another command."
                     continue
                 }
 

@@ -132,6 +132,14 @@ function Resolve-FoundryTeamsCommandFromMessage {
         }
     }
 
+    if ($trimmed -match '^(?i)teardown$') {
+        return [pscustomobject]@{
+            CommandType       = 'teardown'
+            CommandText       = $trimmed
+            ResourceGroupName = $null
+        }
+    }
+
     if ($trimmed -match '^(?i)teardown\s+["'']?([A-Za-z0-9-]+)["'']?$') {
         return [pscustomobject]@{
             CommandType       = 'teardown'

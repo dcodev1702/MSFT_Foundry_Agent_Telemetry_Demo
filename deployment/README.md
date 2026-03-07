@@ -101,6 +101,11 @@ deployment/
 └── README.md                     # You are here 📍
 ```
 
+Additional design references:
+
+- `teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
+- `teams-bot-automation-architecture-overview.docx` — human-readable architecture overview covering components, roles, phases, and operational guidance
+
 ---
 
 ## ▶️ Deploy
@@ -179,6 +184,7 @@ Once the listener is running, send one of these commands in the Teams chat:
 - `heartbeat`
 - `list builds`
 - `build status 'zolab-ai-6bmycg'`
+- `teardown`
 - `teardown 'zolab-ai-6bmycg'`
 - `listener status`
 - `?`
@@ -190,7 +196,7 @@ The listener validates the request, then asks for confirmation:
 - Heartbeat: no confirmation required
 - List builds: no confirmation required
 - Build status: reply `1` to confirm or `2` to abort
-- Teardown: reply `1` to confirm teardown or `2` to abort
+- Teardown: send `teardown` to get a numbered menu of available managed builds plus `none`, or send `teardown '<resource-group>'` directly; after a build is selected, reply `1` to confirm teardown or `2` to abort
 - Listener status / `?`: no confirmation required
 
 By default, the build, build-status, and teardown confirmation prompts stay open for 10 minutes before they expire.
