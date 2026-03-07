@@ -205,6 +205,7 @@ The generated `build_info-<suffix>.json` includes:
 - `genai_model`
 - `foundry_name`
 - `foundry_project_name`
+- `requested_by`
 
 ---
 
@@ -224,11 +225,12 @@ cd deployment
 
 Cleanup will:
 
-1. ❌ Remove all RBAC role assignments for `zolab-ai-dev` (both subscriptions)
-2. 🗑️ Delete the `zolab-ai-<suffix>` resource group and all resources within it
-3. 🧼 Purge soft-deleted Cognitive Services accounts (prevents redeploy conflicts)
-4. 📋 Remove subscription-level deployment records from both subscriptions
-5. ✅ Preserve the `zolab-ai-dev` Entra group (not deleted)
+1. 🗑️ Delete the requested `zolab-ai-<suffix>` resource group (or all managed Foundry resource groups when `-CleanupResourceGroup` is omitted)
+2. 🧼 Purge soft-deleted Cognitive Services accounts (prevents redeploy conflicts)
+3. 📋 Remove the matching subscription deployment records
+4. 🔐 Keep shared LAW Reader RBAC in place while any other managed build still exists
+5. 👤 Keep the current user in `zolab-ai-dev` while they still own another active build (tracked via `requested_by` in `build_info-<suffix>.json`)
+6. ✅ Preserve the `zolab-ai-dev` Entra group itself (not deleted)
 
 ---
 

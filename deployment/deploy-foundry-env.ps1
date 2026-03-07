@@ -455,7 +455,10 @@ function Write-BuildInfoJson {
         [string]$AiFoundryName,
 
         [Parameter(Mandatory)]
-        [string]$AiProjectName
+        [string]$AiProjectName,
+
+        [Parameter(Mandatory)]
+        [string]$RequestedBy
     )
 
     $buildInfo = [ordered]@{
@@ -468,6 +471,7 @@ function Write-BuildInfoJson {
         genai_model             = $GenAiModel
         foundry_name            = $AiFoundryName
         foundry_project_name    = $AiProjectName
+        requested_by            = $RequestedBy
     }
 
     $buildInfo | ConvertTo-Json | Set-Content -Path $OutputPath -Encoding utf8
@@ -525,6 +529,71 @@ function Read-BuildInfoFile {
 
 function Get-FoundryManagedResourceGroups {
     Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' } | Sort-Object ResourceGroupName
+}
+
+function Get-FoundryBuildInventory {
+    param(
+        [string]$ExcludeResourceGroupName
+    )
+
+    $inventory = foreach ($resourceGroup in Get-FoundryManagedResourceGroups) {
+        if ($ExcludeResourceGroupName -and $resourceGroup.ResourceGroupName -ieq $ExcludeResourceGroupName) {
+            continue
+        }
+
+        $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $resourceGroup.ResourceGroupName
+        $requestedBy = $null
+        if ($buildInfoRecord -and $buildInfoRecord.Data.PSObject.Properties.Name -contains 'requested_by') {
+            $requestedBy = [string]$buildInfoRecord.Data.requested_by
+            if ([string]::IsNullOrWhiteSpace($requestedBy)) {
+                $requestedBy = $null
+            }
+        }
+
+        [pscustomobject]@{
+            ResourceGroupName = $resourceGroup.ResourceGroupName
+            BuildInfoPath     = if ($buildInfoRecord) { $buildInfoRecord.Path } else { $null }
+            RequestedBy       = $requestedBy
+            OwnershipKnown    = -not [string]::IsNullOrWhiteSpace($requestedBy)
+        }
+    }
+
+    @($inventory)
+}
+
+function Get-TargetedTeardownSharedAccessPlan {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TargetResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [string]$CurrentUserAccount
+    )
+
+    $remainingBuilds = @(Get-FoundryBuildInventory -ExcludeResourceGroupName $TargetResourceGroupName)
+    $remainingBuildsForCurrentUser = @(
+        $remainingBuilds | Where-Object { $_.RequestedBy -and $_.RequestedBy -ieq $CurrentUserAccount }
+    )
+    $remainingBuildsWithUnknownOwnership = @(
+        $remainingBuilds | Where-Object { -not $_.OwnershipKnown }
+    )
+
+    [pscustomobject]@{
+        RemainingBuilds                  = $remainingBuilds
+        RemainingBuildCount              = $remainingBuilds.Count
+        RemainingBuildNames              = @($remainingBuilds | ForEach-Object { $_.ResourceGroupName })
+        RemainingBuildsForCurrentUser    = $remainingBuildsForCurrentUser
+        RemainingBuildsForCurrentUserCount = $remainingBuildsForCurrentUser.Count
+        RemainingUnknownOwnershipBuilds  = $remainingBuildsWithUnknownOwnership
+        RemainingUnknownOwnershipCount   = $remainingBuildsWithUnknownOwnership.Count
+        ShouldRetainLawRbac              = ($remainingBuilds.Count -gt 0)
+        ShouldRetainUserMembership       = (
+            $remainingBuilds.Count -gt 0 -and (
+                $remainingBuildsForCurrentUser.Count -gt 0 -or
+                $remainingBuildsWithUnknownOwnership.Count -gt 0
+            )
+        )
+    }
 }
 
 function Get-FoundryBuildListLines {
@@ -1141,6 +1210,51 @@ function Get-FoundryBuildStatusLines {
         -UserStatus $userStatus
 }
 
+function Remove-FoundryLawWorkspaceAccess {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SecuritySubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string]$WorkloadSubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string]$GroupObjectId
+    )
+
+    $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
+    Write-Host "Cleaning up LAW RBAC in Security subscription..."
+    Set-AzContext -SubscriptionId $SecuritySubscriptionId | Out-Null
+
+    try {
+        $lawAssignments = Get-AzRoleAssignment -ObjectId $GroupObjectId -Scope $lawScope -ErrorAction SilentlyContinue
+        foreach ($assignment in $lawAssignments) {
+            Write-Host "  Removing: $($assignment.RoleDefinitionName) @ $($assignment.Scope)"
+            Remove-AzRoleAssignment -ObjectId $GroupObjectId `
+                -RoleDefinitionName $assignment.RoleDefinitionName `
+                -Scope $assignment.Scope `
+                -ErrorAction SilentlyContinue
+        }
+
+        $lawDeployments = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'law-rbac*' }
+        foreach ($deployment in $lawDeployments) {
+            Write-Host "Removing deployment record '$($deployment.DeploymentName)'..."
+            Remove-AzSubscriptionDeployment -Name $deployment.DeploymentName -ErrorAction SilentlyContinue
+        }
+    } finally {
+        Set-AzContext -SubscriptionId $WorkloadSubscriptionId | Out-Null
+    }
+
+    [pscustomobject]@{
+        AssignmentCount = @($lawAssignments).Count
+        DeploymentCount = @($lawDeployments).Count
+        Status          = @(
+            if ($lawAssignments) { "Removed $($lawAssignments.Count) LAW role assignments ✅" } else { "No LAW role assignments found ℹ️" }
+            if ($lawDeployments) { "Removed $($lawDeployments.Count) LAW deployment records ✅" } else { "No LAW deployment records found ℹ️" }
+        ) -join '; '
+    }
+}
+
 function Remove-FoundryResourceGroup {
     param(
         [Parameter(Mandatory)]
@@ -1312,6 +1426,10 @@ if ($Cleanup) {
                     throw "Resource group '$CleanupResourceGroup' was not found in subscription '$subscriptionId'."
                 }
 
+                $sharedAccessPlan = Get-TargetedTeardownSharedAccessPlan `
+                    -TargetResourceGroupName $CleanupResourceGroup `
+                    -CurrentUserAccount $currentUser.Account
+
                 $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
                 if ($group) {
                     $groupObjectId = $group.Id
@@ -1354,6 +1472,39 @@ if ($Cleanup) {
                 $buildInfoStatus = Remove-BuildInfoForResourceGroup `
                     -ResourceGroupName $CleanupResourceGroup
 
+                if ($group) {
+                    if ($sharedAccessPlan.ShouldRetainLawRbac) {
+                        $remainingBuildLabel = if ($sharedAccessPlan.RemainingBuildCount -eq 1) { 'build remains' } else { 'builds remain' }
+                        $securityStatus = "Preserved LAW RBAC because $($sharedAccessPlan.RemainingBuildCount) managed $($remainingBuildLabel): $($sharedAccessPlan.RemainingBuildNames -join ', ') ℹ️"
+                    } else {
+                        $lawCleanupResult = Remove-FoundryLawWorkspaceAccess `
+                            -SecuritySubscriptionId $securitySubscriptionId `
+                            -WorkloadSubscriptionId $subscriptionId `
+                            -GroupObjectId $groupObjectId
+                        $securityStatus = $lawCleanupResult.Status
+                    }
+
+                    if ($sharedAccessPlan.ShouldRetainUserMembership) {
+                        if ($sharedAccessPlan.RemainingBuildsForCurrentUserCount -gt 0) {
+                            $userStatus = "Preserved $($currentUser.Account) in $groupDisplayName because $($sharedAccessPlan.RemainingBuildsForCurrentUserCount) owned build(s) remain ✅"
+                        } else {
+                            $unknownBuildNames = $sharedAccessPlan.RemainingUnknownOwnershipBuilds | ForEach-Object { $_.ResourceGroupName }
+                            $userStatus = "Preserved $($currentUser.Account) in $groupDisplayName because remaining build ownership is unknown for: $($unknownBuildNames -join ', ') ℹ️"
+                        }
+                    } else {
+                        $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
+                        if ($isMember) {
+                            Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
+                            $userStatus = "Removed $($currentUser.Account) from $groupDisplayName because no owned builds remain ✅"
+                        } else {
+                            $userStatus = "$($currentUser.Account) was not a member of $groupDisplayName ℹ️"
+                        }
+                    }
+                } else {
+                    $securityStatus = "Entra group '$groupDisplayName' not found; shared LAW RBAC cleanup skipped ℹ️"
+                    $userStatus = "Entra group '$groupDisplayName' not found ℹ️"
+                }
+
                 $teardownStatusLines = Write-TeardownStatus `
                     -ScopeStatus "Targeted teardown for $CleanupResourceGroup" `
                     -ResourceGroupStatus $resourceGroupCleanup.ResourceGroupStatus `
@@ -1361,8 +1512,8 @@ if ($Cleanup) {
                     -CognitiveServicesStatus $resourceGroupCleanup.CognitiveServicesStatus `
                     -DeploymentRecordStatus $deploymentRecordStatus `
                     -BuildInfoStatus $buildInfoStatus `
-                    -SecurityStatus 'No Security subscription cleanup required for targeted teardown ℹ️' `
-                    -UserStatus "$($currentUser.Account) unchanged in $groupDisplayName ℹ️"
+                    -SecurityStatus $securityStatus `
+                    -UserStatus $userStatus
             } else {
                 Write-Host "=== CLEANUP MODE ==="
 
@@ -1427,35 +1578,14 @@ if ($Cleanup) {
                     "No foundry deployment records found ℹ️"
                 }
 
-                $securitySubId = $securitySubscriptionId
-                Write-Host "Cleaning up LAW RBAC in Security subscription..."
-                Set-AzContext -SubscriptionId $securitySubId | Out-Null
-
                 $securityStatus = "No Security cleanup required ℹ️"
                 if ($group) {
-                    $lawScope = "/subscriptions/$securitySubId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
-                    $lawAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $lawScope -ErrorAction SilentlyContinue
-                    foreach ($a in $lawAssignments) {
-                        Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
-                        Remove-AzRoleAssignment -ObjectId $groupObjectId `
-                            -RoleDefinitionName $a.RoleDefinitionName `
-                            -Scope $a.Scope `
-                            -ErrorAction SilentlyContinue
-                    }
-
-                    $lawDeploys = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'law-rbac*' }
-                    foreach ($d in $lawDeploys) {
-                        Write-Host "Removing deployment record '$($d.DeploymentName)'..."
-                        Remove-AzSubscriptionDeployment -Name $d.DeploymentName -ErrorAction SilentlyContinue
-                    }
-
-                    $securityStatus = @(
-                        if ($lawAssignments) { "Removed $($lawAssignments.Count) LAW role assignments ✅" } else { "No LAW role assignments found ℹ️" }
-                        if ($lawDeploys) { "Removed $($lawDeploys.Count) LAW deployment records ✅" } else { "No LAW deployment records found ℹ️" }
-                    ) -join '; '
+                    $lawCleanupResult = Remove-FoundryLawWorkspaceAccess `
+                        -SecuritySubscriptionId $securitySubscriptionId `
+                        -WorkloadSubscriptionId $subscriptionId `
+                        -GroupObjectId $groupObjectId
+                    $securityStatus = $lawCleanupResult.Status
                 }
-
-                Set-AzContext -SubscriptionId $subscriptionId | Out-Null
 
                 $buildInfoPaths = Get-BuildInfoPaths
                 $buildInfoStatus = if ($buildInfoPaths) {
@@ -1789,7 +1919,8 @@ try {
             -KeyVaultName $result.properties.outputs.keyVaultName.value `
             -GenAiModel $selectedAiModelSpec.DeploymentName `
             -AiFoundryName $result.properties.outputs.aiFoundryName.value `
-            -AiProjectName $result.properties.outputs.aiProjectName.value
+            -AiProjectName $result.properties.outputs.aiProjectName.value `
+            -RequestedBy $currentUser.Account
         Write-Host "📝 Build info written to $buildInfoPath"
 
         $buildStatusLines = Write-BuildStatus `
