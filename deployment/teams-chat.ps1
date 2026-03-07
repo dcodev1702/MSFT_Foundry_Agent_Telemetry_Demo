@@ -106,6 +106,13 @@ function Resolve-FoundryTeamsCommandFromMessage {
         }
     }
 
+    if ($trimmed -match '^(?i)heartbeat$') {
+        return [pscustomobject]@{
+            CommandType = 'heartbeat'
+            CommandText = $trimmed
+        }
+    }
+
     if ($trimmed -in @('?', 'help')) {
         return [pscustomobject]@{
             CommandType = 'help'
@@ -176,12 +183,26 @@ function Send-FoundryTeamsChatMessage {
     }
     $htmlMessage = $htmlLines -join '<br/>'
 
-    New-MgChatMessage -ChatId $ChatId -BodyParameter @{
+    $chatMessage = New-MgChatMessage -ChatId $ChatId -BodyParameter @{
         body = @{
             contentType = 'html'
             content     = $htmlMessage
         }
     }
+
+    $previewLine = (($Message -split "`r?`n" | Select-Object -First 1) -join '').Trim()
+    if ($previewLine.Length -gt 120) {
+        $previewLine = $previewLine.Substring(0, 117) + '...'
+    }
+
+    $global:FoundryTeamsLastResponse = [pscustomobject]@{
+        SentAtUtc = (Get-Date).ToUniversalTime()
+        ChatId    = $ChatId
+        MessageId = $chatMessage.Id
+        Preview   = if ($previewLine) { $previewLine } else { '[blank message]' }
+    }
+
+    $chatMessage
 }
 
 function Wait-FoundryTeamsChatChoice {

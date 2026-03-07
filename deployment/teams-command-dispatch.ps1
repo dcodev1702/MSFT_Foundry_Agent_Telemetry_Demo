@@ -15,6 +15,8 @@ $ErrorActionPreference = "Stop"
 
 $deployScript = Join-Path $PSScriptRoot 'deploy-foundry-env.ps1'
 $subscriptionId = (Get-AzSubscription -SubscriptionName "zolab").Id
+$listenerStartTimeUtc = (Get-Date).ToUniversalTime()
+$listenerScriptName = Split-Path -Leaf $PSCommandPath
 
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Teams)) {
     Write-Host "Installing Microsoft.Graph.Teams module..."
@@ -88,6 +90,7 @@ function Get-ListenerHelpLines {
         'Foundry Teams command listener is online.'
         'Available commands:'
         '- build it'
+        '- heartbeat'
         '- list builds'
         '- build status ''zolab-ai-xxxxxx'''
         '- teardown ''zolab-ai-xxxxxx'''
@@ -143,6 +146,88 @@ function Get-ListenerStatusLines {
     )
 }
 
+function Format-ListenerDuration {
+    param(
+        [Parameter(Mandatory)]
+        [TimeSpan]$Duration
+    )
+
+    $parts = @()
+    if ($Duration.Days -gt 0) {
+        $parts += "$($Duration.Days)d"
+    }
+
+    if ($Duration.Hours -gt 0 -or $parts.Count -gt 0) {
+        $parts += "$($Duration.Hours)h"
+    }
+
+    if ($Duration.Minutes -gt 0 -or $parts.Count -gt 0) {
+        $parts += "$($Duration.Minutes)m"
+    }
+
+    $parts += "$($Duration.Seconds)s"
+    $parts -join ' '
+}
+
+function Get-ListenerHeartbeatLines {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Account,
+
+        [Parameter(Mandatory)]
+        [string]$ChatTopic
+    )
+
+    $process = Get-Process -Id $PID -ErrorAction SilentlyContinue
+    $uptime = if ($process) {
+        Format-ListenerDuration -Duration ((Get-Date) - $process.StartTime)
+    } else {
+        Format-ListenerDuration -Duration ((Get-Date).ToUniversalTime() - $listenerStartTimeUtc)
+    }
+
+    $memoryUsage = if ($process) {
+        ('{0:N1} MB' -f ($process.WorkingSet64 / 1MB))
+    } else {
+        'Unavailable'
+    }
+
+    $graphCtx = Get-MgContext
+    $missingGraphScopes = if ($graphCtx) {
+        $requiredGraphScopes | Where-Object { $_ -notin $graphCtx.Scopes }
+    } else {
+        $requiredGraphScopes
+    }
+    $graphState = if ($graphCtx -and
+        $graphCtx.Account -ieq $Account -and
+        $missingGraphScopes.Count -eq 0) {
+        'Connected'
+    } else {
+        'Disconnected'
+    }
+
+    $lastResponse = if ($global:FoundryTeamsLastResponse) {
+        $sentAt = $global:FoundryTeamsLastResponse.SentAtUtc.ToString('u')
+        "$sentAt - $($global:FoundryTeamsLastResponse.Preview)"
+    } else {
+        'No Teams response has been sent yet.'
+    }
+
+    @(
+        '💓 Heartbeat'
+        "🟢 Status: Online ✅"
+        "📜 Script: $listenerScriptName"
+        "🆔 PID: $PID"
+        "🖥️ pwsh version: $($PSVersionTable.PSVersion)"
+        "⏱️ Uptime: $uptime"
+        "🧠 Memory: $memoryUsage"
+        "💬 Last response: $lastResponse"
+        "🔗 Graph state: $graphState 🔌"
+        "📢 Listening in: $ChatTopic"
+        "👤 Identity: $Account"
+        "🕒 Checked at: $((Get-Date).ToUniversalTime().ToString('u'))"
+    )
+}
+
 try {
     [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ((Get-ListenerHelpLines) -join "`n"))
     Write-Host "Listener online. PID=$PID Account=$($ctx.Account) Topic=$TeamsChatTopic UTC=$((Get-Date).ToUniversalTime().ToString('u'))"
@@ -151,7 +236,7 @@ try {
         $commandPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
             @(
                 "Waiting for the next command."
-                "Send 'build it' to start a fresh deployment, 'build status <resource-group>' to get the current deployment report, 'teardown <resource-group>' to remove a deployment, or 'stop listener' to shut me down."
+                "Send 'build it' to start a fresh deployment, 'heartbeat' for listener health, 'build status <resource-group>' to get the current deployment report, 'teardown <resource-group>' to remove a deployment, or 'stop listener' to shut me down."
             ) -join "`n"
         )
 
@@ -191,6 +276,15 @@ try {
                     -PollIntervalSeconds $PollIntervalSeconds
                 [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ($statusLines -join "`n"))
                 Write-Host "Listener status command received."
+                continue
+            }
+
+            'heartbeat' {
+                $heartbeatLines = Get-ListenerHeartbeatLines `
+                    -Account $ctx.Account `
+                    -ChatTopic $TeamsChatTopic
+                [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ($heartbeatLines -join "`n"))
+                Write-Host "Heartbeat command received."
                 continue
             }
 

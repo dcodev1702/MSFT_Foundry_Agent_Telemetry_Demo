@@ -164,6 +164,7 @@ pwsh .\teams-command-dispatch.ps1
 Once the listener is running, send one of these commands in the Teams chat:
 
 - `build it`
+- `heartbeat`
 - `list builds`
 - `build status 'zolab-ai-6bmycg'`
 - `teardown 'zolab-ai-6bmycg'`
@@ -174,6 +175,7 @@ Once the listener is running, send one of these commands in the Teams chat:
 The listener validates the request, then asks for confirmation:
 
 - Build: reply `1` to build or `2` to abort
+- Heartbeat: no confirmation required
 - List builds: no confirmation required
 - Build status: reply `1` to confirm or `2` to abort
 - Teardown: reply `1` to confirm teardown or `2` to abort
@@ -182,7 +184,7 @@ The listener validates the request, then asks for confirmation:
 By default, the confirmation prompt stays open for 30 minutes before it expires.
 After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
 The listener stays online until you explicitly send `stop listener` in the Teams chat.
-Use `?` any time to get the current command list, and use `listener status` for a quick health snapshot that reports the online indicator, account, chat topic, PID, and current UTC time.
+Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph state, chat topic, and running identity.
 
 Upon completion, the script outputs all resource names and writes `build_info-<suffix>.json` at the repo root for notebook configuration.
 
