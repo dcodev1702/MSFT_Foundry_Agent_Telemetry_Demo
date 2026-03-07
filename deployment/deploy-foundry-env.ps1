@@ -3,11 +3,15 @@
 # Usage:
 #   .\deploy-foundry-env.ps1              # deploy all resources + RBAC
 #   .\deploy-foundry-env.ps1 -UseTeamsChatFlow
+#   .\deploy-foundry-env.ps1 -ListBuilds
+#   .\deploy-foundry-env.ps1 -BuildStatusResourceGroup zolab-ai-abc123
 #   .\deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-abc123
 #   .\deploy-foundry-env.ps1 -Cleanup     # tear down resources + RBAC (keeps Entra group)
 param(
     [switch]$Cleanup,
     [string]$CleanupResourceGroup,
+    [switch]$ListBuilds,
+    [string]$BuildStatusResourceGroup,
     [switch]$UseTeamsChatFlow,
     [int]$TeamsChatSelectionTimeoutMinutes = 30,
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments'
@@ -19,6 +23,14 @@ $ErrorActionPreference = "Stop"
 
 if ($CleanupResourceGroup) {
     $Cleanup = $true
+}
+
+if ($BuildStatusResourceGroup -and $Cleanup) {
+    throw "Build status mode cannot be combined with cleanup mode."
+}
+
+if ($ListBuilds -and ($Cleanup -or $BuildStatusResourceGroup)) {
+    throw "List builds mode cannot be combined with cleanup or build status mode."
 }
 
 # ── Configuration ──
@@ -52,6 +64,9 @@ function Write-BuildStatus {
         [string]$GenAiModelDisplay,
 
         [Parameter(Mandatory)]
+        [string]$BuildInfoStatus,
+
+        [Parameter(Mandatory)]
         [string]$FoundryProjectEndpoint,
 
         [Parameter(Mandatory)]
@@ -75,6 +90,7 @@ function Write-BuildStatus {
         @{ Item = '🤖 AI Foundry'; Status = $AiFoundryName },
         @{ Item = '🏢 AI Project'; Status = $AiProjectName },
         @{ Item = '🧠 Model'; Status = $GenAiModelDisplay },
+        @{ Item = '📝 Build Info'; Status = $BuildInfoStatus },
         @{ Item = '🔗 App Insights Connection'; Status = $AppInsightsConnectionStatus },
         @{ Item = '📡 LAW RBAC'; Status = $LawRbacStatus },
         @{ Item = '👤 User'; Status = $UserStatus },
@@ -210,6 +226,111 @@ function Write-BuildInfoJson {
     }
 
     $buildInfo | ConvertTo-Json | Set-Content -Path $OutputPath -Encoding utf8
+}
+
+function Get-BuildInfoDirectory {
+    Split-Path $PSScriptRoot -Parent
+}
+
+function Get-LegacyBuildInfoPath {
+    Join-Path (Get-BuildInfoDirectory) 'build_info.json'
+}
+
+function Get-BuildInfoPathForSuffix {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Suffix
+    )
+
+    Join-Path (Get-BuildInfoDirectory) "build_info-$Suffix.json"
+}
+
+function Get-BuildInfoPaths {
+    $buildInfoPaths = @(
+        Get-ChildItem -Path (Get-BuildInfoDirectory) -Filter 'build_info-*.json' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -ExpandProperty FullName
+    )
+
+    $legacyPath = Get-LegacyBuildInfoPath
+    if (Test-Path -LiteralPath $legacyPath) {
+        $buildInfoPaths += $legacyPath
+    }
+
+    $buildInfoPaths
+}
+
+function Get-LatestBuildInfoPath {
+    $buildInfoPaths = Get-BuildInfoPaths
+    if ($buildInfoPaths) {
+        return $buildInfoPaths[0]
+    }
+
+    $null
+}
+
+function Read-BuildInfoFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+}
+
+function Get-FoundryManagedResourceGroups {
+    Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' } | Sort-Object ResourceGroupName
+}
+
+function Get-FoundryBuildListLines {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
+
+    $resourceGroups = @(Get-FoundryManagedResourceGroups)
+    $buildInfoPaths = @(Get-BuildInfoPaths)
+    $matchedBuildInfoPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    $lines = @(
+        ''
+        '● 📚 Foundry builds'
+        ''
+    )
+
+    if ($resourceGroups.Count -eq 0) {
+        $lines += 'No active managed resource groups found ℹ️'
+    } else {
+        $lines += 'Active resource groups:'
+        for ($i = 0; $i -lt $resourceGroups.Count; $i++) {
+            $resourceGroupName = $resourceGroups[$i].ResourceGroupName
+            $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $resourceGroupName
+            if ($buildInfoRecord) {
+                [void]$matchedBuildInfoPaths.Add($buildInfoRecord.Path)
+                $lines += "$($i + 1). $resourceGroupName — model: $($buildInfoRecord.Data.genai_model) — build info: $(Split-Path -Leaf $buildInfoRecord.Path) ✅"
+            } else {
+                $lines += "$($i + 1). $resourceGroupName — build info file missing ❌"
+            }
+        }
+    }
+
+    $orphanedBuildInfoPaths = @($buildInfoPaths | Where-Object { -not $matchedBuildInfoPaths.Contains($_) })
+    if ($orphanedBuildInfoPaths.Count -gt 0) {
+        $lines += ''
+        $lines += 'Orphaned build info files:'
+        foreach ($path in $orphanedBuildInfoPaths) {
+            try {
+                $buildInfo = Read-BuildInfoFile -Path $path
+                $lines += "- $(Split-Path -Leaf $path) — resource group: $($buildInfo.rg) ⚠️"
+            } catch {
+                $lines += "- $(Split-Path -Leaf $path) — unreadable ⚠️"
+            }
+        }
+    }
+
+    $lines
 }
 
 function Get-AllowedAiModelChoices {
@@ -617,6 +738,154 @@ function Get-FoundryDeploymentSuffixFromResourceGroupName {
     $matches[1]
 }
 
+function Get-BuildInfoPathForResourceGroup {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName
+    )
+
+    $suffixPath = Get-BuildInfoPathForSuffix -Suffix (Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $ResourceGroupName)
+    if (Test-Path -LiteralPath $suffixPath) {
+        return $suffixPath
+    }
+
+    foreach ($path in Get-BuildInfoPaths) {
+        try {
+            $buildInfo = Read-BuildInfoFile -Path $path
+            if ($buildInfo.rg -eq $ResourceGroupName) {
+                return $path
+            }
+        } catch {
+            continue
+        }
+    }
+
+    $null
+}
+
+function Get-BuildInfoRecordForResourceGroup {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName
+    )
+
+    $path = Get-BuildInfoPathForResourceGroup -ResourceGroupName $ResourceGroupName
+    if (-not $path) {
+        return $null
+    }
+
+    [pscustomobject]@{
+        Path = $path
+        Data = Read-BuildInfoFile -Path $path
+    }
+}
+
+function Get-FoundryBuildStatusLines {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [string]$GroupDisplayName,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string]$SecuritySubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string]$CurrentUserAccount
+    )
+
+    $resourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
+    if (-not $resourceGroup) {
+        throw "Resource group '$ResourceGroupName' was not found in subscription '$SubscriptionId'."
+    }
+
+    $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $ResourceGroupName
+    if (-not $buildInfoRecord) {
+        throw "No build_info-<suffix>.json file was found for '$ResourceGroupName'."
+    }
+
+    $buildInfo = $buildInfoRecord.Data
+    $buildInfoFileName = Split-Path -Leaf $buildInfoRecord.Path
+
+    $storageExists = [bool](Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $buildInfo.storage_account -ErrorAction SilentlyContinue)
+    $keyVaultExists = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.KeyVault/vaults' -Name $buildInfo.key_vault -ErrorAction SilentlyContinue)
+    $appInsightsExists = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.Insights/components' -Name $buildInfo.appinsights -ErrorAction SilentlyContinue)
+    $foundryExists = [bool](Get-AzResource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.CognitiveServices/accounts' -Name $buildInfo.foundry_name -ErrorAction SilentlyContinue)
+
+    $projectExists = $false
+    $projectResourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$($buildInfo.foundry_name)/projects/$($buildInfo.foundry_project_name)"
+    az resource show --ids $projectResourceId --api-version 2025-06-01 --only-show-errors --output none 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $projectExists = $true
+    }
+
+    $appInsightsConnectionStatus = 'App Insights connection not found ❌'
+    if ($foundryExists -and $projectExists) {
+        $connectionId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$($buildInfo.foundry_name)/projects/$($buildInfo.foundry_project_name)/connections/$($buildInfo.foundry_name)-appinsights"
+        $connectionSharedToAll = az resource show `
+            --ids $connectionId `
+            --api-version 2025-06-01 `
+            --query properties.isSharedToAll `
+            --output tsv 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            $appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLowerInvariant() -eq 'true') {
+                'Shared to all projects ✅'
+            } else {
+                'This project only ✅'
+            }
+        }
+    }
+
+    $lawRbacStatus = "Entra group '$GroupDisplayName' not found ❌"
+    $userStatus = "$CurrentUserAccount membership could not be checked ❌"
+    $group = Get-MgGroup -Filter "displayName eq '$GroupDisplayName'" -ErrorAction SilentlyContinue
+    if ($group) {
+        $statusUser = Get-MgUser -UserId $CurrentUserAccount -ErrorAction SilentlyContinue
+        if ($statusUser) {
+            $isMember = Get-MgGroupMember -GroupId $group.Id | Where-Object { $_.Id -eq $statusUser.Id }
+            $userStatus = if ($isMember) {
+                "$CurrentUserAccount added to $GroupDisplayName ✅"
+            } else {
+                "$CurrentUserAccount is not a member of $GroupDisplayName ❌"
+            }
+        }
+
+        $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
+        Set-AzContext -SubscriptionId $SecuritySubscriptionId | Out-Null
+        try {
+            $lawAssignments = Get-AzRoleAssignment -ObjectId $group.Id -Scope $lawScope -ErrorAction SilentlyContinue
+        } finally {
+            Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
+        }
+
+        $lawRbacStatus = if ($lawAssignments) {
+            'Log Analytics Reader on DIBSecCom ✅'
+        } else {
+            'Log Analytics Reader missing on DIBSecCom ❌'
+        }
+    }
+
+    Write-BuildStatus `
+        -ResourceGroupName $ResourceGroupName `
+        -StorageAccountName (if ($storageExists) { "$($buildInfo.storage_account) ✅" } else { "$($buildInfo.storage_account) ❌" }) `
+        -KeyVaultName (if ($keyVaultExists) { "$($buildInfo.key_vault) ✅" } else { "$($buildInfo.key_vault) ❌" }) `
+        -AppInsightsName (if ($appInsightsExists) { "$($buildInfo.appinsights) ✅" } else { "$($buildInfo.appinsights) ❌" }) `
+        -AiFoundryName (if ($foundryExists) { "$($buildInfo.foundry_name) ✅" } else { "$($buildInfo.foundry_name) ❌" }) `
+        -AiProjectName (if ($projectExists) { "$($buildInfo.foundry_project_name) ✅" } else { "$($buildInfo.foundry_project_name) ❌" }) `
+        -GenAiModelDisplay $buildInfo.genai_model `
+        -BuildInfoStatus "$buildInfoFileName ✅" `
+        -FoundryProjectEndpoint $buildInfo.foundry_project_endpoint `
+        -AzureOpenAIEndpoint $buildInfo.azure_openai_endpoint `
+        -AppInsightsConnectionStatus $appInsightsConnectionStatus `
+        -LawRbacStatus $lawRbacStatus `
+        -UserStatus $userStatus
+}
+
 function Remove-FoundryResourceGroup {
     param(
         [Parameter(Mandatory)]
@@ -665,26 +934,18 @@ function Remove-FoundryResourceGroup {
 function Remove-BuildInfoForResourceGroup {
     param(
         [Parameter(Mandatory)]
-        [string]$BuildInfoPath,
-
-        [Parameter(Mandatory)]
         [string]$ResourceGroupName
     )
 
-    if (-not (Test-Path -LiteralPath $BuildInfoPath)) {
-        Write-Host "No build_info.json file found to remove."
-        return "No build_info.json file found ℹ️"
+    $buildInfoPath = Get-BuildInfoPathForResourceGroup -ResourceGroupName $ResourceGroupName
+    if (-not $buildInfoPath) {
+        Write-Host "No build_info file found for '$ResourceGroupName'."
+        return "No build_info file found for $ResourceGroupName ℹ️"
     }
 
-    $buildInfo = Get-Content -LiteralPath $BuildInfoPath -Raw | ConvertFrom-Json
-    if ($buildInfo.rg -eq $ResourceGroupName) {
-        Remove-Item -LiteralPath $BuildInfoPath -Force
-        Write-Host "Removed build info file '$BuildInfoPath' for '$ResourceGroupName'."
-        return "Removed build_info.json for $ResourceGroupName ✅"
-    } else {
-        Write-Host "build_info.json points to '$($buildInfo.rg)'; leaving it in place."
-        return "Left build_info.json in place for $($buildInfo.rg) ℹ️"
-    }
+    Remove-Item -LiteralPath $buildInfoPath -Force
+    Write-Host "Removed build info file '$buildInfoPath' for '$ResourceGroupName'."
+    "Removed $(Split-Path -Leaf $buildInfoPath) for $ResourceGroupName ✅"
 }
 
 Write-Host "Resolved subscriptions:"
@@ -730,7 +991,7 @@ $missingScopes = if ($ctx) {
 
 if (-not $ctx -or $missingScopes.Count -gt 0) {
     Write-Host "Connecting to Microsoft Graph..."
-    Connect-MgGraph -Scopes $requiredGraphScopes -NoWelcome
+    Connect-MgGraph -Scopes $requiredGraphScopes -ContextScope CurrentUser -NoWelcome
     $ctx = Get-MgContext
 }
 
@@ -758,7 +1019,6 @@ Write-Host "Subscription set to zolab ($subscriptionId)"
 # ════════════════════════════════════════════════════════════════
 if ($Cleanup) {
     Write-Host ""
-    $buildInfoPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'build_info.json'
     try {
         if ($UseTeamsChatFlow -and $teamsChatId) {
             $cleanupStartMessage = if ($CleanupResourceGroup) {
@@ -817,7 +1077,6 @@ if ($Cleanup) {
             }
 
             $buildInfoStatus = Remove-BuildInfoForResourceGroup `
-                -BuildInfoPath $buildInfoPath `
                 -ResourceGroupName $CleanupResourceGroup
 
             $teardownStatusLines = Write-TeardownStatus `
@@ -923,13 +1182,16 @@ if ($Cleanup) {
 
             Set-AzContext -SubscriptionId $subscriptionId | Out-Null
 
-            $buildInfoStatus = if (Test-Path -LiteralPath $buildInfoPath) {
-                Remove-Item -LiteralPath $buildInfoPath -Force
-                Write-Host "Removed stale build info file '$buildInfoPath'."
-                "Removed stale build_info.json ✅"
+            $buildInfoPaths = Get-BuildInfoPaths
+            $buildInfoStatus = if ($buildInfoPaths) {
+                foreach ($path in $buildInfoPaths) {
+                    Remove-Item -LiteralPath $path -Force
+                    Write-Host "Removed stale build info file '$path'."
+                }
+                "Removed $($buildInfoPaths.Count) build info file(s) ✅"
             } else {
-                Write-Host "No build_info.json file found to remove."
-                "No build_info.json file found ℹ️"
+                Write-Host "No build_info files found to remove."
+                "No build info files found ℹ️"
             }
 
             $teardownStatusLines = Write-TeardownStatus `
@@ -965,6 +1227,71 @@ if ($Cleanup) {
             $failureDetails += $_.Exception.Message
             [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($failureDetails -join "`n"))
         }
+        throw
+    }
+}
+
+# ════════════════════════════════════════════════════════════════
+#  LIST BUILDS MODE
+# ════════════════════════════════════════════════════════════════
+if ($ListBuilds) {
+    try {
+        $buildListLines = Get-FoundryBuildListLines -SubscriptionId $subscriptionId
+        $buildListLines | ForEach-Object { Write-Host $_ }
+
+        if ($UseTeamsChatFlow -and $teamsChatId) {
+            [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($buildListLines -join "`n"))
+        }
+
+        return
+    } catch {
+        if ($UseTeamsChatFlow -and $teamsChatId) {
+            $failureDetails = @(
+                'Microsoft Foundry list builds request failed.'
+                "Account: $($currentUser.Account)"
+                ''
+                'Error:'
+                $_.Exception.Message
+            )
+            [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($failureDetails -join "`n"))
+        }
+
+        throw
+    }
+}
+
+# ════════════════════════════════════════════════════════════════
+#  BUILD STATUS MODE
+# ════════════════════════════════════════════════════════════════
+if ($BuildStatusResourceGroup) {
+    try {
+        $buildStatusLines = Get-FoundryBuildStatusLines `
+            -ResourceGroupName $BuildStatusResourceGroup `
+            -GroupDisplayName $groupDisplayName `
+            -SubscriptionId $subscriptionId `
+            -SecuritySubscriptionId $securitySubscriptionId `
+            -CurrentUserAccount $currentUser.Account
+
+        $buildStatusLines | ForEach-Object { Write-Host $_ }
+
+        if ($UseTeamsChatFlow -and $teamsChatId) {
+            [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($buildStatusLines -join "`n"))
+        }
+
+        return
+    } catch {
+        if ($UseTeamsChatFlow -and $teamsChatId) {
+            $failureDetails = @(
+                'Microsoft Foundry build status request failed.'
+                "Account: $($currentUser.Account)"
+                "Target resource group: $BuildStatusResourceGroup"
+                ''
+                'Error:'
+                $_.Exception.Message
+            )
+            [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($failureDetails -join "`n"))
+        }
+
         throw
     }
 }
@@ -1152,7 +1479,7 @@ try {
         'This project only ✅'
     }
 
-    $buildInfoPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'build_info.json'
+    $buildInfoPath = Get-BuildInfoPathForSuffix -Suffix $suffix
     Write-BuildInfoJson `
         -OutputPath $buildInfoPath `
         -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
@@ -1174,6 +1501,7 @@ try {
         -AiFoundryName $result.properties.outputs.aiFoundryName.value `
         -AiProjectName $result.properties.outputs.aiProjectName.value `
         -GenAiModelDisplay "$($selectedAiModelSpec.DeploymentName) ($($selectedAiModelSpec.SkuName))" `
+        -BuildInfoStatus "$(Split-Path -Leaf $buildInfoPath) ✅" `
         -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
         -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
         -AppInsightsConnectionStatus $appInsightsConnectionStatus `

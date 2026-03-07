@@ -140,23 +140,33 @@ cd deployment
 Once the listener is running, send one of these commands in the Teams chat:
 
 - `build it`
+- `list builds`
+- `build status 'zolab-ai-6bmycg'`
 - `teardown 'zolab-ai-6bmycg'`
+- `listener status`
+- `?`
+- `stop listener`
 
 The listener validates the request, then asks for confirmation:
 
 - Build: reply `1` to build or `2` to abort
+- List builds: no confirmation required
+- Build status: reply `1` to confirm or `2` to abort
 - Teardown: reply `1` to confirm teardown or `2` to abort
+- Listener status / `?`: no confirmation required
 
 By default, the confirmation prompt stays open for 30 minutes before it expires.
 After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
+The listener stays online until you explicitly send `stop listener` in the Teams chat.
+Use `?` any time to get the current command list, and use `listener status` for a quick health snapshot that reports the online indicator, account, chat topic, PID, and current UTC time.
 
-Upon completion, the script outputs all resource names and writes `build_info.json` at the repo root for notebook configuration.
+Upon completion, the script outputs all resource names and writes `build_info-<suffix>.json` at the repo root for notebook configuration.
 
-- 🌐 **Foundry Project Endpoint** — stored in `build_info.json` as `foundry_project_endpoint` and loaded by the Win11 notebook into `foundry_proj_ep`
-- 🤖 **Model Endpoint** — stored in `build_info.json` as `azure_openai_endpoint`
-- 🧠 **Model Name** — stored in `build_info.json` as `genai_model` and used by the notebook when creating the agent
+- 🌐 **Foundry Project Endpoint** — stored in `build_info-<suffix>.json` as `foundry_project_endpoint` and loaded by the Win11 notebook into `foundry_proj_ep`
+- 🤖 **Model Endpoint** — stored in `build_info-<suffix>.json` as `azure_openai_endpoint`
+- 🧠 **Model Name** — stored in `build_info-<suffix>.json` as `genai_model` and used by the notebook when creating the agent
 
-The generated `build_info.json` includes:
+The generated `build_info-<suffix>.json` includes:
 
 - `rg`
 - `appinsights`

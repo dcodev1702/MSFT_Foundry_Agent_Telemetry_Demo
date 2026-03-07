@@ -22,7 +22,7 @@ A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI
 
 ## 🚀 Quick Start
 
-1. Run the deployment first — it generates `build_info.json` at the repo root (see [`deployment/README.md`](deployment/README.md))
+1. Run the deployment first — it generates `build_info-<suffix>.json` at the repo root (see [`deployment/README.md`](deployment/README.md))
 2. Open `zolab-ai-agent-demo-win11.ipynb`
 4. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
 5. Switch to the **AI Agent Demo (.venv)** kernel
@@ -42,9 +42,9 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
 | **1** | Install Dependencies | Installs Azure AI, OpenTelemetry, and Azure Monitor packages with compatibility safeguards |
-| **1.1** | Confirm Existing Deployment | Loads `build_info.json` and prints the current infrastructure summary before SDK imports |
+| **1.1** | Confirm Existing Deployment | Loads the latest `build_info-<suffix>.json` and prints the current infrastructure summary before SDK imports |
 | **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `PromptAgentDefinition`, `AIProjectInstrumentor` |
-| **3** | Configure the Project Client | Reuses the deployment values loaded from `build_info.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
+| **3** | Configure the Project Client | Reuses the deployment values loaded from `build_info-<suffix>.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
 | **3.1** | Enable Telemetry | Configures OpenTelemetry + Azure Monitor tracing pipeline and instruments the SDK |
 | **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a tool for the agent |
 | **4** | Create the Agent | Defines a versioned agent with storytelling persona and MCP tool access |
@@ -57,7 +57,7 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 
 ### Build-Time Notebook Configuration
 
-The deployment script writes a repo-local `build_info.json` file at build time. The Win11 notebook reads this file in the **Confirm Existing Deployment** section and reuses it in **Section 3** to populate:
+The deployment script writes a repo-local `build_info-<suffix>.json` file at build time. The Win11 notebook reads the latest matching file in the **Confirm Existing Deployment** section and reuses it in **Section 3** to populate:
 
 - `foundry_proj_ep` → the Microsoft Foundry project endpoint
 - `genai_model` → the model name used when creating the agent
@@ -120,6 +120,7 @@ The notebook produces traces across three observability surfaces:
 ## 🏗️ Infrastructure
 
 The `deployment/` directory contains Bicep IaC to provision the full AI Foundry environment — see [`deployment/README.md`](deployment/README.md) for details.
+That deployment guide also documents the Teams command listener, including `build it`, `list builds`, `build status`, `teardown`, `listener status`, `?`, and `stop listener`.
 
 ---
 

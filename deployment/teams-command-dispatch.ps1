@@ -40,7 +40,7 @@ $missingScopes = if ($ctx) {
 
 if (-not $ctx -or $missingScopes.Count -gt 0) {
     Write-Host "Connecting to Microsoft Graph..."
-    Connect-MgGraph -Scopes $requiredGraphScopes -NoWelcome | Out-Null
+    Connect-MgGraph -Scopes $requiredGraphScopes -ContextScope CurrentUser -NoWelcome | Out-Null
     $ctx = Get-MgContext
 }
 
@@ -53,34 +53,128 @@ Set-AzContext -SubscriptionId $subscriptionId | Out-Null
 $user = Get-MgUser -UserId $ctx.Account
 $chat = Get-OrCreate-FoundryTeamsChat -UserId $user.Id -Topic $TeamsChatTopic
 
+function Get-ListenerHelpLines {
+    @(
+        'Foundry Teams command listener is online.'
+        'Available commands:'
+        '- build it'
+        '- list builds'
+        '- build status ''zolab-ai-xxxxxx'''
+        '- teardown ''zolab-ai-xxxxxx'''
+        '- listener status'
+        '- ?'
+        '- stop listener'
+        ''
+        'I will ask for confirmation before build, build status, and teardown actions.'
+    )
+}
+
+function Get-ListenerStatusLines {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Account,
+
+        [Parameter(Mandatory)]
+        [string]$ChatTopic,
+
+        [Parameter(Mandatory)]
+        [int]$CommandTimeoutMinutes,
+
+        [Parameter(Mandatory)]
+        [int]$ConfirmationTimeoutMinutes,
+
+        [Parameter(Mandatory)]
+        [int]$PollIntervalSeconds
+    )
+
+    @(
+        '● 🛰️ Listener status'
+        ''
+        "Status: Online ✅"
+        "Account: $Account"
+        "Chat topic: $ChatTopic"
+        "Process ID: $PID"
+        "Command timeout: $CommandTimeoutMinutes minute(s)"
+        "Confirmation timeout: $ConfirmationTimeoutMinutes minute(s)"
+        "Poll interval: $PollIntervalSeconds second(s)"
+        "Checked at: $((Get-Date).ToUniversalTime().ToString('u'))"
+    )
+}
+
 try {
-    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
-        @(
-            "Foundry Teams command listener is online."
-            "Supported commands:"
-            "- build it"
-            "- teardown 'zolab-ai-xxxxxx'"
-            ""
-            "I'll ask for a 1/2 confirmation before I do anything."
-        ) -join "`n"
-    ))
+    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ((Get-ListenerHelpLines) -join "`n"))
+    Write-Host "Listener online. PID=$PID Account=$($ctx.Account) Topic=$TeamsChatTopic UTC=$((Get-Date).ToUniversalTime().ToString('u'))"
 
     while ($true) {
         $commandPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
             @(
                 "Waiting for the next command."
-                "Send 'build it' to start a fresh deployment or 'teardown <resource-group>' to remove a deployment."
+                "Send 'build it' to start a fresh deployment, 'build status <resource-group>' to get the current deployment report, 'teardown <resource-group>' to remove a deployment, or 'stop listener' to shut me down."
             ) -join "`n"
         )
 
-        $command = Wait-FoundryTeamsChatCommand `
-            -ChatId $chat.Id `
-            -PromptCreatedDateTime $commandPrompt.CreatedDateTime `
-            -PromptMessageId $commandPrompt.Id `
-            -TimeoutMinutes $CommandTimeoutMinutes `
-            -PollIntervalSeconds $PollIntervalSeconds
+        try {
+            $command = Wait-FoundryTeamsChatCommand `
+                -ChatId $chat.Id `
+                -PromptCreatedDateTime $commandPrompt.CreatedDateTime `
+                -PromptMessageId $commandPrompt.Id `
+                -TimeoutMinutes $CommandTimeoutMinutes `
+                -PollIntervalSeconds $PollIntervalSeconds
+        } catch {
+            if ($_.Exception.Message -like 'Timed out waiting for a Teams command*') {
+                Write-Host "No Teams command received during the last wait window. Continuing to listen..."
+                continue
+            }
+
+            throw
+        }
 
         switch ($command.CommandType) {
+            'help' {
+                [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ((Get-ListenerHelpLines) -join "`n"))
+                Write-Host "Help command received."
+                continue
+            }
+
+            'listener-status' {
+                $statusLines = Get-ListenerStatusLines `
+                    -Account $ctx.Account `
+                    -ChatTopic $TeamsChatTopic `
+                    -CommandTimeoutMinutes $CommandTimeoutMinutes `
+                    -ConfirmationTimeoutMinutes $ConfirmationTimeoutMinutes `
+                    -PollIntervalSeconds $PollIntervalSeconds
+                [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ($statusLines -join "`n"))
+                Write-Host "Listener status command received."
+                continue
+            }
+
+            'list-builds' {
+                [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Listing managed Foundry builds...')
+                Write-Host "List builds command received."
+                try {
+                    & $deployScript -ListBuilds -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
+                } catch {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                        @(
+                            "List builds command failed."
+                            ""
+                            $_.Exception.Message
+                            ""
+                            "Listener is still online."
+                        ) -join "`n"
+                    ))
+                    Write-Warning "List builds command failed: $($_.Exception.Message)"
+                }
+
+                continue
+            }
+
+            'stop-listener' {
+                [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Foundry Teams command listener is stopping now.")
+                Write-Host "Stop listener command received."
+                return
+            }
+
             'build' {
                 $confirmationPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
                     @(
@@ -93,24 +187,104 @@ try {
                     ) -join "`n"
                 )
 
-                $confirmation = Wait-FoundryTeamsChatChoice `
-                    -ChatId $chat.Id `
-                    -AllowedChoices @('build', 'abort') `
-                    -PromptCreatedDateTime $confirmationPrompt.CreatedDateTime `
-                    -PromptMessageId $confirmationPrompt.Id `
-                    -TimeoutMinutes $ConfirmationTimeoutMinutes `
-                    -PollIntervalSeconds $PollIntervalSeconds
+                try {
+                    $confirmation = Wait-FoundryTeamsChatChoice `
+                        -ChatId $chat.Id `
+                        -AllowedChoices @('build', 'abort') `
+                        -PromptCreatedDateTime $confirmationPrompt.CreatedDateTime `
+                        -PromptMessageId $confirmationPrompt.Id `
+                        -TimeoutMinutes $ConfirmationTimeoutMinutes `
+                        -PollIntervalSeconds $PollIntervalSeconds
+                } catch {
+                    if ($_.Exception.Message -like 'Timed out waiting for a Teams response*') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build confirmation timed out. Listener is still online.")
+                        Write-Host "Build confirmation timed out."
+                        continue
+                    }
+
+                    throw
+                }
 
                 if ($confirmation.Choice -eq 'abort') {
-                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build request aborted.")
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build request aborted. Listener is still online.")
                     Write-Host "Build request aborted."
-                    return
+                    continue
                 }
 
                 [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build confirmed. Starting deployment...")
                 Write-Host "Build confirmed. Starting deployment..."
-                & $deployScript -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
-                return
+                try {
+                    & $deployScript -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
+                } catch {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                        @(
+                            "Build command failed."
+                            ""
+                            $_.Exception.Message
+                            ""
+                            "Listener is still online."
+                        ) -join "`n"
+                    ))
+                    Write-Warning "Build command failed: $($_.Exception.Message)"
+                }
+
+                continue
+            }
+
+            'build-status' {
+                $confirmationPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                    @(
+                        "Build status request received for '$($command.ResourceGroupName)'."
+                        "Reply with:"
+                        "1. confirm"
+                        "2. abort"
+                        ""
+                        "This confirmation expires in $ConfirmationTimeoutMinutes minutes."
+                    ) -join "`n"
+                )
+
+                try {
+                    $confirmation = Wait-FoundryTeamsChatChoice `
+                        -ChatId $chat.Id `
+                        -AllowedChoices @('confirm', 'abort') `
+                        -PromptCreatedDateTime $confirmationPrompt.CreatedDateTime `
+                        -PromptMessageId $confirmationPrompt.Id `
+                        -TimeoutMinutes $ConfirmationTimeoutMinutes `
+                        -PollIntervalSeconds $PollIntervalSeconds
+                } catch {
+                    if ($_.Exception.Message -like 'Timed out waiting for a Teams response*') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build status confirmation timed out. Listener is still online.")
+                        Write-Host "Build status confirmation timed out."
+                        continue
+                    }
+
+                    throw
+                }
+
+                if ($confirmation.Choice -eq 'abort') {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build status request for '$($command.ResourceGroupName)' aborted. Listener is still online.")
+                    Write-Host "Build status request aborted."
+                    continue
+                }
+
+                [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Build status confirmed for '$($command.ResourceGroupName)'. Gathering deployment status...")
+                Write-Host "Build status confirmed for '$($command.ResourceGroupName)'."
+                try {
+                    & $deployScript -BuildStatusResourceGroup $command.ResourceGroupName -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
+                } catch {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                        @(
+                            "Build status command failed for '$($command.ResourceGroupName)'."
+                            ""
+                            $_.Exception.Message
+                            ""
+                            "Listener is still online."
+                        ) -join "`n"
+                    ))
+                    Write-Warning "Build status command failed: $($_.Exception.Message)"
+                }
+
+                continue
             }
 
             'teardown' {
@@ -138,24 +312,48 @@ try {
                     ) -join "`n"
                 )
 
-                $confirmation = Wait-FoundryTeamsChatChoice `
-                    -ChatId $chat.Id `
-                    -AllowedChoices @('confirm teardown', 'abort') `
-                    -PromptCreatedDateTime $confirmationPrompt.CreatedDateTime `
-                    -PromptMessageId $confirmationPrompt.Id `
-                    -TimeoutMinutes $ConfirmationTimeoutMinutes `
-                    -PollIntervalSeconds $PollIntervalSeconds
+                try {
+                    $confirmation = Wait-FoundryTeamsChatChoice `
+                        -ChatId $chat.Id `
+                        -AllowedChoices @('confirm teardown', 'abort') `
+                        -PromptCreatedDateTime $confirmationPrompt.CreatedDateTime `
+                        -PromptMessageId $confirmationPrompt.Id `
+                        -TimeoutMinutes $ConfirmationTimeoutMinutes `
+                        -PollIntervalSeconds $PollIntervalSeconds
+                } catch {
+                    if ($_.Exception.Message -like 'Timed out waiting for a Teams response*') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown confirmation timed out. Listener is still online.")
+                        Write-Host "Teardown confirmation timed out."
+                        continue
+                    }
+
+                    throw
+                }
 
                 if ($confirmation.Choice -eq 'abort') {
-                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown request for '$($targetResourceGroup.ResourceGroupName)' aborted.")
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown request for '$($targetResourceGroup.ResourceGroupName)' aborted. Listener is still online.")
                     Write-Host "Teardown request aborted."
-                    return
+                    continue
                 }
 
                 [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown confirmed for '$($targetResourceGroup.ResourceGroupName)'. Starting cleanup...")
                 Write-Host "Teardown confirmed for '$($targetResourceGroup.ResourceGroupName)'. Starting cleanup..."
-                & $deployScript -Cleanup -CleanupResourceGroup $targetResourceGroup.ResourceGroupName -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
-                return
+                try {
+                    & $deployScript -Cleanup -CleanupResourceGroup $targetResourceGroup.ResourceGroupName -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
+                } catch {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                        @(
+                            "Teardown command failed for '$($targetResourceGroup.ResourceGroupName)'."
+                            ""
+                            $_.Exception.Message
+                            ""
+                            "Listener is still online."
+                        ) -join "`n"
+                    ))
+                    Write-Warning "Teardown command failed: $($_.Exception.Message)"
+                }
+
+                continue
             }
         }
     }

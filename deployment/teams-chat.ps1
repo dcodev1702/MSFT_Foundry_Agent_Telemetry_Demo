@@ -84,6 +84,42 @@ function Resolve-FoundryTeamsCommandFromMessage {
         }
     }
 
+    if ($trimmed -match '^(?i)list\s+builds$') {
+        return [pscustomobject]@{
+            CommandType = 'list-builds'
+            CommandText = $trimmed
+        }
+    }
+
+    if ($trimmed -match '^(?i)build\s+status\s+["'']?([A-Za-z0-9-]+)["'']?$') {
+        return [pscustomobject]@{
+            CommandType       = 'build-status'
+            CommandText       = $trimmed
+            ResourceGroupName = $matches[1]
+        }
+    }
+
+    if ($trimmed -match '^(?i)listener\s+status$') {
+        return [pscustomobject]@{
+            CommandType = 'listener-status'
+            CommandText = $trimmed
+        }
+    }
+
+    if ($trimmed -in @('?', 'help')) {
+        return [pscustomobject]@{
+            CommandType = 'help'
+            CommandText = $trimmed
+        }
+    }
+
+    if ($trimmed -match '^(?i)stop\s+listener$') {
+        return [pscustomobject]@{
+            CommandType = 'stop-listener'
+            CommandText = $trimmed
+        }
+    }
+
     if ($trimmed -match '^(?i)teardown\s+["'']?([A-Za-z0-9-]+)["'']?$') {
         return [pscustomobject]@{
             CommandType       = 'teardown'
