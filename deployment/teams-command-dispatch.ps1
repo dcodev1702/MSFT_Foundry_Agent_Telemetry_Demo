@@ -534,22 +534,28 @@ try {
                         -TimeoutMinutes $ConfirmationTimeoutMinutes `
                         -PollIntervalSeconds $PollIntervalSeconds
 
-                    switch ($selectionResult.Outcome) {
-                        'none-available' {
-                            [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'No managed Foundry builds are currently available for teardown. Listener is still online.')
-                            Write-Host 'No managed Foundry builds are currently available for teardown.'
-                            continue
-                        }
-                        'timed-out' {
-                            [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection timed out. Listener is still online.')
-                            Write-Host 'Teardown selection timed out.'
-                            continue
-                        }
-                        'aborted' {
-                            [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection canceled. Listener is still online.')
-                            Write-Host 'Teardown selection canceled.'
-                            continue
-                        }
+                    if ($selectionResult.Outcome -eq 'none-available') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'No managed Foundry builds are currently available for teardown. Listener is still online.')
+                        Write-Host 'No managed Foundry builds are currently available for teardown.'
+                        continue
+                    }
+
+                    if ($selectionResult.Outcome -eq 'timed-out') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection timed out. Listener is still online.')
+                        Write-Host 'Teardown selection timed out.'
+                        continue
+                    }
+
+                    if ($selectionResult.Outcome -eq 'aborted') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection canceled. Listener is still online.')
+                        Write-Host 'Teardown selection canceled.'
+                        continue
+                    }
+
+                    if ($selectionResult.Outcome -ne 'selected' -or [string]::IsNullOrWhiteSpace($selectionResult.ResourceGroupName)) {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message 'Teardown selection did not resolve to a valid build. Listener is still online.')
+                        Write-Host 'Teardown selection did not resolve to a valid build.'
+                        continue
                     }
 
                     $selectedResourceGroupName = $selectionResult.ResourceGroupName
