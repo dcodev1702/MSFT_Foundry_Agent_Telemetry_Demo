@@ -40,6 +40,82 @@ $location               = "eastus2"
 $groupDisplayName       = "zolab-ai-dev"
 $defaultModelCapacity   = 250
 
+function Get-AzureCliContext {
+    $cliContextJson = & az account show --query "{account:user.name,tenantId:tenantId,subscriptionId:id}" --output json 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $cliContextJson) {
+        return $null
+    }
+
+    $cliContextJson | ConvertFrom-Json
+}
+
+function Ensure-AzureSession {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [string]$ExpectedAccount
+    )
+
+    $targetSubscription = Get-AzSubscription -SubscriptionId $SubscriptionId -ErrorAction Stop
+    $azContext = Get-AzContext -ErrorAction SilentlyContinue
+    $needsConnect = -not $azContext -or -not $azContext.Account -or -not $azContext.Subscription
+
+    if (-not $needsConnect) {
+        $needsConnect = ($azContext.Subscription.Id -ne $SubscriptionId)
+    }
+
+    if (-not $needsConnect -and $ExpectedAccount) {
+        $needsConnect = ($azContext.Account.Id -ine $ExpectedAccount)
+    }
+
+    if (-not $needsConnect -and $azContext.Tenant -and $azContext.Tenant.Id) {
+        $needsConnect = ($azContext.Tenant.Id -ne $targetSubscription.TenantId)
+    }
+
+    if ($needsConnect) {
+        Write-Host "Refreshing Azure PowerShell context for subscription '$($targetSubscription.Name)'..."
+        $connectParams = @{
+            Tenant       = $targetSubscription.TenantId
+            Subscription = $SubscriptionId
+            ErrorAction  = 'Stop'
+        }
+        if ($ExpectedAccount) {
+            $connectParams.AccountId = $ExpectedAccount
+        }
+
+        Connect-AzAccount @connectParams | Out-Null
+    }
+
+    $azContext = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop
+
+    if ($ExpectedAccount -and $azContext.Account.Id -ine $ExpectedAccount) {
+        throw "Azure PowerShell is signed in as '$($azContext.Account.Id)', but Teams chat flow requires '$ExpectedAccount'. Reauthenticate that account and restart the listener."
+    }
+
+    $cliContext = Get-AzureCliContext
+    if (-not $cliContext) {
+        throw "Azure CLI is not authenticated. Run 'az login --tenant $($targetSubscription.TenantId)' and restart the Teams listener."
+    }
+
+    if ($ExpectedAccount -and $cliContext.account -and $cliContext.account -ine $ExpectedAccount) {
+        throw "Azure CLI is signed in as '$($cliContext.account)', but Teams chat flow requires '$ExpectedAccount'. Run 'az login --tenant $($targetSubscription.TenantId)' with that account and restart the listener."
+    }
+
+    & az account set --subscription $SubscriptionId 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to set Azure CLI subscription context to '$SubscriptionId'."
+    }
+
+    [pscustomobject]@{
+        SubscriptionId    = $SubscriptionId
+        SubscriptionName  = $targetSubscription.Name
+        TenantId          = $targetSubscription.TenantId
+        PowerShellAccount = $azContext.Account.Id
+        CliAccount        = $cliContext.account
+    }
+}
+
 function Write-BuildStatus {
     param(
         [Parameter(Mandatory)]
@@ -76,6 +152,9 @@ function Write-BuildStatus {
         [string]$AppInsightsConnectionStatus,
 
         [Parameter(Mandatory)]
+        [string]$AppInsightsAccessStatus,
+
+        [Parameter(Mandatory)]
         [string]$LawRbacStatus,
 
         [Parameter(Mandatory)]
@@ -92,6 +171,7 @@ function Write-BuildStatus {
         @{ Item = '🧠 Model'; Status = $GenAiModelDisplay },
         @{ Item = '📝 Build Info'; Status = $BuildInfoStatus },
         @{ Item = '🔗 App Insights Connection'; Status = $AppInsightsConnectionStatus },
+        @{ Item = '👁️ App Insights Access'; Status = $AppInsightsAccessStatus },
         @{ Item = '📡 LAW RBAC'; Status = $LawRbacStatus },
         @{ Item = '👤 User'; Status = $UserStatus },
         @{ Item = '🔌 Foundry Project Endpoint'; Status = $FoundryProjectEndpoint },
@@ -842,6 +922,7 @@ function Get-FoundryBuildStatusLines {
     }
 
     $lawRbacStatus = "Entra group '$GroupDisplayName' not found ❌"
+    $appInsightsAccessStatus = "Reader missing on resource group ❌"
     $userStatus = "$CurrentUserAccount membership could not be checked ❌"
     $group = Get-MgGroup -Filter "displayName eq '$GroupDisplayName'" -ErrorAction SilentlyContinue
     if ($group) {
@@ -853,6 +934,14 @@ function Get-FoundryBuildStatusLines {
             } else {
                 "$CurrentUserAccount is not a member of $GroupDisplayName ❌"
             }
+        }
+
+        $resourceGroupScope = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName"
+        $rgReaderAssignments = Get-AzRoleAssignment -ObjectId $group.Id -Scope $resourceGroupScope -RoleDefinitionName 'Reader' -ErrorAction SilentlyContinue
+        $appInsightsAccessStatus = if ($rgReaderAssignments) {
+            'Reader on resource group ✅'
+        } else {
+            'Reader missing on resource group ❌'
         }
 
         $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
@@ -882,6 +971,7 @@ function Get-FoundryBuildStatusLines {
         -FoundryProjectEndpoint $buildInfo.foundry_project_endpoint `
         -AzureOpenAIEndpoint $buildInfo.azure_openai_endpoint `
         -AppInsightsConnectionStatus $appInsightsConnectionStatus `
+        -AppInsightsAccessStatus $appInsightsAccessStatus `
         -LawRbacStatus $lawRbacStatus `
         -UserStatus $userStatus
 }
@@ -998,6 +1088,7 @@ if (-not $ctx -or $missingScopes.Count -gt 0) {
 $teamsChatId = $null
 $currentUser = $ctx
 $userId = $null
+$azureSession = $null
 
 if ($UseTeamsChatFlow) {
     if ($currentUser.Account -notmatch '@dibsecurity\.onmicrosoft\.com$') {
@@ -1010,9 +1101,11 @@ if ($UseTeamsChatFlow) {
 }
 
 # ── 3. Set Azure subscription context (both Az PowerShell and az CLI) ──
-Set-AzContext -SubscriptionId $subscriptionId | Out-Null
-az account set --subscription $subscriptionId 2>&1 | Out-Null
-Write-Host "Subscription set to zolab ($subscriptionId)"
+$azureSession = Ensure-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $currentUser.Account } else { $null })
+Write-Host "Subscription set to $($azureSession.SubscriptionName) ($subscriptionId)"
+if ($UseTeamsChatFlow) {
+    Write-Host "Azure account validated for Teams chat flow: $($azureSession.PowerShellAccount)"
+}
 
 # ════════════════════════════════════════════════════════════════
 #  CLEANUP MODE
@@ -1479,6 +1572,14 @@ try {
         'This project only ✅'
     }
 
+    $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)"
+    $rgReaderAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -RoleDefinitionName 'Reader' -ErrorAction SilentlyContinue
+    $appInsightsAccessStatus = if ($rgReaderAssignments) {
+        'Reader on resource group ✅'
+    } else {
+        'Reader missing on resource group ❌'
+    }
+
     $buildInfoPath = Get-BuildInfoPathForSuffix -Suffix $suffix
     Write-BuildInfoJson `
         -OutputPath $buildInfoPath `
@@ -1505,6 +1606,7 @@ try {
         -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
         -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
         -AppInsightsConnectionStatus $appInsightsConnectionStatus `
+        -AppInsightsAccessStatus $appInsightsAccessStatus `
         -LawRbacStatus 'Log Analytics Reader on DIBSecCom ✅' `
         -UserStatus "$($currentUser.Account) added to $groupDisplayName ✅"
     $buildStatusLines | ForEach-Object { Write-Host $_ }

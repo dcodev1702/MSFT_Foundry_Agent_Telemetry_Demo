@@ -53,6 +53,36 @@ Set-AzContext -SubscriptionId $subscriptionId | Out-Null
 $user = Get-MgUser -UserId $ctx.Account
 $chat = Get-OrCreate-FoundryTeamsChat -UserId $user.Id -Topic $TeamsChatTopic
 
+function Get-ListenerAzureContextSummary {
+    $azContext = Get-AzContext -ErrorAction SilentlyContinue
+    $cliContextJson = & az account show --query "{account:user.name,subscriptionId:id}" --output json 2>$null
+    $cliContext = if ($LASTEXITCODE -eq 0 -and $cliContextJson) {
+        $cliContextJson | ConvertFrom-Json
+    } else {
+        $null
+    }
+
+    [pscustomobject]@{
+        PowerShellAccount = if ($azContext -and $azContext.Account -and $azContext.Account.Id) {
+            $azContext.Account.Id
+        } else {
+            'Unavailable ❌'
+        }
+        CliAccount = if ($cliContext -and $cliContext.account) {
+            $cliContext.account
+        } else {
+            'Unavailable ❌'
+        }
+        SubscriptionId = if ($cliContext -and $cliContext.subscriptionId) {
+            $cliContext.subscriptionId
+        } elseif ($azContext -and $azContext.Subscription -and $azContext.Subscription.Id) {
+            $azContext.Subscription.Id
+        } else {
+            'Unavailable ❌'
+        }
+    }
+}
+
 function Get-ListenerHelpLines {
     @(
         'Foundry Teams command listener is online.'
@@ -75,6 +105,15 @@ function Get-ListenerStatusLines {
         [string]$Account,
 
         [Parameter(Mandatory)]
+        [string]$AzurePowerShellAccount,
+
+        [Parameter(Mandatory)]
+        [string]$AzureCliAccount,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [Parameter(Mandatory)]
         [string]$ChatTopic,
 
         [Parameter(Mandatory)]
@@ -92,6 +131,9 @@ function Get-ListenerStatusLines {
         ''
         "Status: Online ✅"
         "Account: $Account"
+        "Azure PowerShell account: $AzurePowerShellAccount"
+        "Azure CLI account: $AzureCliAccount"
+        "Subscription: $SubscriptionId"
         "Chat topic: $ChatTopic"
         "Process ID: $PID"
         "Command timeout: $CommandTimeoutMinutes minute(s)"
@@ -137,8 +179,12 @@ try {
             }
 
             'listener-status' {
+                $azureSummary = Get-ListenerAzureContextSummary
                 $statusLines = Get-ListenerStatusLines `
                     -Account $ctx.Account `
+                    -AzurePowerShellAccount $azureSummary.PowerShellAccount `
+                    -AzureCliAccount $azureSummary.CliAccount `
+                    -SubscriptionId $azureSummary.SubscriptionId `
                     -ChatTopic $TeamsChatTopic `
                     -CommandTimeoutMinutes $CommandTimeoutMinutes `
                     -ConfirmationTimeoutMinutes $ConfirmationTimeoutMinutes `

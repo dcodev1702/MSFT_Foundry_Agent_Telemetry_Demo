@@ -67,6 +67,7 @@ The deployment script requires an AI model selection and only allows these optio
 |---|---|
 | Azure AI Developer | Resource Group |
 | Azure AI User | Resource Group |
+| Reader | Resource Group |
 | Storage Blob Data Contributor | Resource Group |
 | Key Vault Secrets Officer | Resource Group |
 | Key Vault Crypto Officer | Resource Group |
@@ -145,9 +146,11 @@ Microsoft Graph requirements for this flow:
 Helpful notes:
 
 - The scripts reconnect with `Connect-MgGraph -ContextScope CurrentUser`, so once you consent these scopes they can be reused by later sessions under the same Windows profile.
+- Teams-triggered runs now validate both the Az PowerShell context and the Azure CLI sign-in before deployment work starts; if either one is using the wrong account, the build fails fast with a remediation message instead of creating a partially visible environment.
 - The automation intentionally uses a self-owned **group chat** named `Microsoft Foundry Deployments`; that is the supported pattern for this workflow.
+- `zolab-ai-dev` now receives `Reader` on each deployment resource group so the App Insights resource and Foundry App Insights connection remain visible after Teams-triggered builds.
 - If you change listener command handling, restart the detached listener so the running process picks up the new code.
-- Use `listener status` after startup to confirm the listener is online with the expected account, chat topic, PID, and current UTC time.
+- Use `listener status` after startup to confirm the listener is online with the expected Graph account, Azure PowerShell account, Azure CLI account, subscription, chat topic, PID, and current UTC time.
 
 ### Teams Command Listener
 

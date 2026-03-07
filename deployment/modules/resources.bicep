@@ -44,6 +44,7 @@ var aiProjectName = 'zolabai-fndry-proj-${suffix}'
 var roles = {
   azureAIDeveloper:          '64702f94-c441-49e6-a78b-ef80e0188fee'
   azureAIUser:               '53ca6127-db72-4b80-b1b0-d745d6d5456d'
+  reader:                    'acdd72a7-3385-48ef-bd42-f606fba81ae7'
   storageBlobDataContributor:'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
   keyVaultSecretsOfficer:    'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
   keyVaultCryptoOfficer:     '14b46e9e-c2b7-41b4-b07b-48a6ebf60603'
@@ -273,6 +274,15 @@ resource aiDevRoleAIUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   name: guid(resourceGroup().id, aiDevGroupObjectId, roles.azureAIUser)
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.azureAIUser)
+    principalId: aiDevGroupObjectId
+    principalType: 'Group'
+  }
+}
+
+resource aiDevRoleReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, aiDevGroupObjectId, roles.reader)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.reader)
     principalId: aiDevGroupObjectId
     principalType: 'Group'
   }
