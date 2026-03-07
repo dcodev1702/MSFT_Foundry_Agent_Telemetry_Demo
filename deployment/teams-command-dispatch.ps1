@@ -5,7 +5,7 @@
 param(
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
     [int]$CommandTimeoutMinutes = 60,
-    [int]$ConfirmationTimeoutMinutes = 30,
+    [int]$ConfirmationTimeoutMinutes = 10,
     [int]$HeartbeatIntervalMinutes = 30,
     [int]$PollIntervalSeconds = 10
 )

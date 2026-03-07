@@ -181,8 +181,9 @@ The listener validates the request, then asks for confirmation:
 - Teardown: reply `1` to confirm teardown or `2` to abort
 - Listener status / `?`: no confirmation required
 
-By default, the confirmation prompt stays open for 30 minutes before it expires.
+By default, the build, build-status, and teardown confirmation prompts stay open for 10 minutes before they expire.
 The listener also posts an automatic heartbeat to the Teams chat every 30 minutes while it remains online.
+While a build is actively running, the automation posts `🚧 One moment ..the Bob's are still building! 🚧` every 2 minutes. During teardown, it posts `🚧 Pls hold while we teardown: <resource-group> 🚧` every 2 minutes until the cleanup finishes.
 After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
 The listener stays online until you explicitly send `stop listener` in the Teams chat.
 Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph API connectivity, chat topic, and running identity.

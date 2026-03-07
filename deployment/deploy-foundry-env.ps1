@@ -149,6 +149,138 @@ function Test-GraphGroupMembership {
     $memberIds -contains $DirectoryObjectId
 }
 
+function Start-TeamsProgressNotifier {
+    param(
+        [string]$ChatId,
+        [string]$Message,
+        [string]$TeamsChatHelperPath,
+        [int]$IntervalSeconds = 120
+    )
+
+    if (-not $ChatId -or -not $Message) {
+        return $null
+    }
+
+    if (-not (Test-Path -LiteralPath $TeamsChatHelperPath)) {
+        throw "Teams chat helper script was not found at '$TeamsChatHelperPath'."
+    }
+
+    $notifierId = [guid]::NewGuid().ToString('N')
+    $tempRoot = [System.IO.Path]::GetTempPath()
+    $stopFilePath = Join-Path $tempRoot "foundry-progress-$notifierId.stop"
+    $scriptPath = Join-Path $tempRoot "foundry-progress-$notifierId.ps1"
+    $stdoutPath = Join-Path $tempRoot "foundry-progress-$notifierId.log"
+    $stderrPath = Join-Path $tempRoot "foundry-progress-$notifierId.err.log"
+    $utf8Bom = [System.Text.UTF8Encoding]::new($true)
+    $escapedTeamsChatHelperPath = $TeamsChatHelperPath.Replace("'", "''")
+    $escapedChatId = $ChatId.Replace("'", "''")
+    $escapedMessage = $Message.Replace("'", "''")
+    $escapedStopFilePath = $stopFilePath.Replace("'", "''")
+
+    $scriptContent = @"
+`$ErrorActionPreference = 'Stop'
+
+`$TeamsChatHelperPath = '$escapedTeamsChatHelperPath'
+`$ChatId = '$escapedChatId'
+`$Message = '$escapedMessage'
+`$IntervalSeconds = $IntervalSeconds
+`$StopFilePath = '$escapedStopFilePath'
+
+. `$TeamsChatHelperPath
+
+Import-Module Microsoft.Graph.Authentication
+Import-Module Microsoft.Graph.Teams
+
+`$requiredGraphScopes = @(
+    'User.Read'
+    'Chat.Create'
+    'Chat.ReadWrite'
+    'ChatMessage.Send'
+)
+
+`$ctx = Get-MgContext
+`$missingScopes = if (`$ctx) {
+    `$requiredGraphScopes | Where-Object { `$_ -notin `$ctx.Scopes }
+} else {
+    `$requiredGraphScopes
+}
+
+if (-not `$ctx -or `$missingScopes.Count -gt 0) {
+    Connect-MgGraph -Scopes `$requiredGraphScopes -ContextScope CurrentUser -NoWelcome | Out-Null
+}
+
+while (-not (Test-Path -LiteralPath `$StopFilePath)) {
+    Start-Sleep -Seconds `$IntervalSeconds
+    if (Test-Path -LiteralPath `$StopFilePath) {
+        break
+    }
+
+    [void](Send-FoundryTeamsChatMessage -ChatId `$ChatId -Message `$Message)
+}
+"@
+
+    [System.IO.File]::WriteAllText($scriptPath, $scriptContent, $utf8Bom)
+
+    $process = Start-Process -FilePath 'pwsh.exe' `
+        -ArgumentList @(
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $scriptPath
+        ) `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath `
+        -WindowStyle Hidden `
+        -PassThru
+
+    [pscustomobject]@{
+        Process      = $process
+        StopFilePath = $stopFilePath
+        ScriptPath   = $scriptPath
+        StdOutPath   = $stdoutPath
+        StdErrPath   = $stderrPath
+    }
+}
+
+function Stop-TeamsProgressNotifier {
+    param(
+        $Notifier
+    )
+
+    if (-not $Notifier) {
+        return
+    }
+
+    try {
+        if ($Notifier.StopFilePath) {
+            Set-Content -LiteralPath $Notifier.StopFilePath -Value 'stop' -Encoding ascii
+        }
+
+        $process = $Notifier.Process
+        if ($process) {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+                if (-not $process.WaitForExit(5000)) {
+                    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    } finally {
+        foreach ($path in @(
+            $Notifier.StopFilePath,
+            $Notifier.ScriptPath,
+            $Notifier.StdOutPath,
+            $Notifier.StdErrPath
+        )) {
+            if ($path -and (Test-Path -LiteralPath $path)) {
+                Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 function Write-BuildStatus {
     param(
         [Parameter(Mandatory)]
@@ -1158,180 +1290,197 @@ if ($Cleanup) {
             [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message $cleanupStartMessage)
         }
 
-        if ($CleanupResourceGroup) {
-            Write-Host "=== TARGETED CLEANUP MODE ==="
-
-            $targetResourceGroup = Get-AzResourceGroup -Name $CleanupResourceGroup -ErrorAction SilentlyContinue
-            if (-not $targetResourceGroup) {
-                throw "Resource group '$CleanupResourceGroup' was not found in subscription '$subscriptionId'."
-            }
-
-            $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
-            if ($group) {
-                $groupObjectId = $group.Id
-                Write-Host "Found Entra group '$groupDisplayName' — ObjectId: $groupObjectId"
-
-                $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$CleanupResourceGroup"
-                $rgAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -ErrorAction SilentlyContinue
-                foreach ($a in $rgAssignments) {
-                    Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
-                    Remove-AzRoleAssignment -ObjectId $groupObjectId `
-                        -RoleDefinitionName $a.RoleDefinitionName `
-                        -Scope $a.Scope `
-                        -ErrorAction SilentlyContinue
-                }
-                $rbacStatus = if ($rgAssignments) {
-                    "Removed $($rgAssignments.Count) scoped assignments from $groupDisplayName ✅"
+        $teardownProgressNotifier = $null
+        try {
+            if ($UseTeamsChatFlow -and $teamsChatId) {
+                $teardownProgressMessage = if ($CleanupResourceGroup) {
+                    "🚧 Pls hold while we teardown: $CleanupResourceGroup 🚧"
                 } else {
-                    "No scoped assignments found for $groupDisplayName ℹ️"
+                    '🚧 Pls hold while we teardown managed Foundry resources 🚧'
                 }
-            } else {
-                $rbacStatus = "Entra group '$groupDisplayName' not found; scoped RBAC cleanup skipped ℹ️"
+                $teardownProgressNotifier = Start-TeamsProgressNotifier `
+                    -ChatId $teamsChatId `
+                    -Message $teardownProgressMessage `
+                    -TeamsChatHelperPath (Join-Path $PSScriptRoot 'teams-chat.ps1')
             }
 
-            $resourceGroupCleanup = Remove-FoundryResourceGroup `
-                -ResourceGroupName $CleanupResourceGroup `
-                -Location $location `
-                -SubscriptionId $subscriptionId
+            if ($CleanupResourceGroup) {
+                Write-Host "=== TARGETED CLEANUP MODE ==="
 
-            $targetSuffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $CleanupResourceGroup
-            $deploymentName = "foundry-ai-env-$targetSuffix"
-            $deployment = Get-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
-            $deploymentRecordStatus = if ($deployment) {
-                Write-Host "Removing deployment record '$deploymentName'..."
-                Remove-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
-                "Removed $deploymentName ✅"
-            } else {
-                "No deployment record named $deploymentName found ℹ️"
-            }
-
-            $buildInfoStatus = Remove-BuildInfoForResourceGroup `
-                -ResourceGroupName $CleanupResourceGroup
-
-            $teardownStatusLines = Write-TeardownStatus `
-                -ScopeStatus "Targeted teardown for $CleanupResourceGroup" `
-                -ResourceGroupStatus $resourceGroupCleanup.ResourceGroupStatus `
-                -RbacStatus $rbacStatus `
-                -CognitiveServicesStatus $resourceGroupCleanup.CognitiveServicesStatus `
-                -DeploymentRecordStatus $deploymentRecordStatus `
-                -BuildInfoStatus $buildInfoStatus `
-                -SecurityStatus 'No Security subscription cleanup required for targeted teardown ℹ️' `
-                -UserStatus "$($currentUser.Account) unchanged in $groupDisplayName ℹ️"
-        } else {
-            Write-Host "=== CLEANUP MODE ==="
-
-            $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
-            if ($group) {
-                $groupObjectId = $group.Id
-                Write-Host "Found Entra group '$groupDisplayName' — ObjectId: $groupObjectId"
-
-                Write-Host "Removing RBAC role assignments for '$groupDisplayName'..."
-                $assignments = Get-AzRoleAssignment -ObjectId $groupObjectId -ErrorAction SilentlyContinue
-                foreach ($a in $assignments) {
-                    Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
-                    Remove-AzRoleAssignment -ObjectId $groupObjectId `
-                        -RoleDefinitionName $a.RoleDefinitionName `
-                        -Scope $a.Scope `
-                        -ErrorAction SilentlyContinue
+                $targetResourceGroup = Get-AzResourceGroup -Name $CleanupResourceGroup -ErrorAction SilentlyContinue
+                if (-not $targetResourceGroup) {
+                    throw "Resource group '$CleanupResourceGroup' was not found in subscription '$subscriptionId'."
                 }
-                $rbacStatus = if ($assignments) {
-                    "Removed $($assignments.Count) role assignments for $groupDisplayName ✅"
+
+                $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
+                if ($group) {
+                    $groupObjectId = $group.Id
+                    Write-Host "Found Entra group '$groupDisplayName' — ObjectId: $groupObjectId"
+
+                    $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$CleanupResourceGroup"
+                    $rgAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -ErrorAction SilentlyContinue
+                    foreach ($a in $rgAssignments) {
+                        Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
+                        Remove-AzRoleAssignment -ObjectId $groupObjectId `
+                            -RoleDefinitionName $a.RoleDefinitionName `
+                            -Scope $a.Scope `
+                            -ErrorAction SilentlyContinue
+                    }
+                    $rbacStatus = if ($rgAssignments) {
+                        "Removed $($rgAssignments.Count) scoped assignments from $groupDisplayName ✅"
+                    } else {
+                        "No scoped assignments found for $groupDisplayName ℹ️"
+                    }
                 } else {
-                    "No role assignments found for $groupDisplayName ℹ️"
+                    $rbacStatus = "Entra group '$groupDisplayName' not found; scoped RBAC cleanup skipped ℹ️"
                 }
 
-                $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
-                if ($isMember) {
-                    Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
-                    $userStatus = "Removed $($currentUser.Account) from $groupDisplayName ✅"
-                } else {
-                    $userStatus = "$($currentUser.Account) was not a member of $groupDisplayName ℹ️"
-                }
-            } else {
-                $rbacStatus = "Entra group '$groupDisplayName' not found; RBAC cleanup skipped ℹ️"
-                $userStatus = "Entra group '$groupDisplayName' not found ℹ️"
-            }
-
-            $rgList = Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' }
-            $resourceGroupResults = foreach ($rg in $rgList) {
-                Remove-FoundryResourceGroup `
-                    -ResourceGroupName $rg.ResourceGroupName `
+                $resourceGroupCleanup = Remove-FoundryResourceGroup `
+                    -ResourceGroupName $CleanupResourceGroup `
                     -Location $location `
                     -SubscriptionId $subscriptionId
-            }
-            $resourceGroupStatus = if ($resourceGroupResults) {
-                "Deleted $($resourceGroupResults.Count) managed resource groups ✅"
-            } else {
-                "No zolab-ai-<suffix> resource groups found ℹ️"
-            }
-            $cognitiveServicesStatus = if ($resourceGroupResults) {
-                ($resourceGroupResults | ForEach-Object { $_.CognitiveServicesStatus }) -join '; '
-            } else {
-                "No Cognitive Services purge work was required ℹ️"
-            }
 
-            $deployments = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'foundry-ai-env*' }
-            foreach ($d in $deployments) {
-                Write-Host "Removing deployment record '$($d.DeploymentName)'..."
-                Remove-AzSubscriptionDeployment -Name $d.DeploymentName -ErrorAction SilentlyContinue
-            }
-            $deploymentRecordStatus = if ($deployments) {
-                "Removed $($deployments.Count) foundry deployment records ✅"
+                $targetSuffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $CleanupResourceGroup
+                $deploymentName = "foundry-ai-env-$targetSuffix"
+                $deployment = Get-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
+                $deploymentRecordStatus = if ($deployment) {
+                    Write-Host "Removing deployment record '$deploymentName'..."
+                    Remove-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
+                    "Removed $deploymentName ✅"
+                } else {
+                    "No deployment record named $deploymentName found ℹ️"
+                }
+                
+                $buildInfoStatus = Remove-BuildInfoForResourceGroup `
+                    -ResourceGroupName $CleanupResourceGroup
+
+                $teardownStatusLines = Write-TeardownStatus `
+                    -ScopeStatus "Targeted teardown for $CleanupResourceGroup" `
+                    -ResourceGroupStatus $resourceGroupCleanup.ResourceGroupStatus `
+                    -RbacStatus $rbacStatus `
+                    -CognitiveServicesStatus $resourceGroupCleanup.CognitiveServicesStatus `
+                    -DeploymentRecordStatus $deploymentRecordStatus `
+                    -BuildInfoStatus $buildInfoStatus `
+                    -SecurityStatus 'No Security subscription cleanup required for targeted teardown ℹ️' `
+                    -UserStatus "$($currentUser.Account) unchanged in $groupDisplayName ℹ️"
             } else {
-                "No foundry deployment records found ℹ️"
-            }
+                Write-Host "=== CLEANUP MODE ==="
 
-            $securitySubId = $securitySubscriptionId
-            Write-Host "Cleaning up LAW RBAC in Security subscription..."
-            Set-AzContext -SubscriptionId $securitySubId | Out-Null
+                $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
+                if ($group) {
+                    $groupObjectId = $group.Id
+                    Write-Host "Found Entra group '$groupDisplayName' — ObjectId: $groupObjectId"
 
-            $securityStatus = "No Security cleanup required ℹ️"
-            if ($group) {
-                $lawScope = "/subscriptions/$securitySubId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
-                $lawAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $lawScope -ErrorAction SilentlyContinue
-                foreach ($a in $lawAssignments) {
-                    Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
-                    Remove-AzRoleAssignment -ObjectId $groupObjectId `
-                        -RoleDefinitionName $a.RoleDefinitionName `
-                        -Scope $a.Scope `
-                        -ErrorAction SilentlyContinue
+                    Write-Host "Removing RBAC role assignments for '$groupDisplayName'..."
+                    $assignments = Get-AzRoleAssignment -ObjectId $groupObjectId -ErrorAction SilentlyContinue
+                    foreach ($a in $assignments) {
+                        Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
+                        Remove-AzRoleAssignment -ObjectId $groupObjectId `
+                            -RoleDefinitionName $a.RoleDefinitionName `
+                            -Scope $a.Scope `
+                            -ErrorAction SilentlyContinue
+                    }
+                    $rbacStatus = if ($assignments) {
+                        "Removed $($assignments.Count) role assignments for $groupDisplayName ✅"
+                    } else {
+                        "No role assignments found for $groupDisplayName ℹ️"
+                    }
+
+                    $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
+                    if ($isMember) {
+                        Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
+                        $userStatus = "Removed $($currentUser.Account) from $groupDisplayName ✅"
+                    } else {
+                        $userStatus = "$($currentUser.Account) was not a member of $groupDisplayName ℹ️"
+                    }
+                } else {
+                    $rbacStatus = "Entra group '$groupDisplayName' not found; RBAC cleanup skipped ℹ️"
+                    $userStatus = "Entra group '$groupDisplayName' not found ℹ️"
                 }
 
-                $lawDeploys = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'law-rbac*' }
-                foreach ($d in $lawDeploys) {
+                $rgList = Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' }
+                $resourceGroupResults = foreach ($rg in $rgList) {
+                    Remove-FoundryResourceGroup `
+                        -ResourceGroupName $rg.ResourceGroupName `
+                        -Location $location `
+                        -SubscriptionId $subscriptionId
+                }
+                $resourceGroupStatus = if ($resourceGroupResults) {
+                    "Deleted $($resourceGroupResults.Count) managed resource groups ✅"
+                } else {
+                    "No zolab-ai-<suffix> resource groups found ℹ️"
+                }
+                $cognitiveServicesStatus = if ($resourceGroupResults) {
+                    ($resourceGroupResults | ForEach-Object { $_.CognitiveServicesStatus }) -join '; '
+                } else {
+                    "No Cognitive Services purge work was required ℹ️"
+                }
+
+                $deployments = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'foundry-ai-env*' }
+                foreach ($d in $deployments) {
                     Write-Host "Removing deployment record '$($d.DeploymentName)'..."
                     Remove-AzSubscriptionDeployment -Name $d.DeploymentName -ErrorAction SilentlyContinue
                 }
-
-                $securityStatus = @(
-                    if ($lawAssignments) { "Removed $($lawAssignments.Count) LAW role assignments ✅" } else { "No LAW role assignments found ℹ️" }
-                    if ($lawDeploys) { "Removed $($lawDeploys.Count) LAW deployment records ✅" } else { "No LAW deployment records found ℹ️" }
-                ) -join '; '
-            }
-
-            Set-AzContext -SubscriptionId $subscriptionId | Out-Null
-
-            $buildInfoPaths = Get-BuildInfoPaths
-            $buildInfoStatus = if ($buildInfoPaths) {
-                foreach ($path in $buildInfoPaths) {
-                    Remove-Item -LiteralPath $path -Force
-                    Write-Host "Removed stale build info file '$path'."
+                $deploymentRecordStatus = if ($deployments) {
+                    "Removed $($deployments.Count) foundry deployment records ✅"
+                } else {
+                    "No foundry deployment records found ℹ️"
                 }
-                "Removed $($buildInfoPaths.Count) build info file(s) ✅"
-            } else {
-                Write-Host "No build_info files found to remove."
-                "No build info files found ℹ️"
-            }
 
-            $teardownStatusLines = Write-TeardownStatus `
-                -ScopeStatus 'Full teardown of managed Foundry resources' `
-                -ResourceGroupStatus $resourceGroupStatus `
-                -RbacStatus $rbacStatus `
-                -CognitiveServicesStatus $cognitiveServicesStatus `
-                -DeploymentRecordStatus $deploymentRecordStatus `
-                -BuildInfoStatus $buildInfoStatus `
-                -SecurityStatus $securityStatus `
-                -UserStatus $userStatus
+                $securitySubId = $securitySubscriptionId
+                Write-Host "Cleaning up LAW RBAC in Security subscription..."
+                Set-AzContext -SubscriptionId $securitySubId | Out-Null
+
+                $securityStatus = "No Security cleanup required ℹ️"
+                if ($group) {
+                    $lawScope = "/subscriptions/$securitySubId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
+                    $lawAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $lawScope -ErrorAction SilentlyContinue
+                    foreach ($a in $lawAssignments) {
+                        Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
+                        Remove-AzRoleAssignment -ObjectId $groupObjectId `
+                            -RoleDefinitionName $a.RoleDefinitionName `
+                            -Scope $a.Scope `
+                            -ErrorAction SilentlyContinue
+                    }
+
+                    $lawDeploys = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'law-rbac*' }
+                    foreach ($d in $lawDeploys) {
+                        Write-Host "Removing deployment record '$($d.DeploymentName)'..."
+                        Remove-AzSubscriptionDeployment -Name $d.DeploymentName -ErrorAction SilentlyContinue
+                    }
+
+                    $securityStatus = @(
+                        if ($lawAssignments) { "Removed $($lawAssignments.Count) LAW role assignments ✅" } else { "No LAW role assignments found ℹ️" }
+                        if ($lawDeploys) { "Removed $($lawDeploys.Count) LAW deployment records ✅" } else { "No LAW deployment records found ℹ️" }
+                    ) -join '; '
+                }
+
+                Set-AzContext -SubscriptionId $subscriptionId | Out-Null
+
+                $buildInfoPaths = Get-BuildInfoPaths
+                $buildInfoStatus = if ($buildInfoPaths) {
+                    foreach ($path in $buildInfoPaths) {
+                        Remove-Item -LiteralPath $path -Force
+                        Write-Host "Removed stale build info file '$path'."
+                    }
+                    "Removed $($buildInfoPaths.Count) build info file(s) ✅"
+                } else {
+                    Write-Host "No build_info files found to remove."
+                    "No build info files found ℹ️"
+                }
+
+                $teardownStatusLines = Write-TeardownStatus `
+                    -ScopeStatus 'Full teardown of managed Foundry resources' `
+                    -ResourceGroupStatus $resourceGroupStatus `
+                    -RbacStatus $rbacStatus `
+                    -CognitiveServicesStatus $cognitiveServicesStatus `
+                    -DeploymentRecordStatus $deploymentRecordStatus `
+                    -BuildInfoStatus $buildInfoStatus `
+                    -SecurityStatus $securityStatus `
+                    -UserStatus $userStatus
+            }
+        } finally {
+            Stop-TeamsProgressNotifier -Notifier $teardownProgressNotifier
         }
 
         Write-Host ""
@@ -1519,144 +1668,156 @@ try {
     Write-Host "Generated suffix: $suffix"
     Write-Host "Resource group will be: zolab-ai-$suffix"
 
-    # ── Deploy Bicep (subscription-scoped via az cli) ──
-    Write-Host ""
-    Write-Host "Deploying AI Foundry environment..."
-    $deployOutput = az deployment sub create `
-        --location $location `
-        --template-file "$PSScriptRoot\main.bicep" `
-        --name "foundry-ai-env-$suffix" `
-        --parameters `
-            aiDevGroupObjectId=$groupObjectId `
-            securitySubscriptionId=$securitySubscriptionId `
-            suffix=$suffix `
-            aiModelDeploymentName=$($selectedAiModelSpec.DeploymentName) `
-            aiModelName=$($selectedAiModelSpec.ModelName) `
-            aiModelFormat=$($selectedAiModelSpec.ModelFormat) `
-            aiModelVersion=$($selectedAiModelSpec.ModelVersion) `
-            aiModelSkuName=$($selectedAiModelSpec.SkuName) `
-            aiModelSkuCapacity=$($selectedAiModelSpec.SkuCapacity) `
-        --output json 2>&1
-
-    $rawOutput = $deployOutput -join "`n"
-    $jsonStart = $rawOutput.IndexOf('{')
-    $jsonEnd = $rawOutput.LastIndexOf('}')
-    if ($jsonStart -lt 0 -or $jsonEnd -le $jsonStart) {
-        throw "No JSON found in deployment output.`n$rawOutput"
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Deployment failed.`n$rawOutput"
-    }
-
-    $jsonString = $rawOutput.Substring($jsonStart, $jsonEnd - $jsonStart + 1)
-    $result = $jsonString | ConvertFrom-Json
-
-    Write-Host ""
-    Write-Host "=== Deployment Result ==="
-    Write-Host "ProvisioningState        : $($result.properties.provisioningState)"
-    Write-Host "Resource Group           : $($result.properties.outputs.resourceGroupName.value)"
-    Write-Host "Suffix                   : $($result.properties.outputs.suffix.value)"
-    Write-Host "Storage Account          : $($result.properties.outputs.storageAccountName.value)"
-    Write-Host "Key Vault                : $($result.properties.outputs.keyVaultName.value)"
-    Write-Host "App Insights             : $($result.properties.outputs.appInsightsName.value)"
-    Write-Host "AI Foundry               : $($result.properties.outputs.aiFoundryName.value)"
-    Write-Host "AI Project               : $($result.properties.outputs.aiProjectName.value)"
-    Write-Host "AI Model Deployment      : $($result.properties.outputs.aiModelDeploymentName.value)"
-    Write-Host "Foundry Project Endpoint : $($result.properties.outputs.foundryProjectEndpoint.value)"
-    Write-Host "Azure OpenAI Endpoint    : $($result.properties.outputs.azureOpenAIEndpoint.value)"
-    Write-Host ""
-    Write-Host "Portal link:"
-    Write-Host "https://portal.azure.com/#@/resource/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/overview"
-
-    # ── Deploy LAW RBAC to Security subscription (Log Analytics Reader on DIBSecCom) ──
-    $securitySubId = $securitySubscriptionId
-    Write-Host ""
-    Write-Host "Deploying Log Analytics Reader RBAC to Security subscription..."
-    az account set --subscription $securitySubId 2>&1 | Out-Null
-
-    $lawOutput = az deployment sub create `
-        --location $location `
-        --template-file "$PSScriptRoot\law-rbac.bicep" `
-        --name "law-rbac-zolab-ai-dev" `
-        --parameters aiDevGroupObjectId=$groupObjectId `
-        --output json 2>&1
-
-    $lawExitCode = $LASTEXITCODE
-    $lawWarnings = $lawOutput | Where-Object { $_ -match '^WARNING:|^BCP\d|\.bicep\(' }
-    if ($lawWarnings) {
-        $lawWarnings | ForEach-Object { Write-Host $_ }
-    }
-
-    az account set --subscription $subscriptionId 2>&1 | Out-Null
-
-    if ($lawExitCode -ne 0) {
-        throw "LAW RBAC deployment failed.`n$($lawOutput -join "`n")"
-    }
-
-    Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on DIBSecCom workspace."
-
-    $connectionId = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/providers/Microsoft.CognitiveServices/accounts/$($result.properties.outputs.aiFoundryName.value)/projects/$($result.properties.outputs.aiProjectName.value)/connections/$($result.properties.outputs.aiFoundryName.value)-appinsights"
-    $connectionSharedToAll = az resource show `
-        --ids $connectionId `
-        --api-version 2025-06-01 `
-        --query properties.isSharedToAll `
-        --output tsv 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to resolve App Insights connection scope.`n$($connectionSharedToAll -join "`n")"
-    }
-
-    $appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLowerInvariant() -eq 'true') {
-        'Shared to all projects ✅'
-    } else {
-        'This project only ✅'
-    }
-
-    $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)"
-    $rgReaderAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -RoleDefinitionName 'Reader' -ErrorAction SilentlyContinue
-    $appInsightsAccessStatus = if ($rgReaderAssignments) {
-        'Reader on resource group ✅'
-    } else {
-        'Reader missing on resource group ❌'
-    }
-
-    $buildInfoPath = Get-BuildInfoPathForSuffix -Suffix $suffix
-    Write-BuildInfoJson `
-        -OutputPath $buildInfoPath `
-        -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
-        -AppInsightsName $result.properties.outputs.appInsightsName.value `
-        -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
-        -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
-        -StorageAccountName $result.properties.outputs.storageAccountName.value `
-        -KeyVaultName $result.properties.outputs.keyVaultName.value `
-        -GenAiModel $selectedAiModelSpec.DeploymentName `
-        -AiFoundryName $result.properties.outputs.aiFoundryName.value `
-        -AiProjectName $result.properties.outputs.aiProjectName.value
-    Write-Host "📝 Build info written to $buildInfoPath"
-
-    $buildStatusLines = Write-BuildStatus `
-        -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
-        -StorageAccountName $result.properties.outputs.storageAccountName.value `
-        -KeyVaultName $result.properties.outputs.keyVaultName.value `
-        -AppInsightsName $result.properties.outputs.appInsightsName.value `
-        -AiFoundryName $result.properties.outputs.aiFoundryName.value `
-        -AiProjectName $result.properties.outputs.aiProjectName.value `
-        -GenAiModelDisplay "$($selectedAiModelSpec.DeploymentName) ($($selectedAiModelSpec.SkuName))" `
-        -BuildInfoStatus "$(Split-Path -Leaf $buildInfoPath) ✅" `
-        -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
-        -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
-        -AppInsightsConnectionStatus $appInsightsConnectionStatus `
-        -AppInsightsAccessStatus $appInsightsAccessStatus `
-        -LawRbacStatus 'Log Analytics Reader on DIBSecCom ✅' `
-        -UserStatus "$($currentUser.Account) added to $groupDisplayName ✅"
-    $buildStatusLines | ForEach-Object { Write-Host $_ }
-
-    if ($UseTeamsChatFlow -and $teamsChatId) {
-        try {
-            [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($buildStatusLines -join "`n"))
-        } catch {
-            Write-Warning "Failed to send Teams build notification: $($_.Exception.Message)"
+    $buildProgressNotifier = $null
+    try {
+        if ($UseTeamsChatFlow -and $teamsChatId) {
+            $buildProgressNotifier = Start-TeamsProgressNotifier `
+                -ChatId $teamsChatId `
+                -Message "🚧 One moment ..the Bob's are still building! 🚧" `
+                -TeamsChatHelperPath (Join-Path $PSScriptRoot 'teams-chat.ps1')
         }
+
+        # ── Deploy Bicep (subscription-scoped via az cli) ──
+        Write-Host ""
+        Write-Host "Deploying AI Foundry environment..."
+        $deployOutput = az deployment sub create `
+            --location $location `
+            --template-file "$PSScriptRoot\main.bicep" `
+            --name "foundry-ai-env-$suffix" `
+            --parameters `
+                aiDevGroupObjectId=$groupObjectId `
+                securitySubscriptionId=$securitySubscriptionId `
+                suffix=$suffix `
+                aiModelDeploymentName=$($selectedAiModelSpec.DeploymentName) `
+                aiModelName=$($selectedAiModelSpec.ModelName) `
+                aiModelFormat=$($selectedAiModelSpec.ModelFormat) `
+                aiModelVersion=$($selectedAiModelSpec.ModelVersion) `
+                aiModelSkuName=$($selectedAiModelSpec.SkuName) `
+                aiModelSkuCapacity=$($selectedAiModelSpec.SkuCapacity) `
+            --output json 2>&1
+
+        $rawOutput = $deployOutput -join "`n"
+        $jsonStart = $rawOutput.IndexOf('{')
+        $jsonEnd = $rawOutput.LastIndexOf('}')
+        if ($jsonStart -lt 0 -or $jsonEnd -le $jsonStart) {
+            throw "No JSON found in deployment output.`n$rawOutput"
+        }
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Deployment failed.`n$rawOutput"
+        }
+
+        $jsonString = $rawOutput.Substring($jsonStart, $jsonEnd - $jsonStart + 1)
+        $result = $jsonString | ConvertFrom-Json
+
+        Write-Host ""
+        Write-Host "=== Deployment Result ==="
+        Write-Host "ProvisioningState        : $($result.properties.provisioningState)"
+        Write-Host "Resource Group           : $($result.properties.outputs.resourceGroupName.value)"
+        Write-Host "Suffix                   : $($result.properties.outputs.suffix.value)"
+        Write-Host "Storage Account          : $($result.properties.outputs.storageAccountName.value)"
+        Write-Host "Key Vault                : $($result.properties.outputs.keyVaultName.value)"
+        Write-Host "App Insights             : $($result.properties.outputs.appInsightsName.value)"
+        Write-Host "AI Foundry               : $($result.properties.outputs.aiFoundryName.value)"
+        Write-Host "AI Project               : $($result.properties.outputs.aiProjectName.value)"
+        Write-Host "AI Model Deployment      : $($result.properties.outputs.aiModelDeploymentName.value)"
+        Write-Host "Foundry Project Endpoint : $($result.properties.outputs.foundryProjectEndpoint.value)"
+        Write-Host "Azure OpenAI Endpoint    : $($result.properties.outputs.azureOpenAIEndpoint.value)"
+        Write-Host ""
+        Write-Host "Portal link:"
+        Write-Host "https://portal.azure.com/#@/resource/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/overview"
+
+        # ── Deploy LAW RBAC to Security subscription (Log Analytics Reader on DIBSecCom) ──
+        $securitySubId = $securitySubscriptionId
+        Write-Host ""
+        Write-Host "Deploying Log Analytics Reader RBAC to Security subscription..."
+        az account set --subscription $securitySubId 2>&1 | Out-Null
+
+        $lawOutput = az deployment sub create `
+            --location $location `
+            --template-file "$PSScriptRoot\law-rbac.bicep" `
+            --name "law-rbac-zolab-ai-dev" `
+            --parameters aiDevGroupObjectId=$groupObjectId `
+            --output json 2>&1
+
+        $lawExitCode = $LASTEXITCODE
+        $lawWarnings = $lawOutput | Where-Object { $_ -match '^WARNING:|^BCP\d|\.bicep\(' }
+        if ($lawWarnings) {
+            $lawWarnings | ForEach-Object { Write-Host $_ }
+        }
+
+        az account set --subscription $subscriptionId 2>&1 | Out-Null
+
+        if ($lawExitCode -ne 0) {
+            throw "LAW RBAC deployment failed.`n$($lawOutput -join "`n")"
+        }
+
+        Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on DIBSecCom workspace."
+
+        $connectionId = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/providers/Microsoft.CognitiveServices/accounts/$($result.properties.outputs.aiFoundryName.value)/projects/$($result.properties.outputs.aiProjectName.value)/connections/$($result.properties.outputs.aiFoundryName.value)-appinsights"
+        $connectionSharedToAll = az resource show `
+            --ids $connectionId `
+            --api-version 2025-06-01 `
+            --query properties.isSharedToAll `
+            --output tsv 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to resolve App Insights connection scope.`n$($connectionSharedToAll -join "`n")"
+        }
+
+        $appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLowerInvariant() -eq 'true') {
+            'Shared to all projects ✅'
+        } else {
+            'This project only ✅'
+        }
+
+        $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)"
+        $rgReaderAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -RoleDefinitionName 'Reader' -ErrorAction SilentlyContinue
+        $appInsightsAccessStatus = if ($rgReaderAssignments) {
+            'Reader on resource group ✅'
+        } else {
+            'Reader missing on resource group ❌'
+        }
+
+        $buildInfoPath = Get-BuildInfoPathForSuffix -Suffix $suffix
+        Write-BuildInfoJson `
+            -OutputPath $buildInfoPath `
+            -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
+            -AppInsightsName $result.properties.outputs.appInsightsName.value `
+            -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
+            -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
+            -StorageAccountName $result.properties.outputs.storageAccountName.value `
+            -KeyVaultName $result.properties.outputs.keyVaultName.value `
+            -GenAiModel $selectedAiModelSpec.DeploymentName `
+            -AiFoundryName $result.properties.outputs.aiFoundryName.value `
+            -AiProjectName $result.properties.outputs.aiProjectName.value
+        Write-Host "📝 Build info written to $buildInfoPath"
+
+        $buildStatusLines = Write-BuildStatus `
+            -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
+            -StorageAccountName $result.properties.outputs.storageAccountName.value `
+            -KeyVaultName $result.properties.outputs.keyVaultName.value `
+            -AppInsightsName $result.properties.outputs.appInsightsName.value `
+            -AiFoundryName $result.properties.outputs.aiFoundryName.value `
+            -AiProjectName $result.properties.outputs.aiProjectName.value `
+            -GenAiModelDisplay "$($selectedAiModelSpec.DeploymentName) ($($selectedAiModelSpec.SkuName))" `
+            -BuildInfoStatus "$(Split-Path -Leaf $buildInfoPath) ✅" `
+            -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
+            -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
+            -AppInsightsConnectionStatus $appInsightsConnectionStatus `
+            -AppInsightsAccessStatus $appInsightsAccessStatus `
+            -LawRbacStatus 'Log Analytics Reader on DIBSecCom ✅' `
+            -UserStatus "$($currentUser.Account) added to $groupDisplayName ✅"
+        $buildStatusLines | ForEach-Object { Write-Host $_ }
+
+        if ($UseTeamsChatFlow -and $teamsChatId) {
+            try {
+                [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message ($buildStatusLines -join "`n"))
+            } catch {
+                Write-Warning "Failed to send Teams build notification: $($_.Exception.Message)"
+            }
+        }
+    } finally {
+        Stop-TeamsProgressNotifier -Notifier $buildProgressNotifier
     }
 } catch {
     if ($UseTeamsChatFlow -and $teamsChatId) {
