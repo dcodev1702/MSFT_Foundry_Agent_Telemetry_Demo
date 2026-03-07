@@ -13,10 +13,11 @@ Before running the deployment, ensure the following are in place:
 | **Azure Subscriptions** | Access to both the `zolab` (workload) and `Security` (monitoring) subscriptions |
 | **Azure RBAC Permissions** | `Owner` or `Contributor` + `User Access Administrator` on the `zolab` subscription; `Contributor` on the `Security` subscription's `Sentinel` resource group |
 | **Microsoft Entra ID Permissions** | Ability to create security groups and manage members (`Group.ReadWrite.All`, `GroupMember.ReadWrite.All` in Microsoft Graph) |
+| **Teams Chat Flow (optional)** | Same-tenant Graph access in `dibsecurity.onmicrosoft.com` with delegated `User.Read`, `Chat.Create`, `Chat.ReadWrite`, and `ChatMessage.Send` |
 | **Azure CLI** | Installed and authenticated — [Install Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) |
 | **Bicep CLI** | Installed via `az bicep install` — [Install Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/install) |
 | **Az PowerShell Module** | Installed and authenticated — `Install-Module Az -Scope CurrentUser` |
-| **Microsoft.Graph PowerShell** | Auto-installed by the script if missing (`Microsoft.Graph.Groups`) |
+| **Microsoft.Graph PowerShell** | Auto-installed by the script if missing (`Microsoft.Graph.Groups`; `Microsoft.Graph.Teams` when `-UseTeamsChatFlow` is enabled) |
 
 ---
 
@@ -87,6 +88,8 @@ The deployment script requires an AI model selection and only allows these optio
 ```
 deployment/
 ├── deploy-foundry-env.ps1        # Orchestration script (deploy + cleanup)
+├── teams-command-dispatch.ps1    # Teams chat command listener for build/teardown
+├── teams-chat.ps1                # Teams chat helpers for Graph-based selection/notifications
 ├── main.bicep                    # Subscription-scoped entry point
 ├── law-rbac.bicep                # Cross-sub LAW RBAC (Security subscription)
 ├── modules/
@@ -104,6 +107,13 @@ cd deployment
 .\deploy-foundry-env.ps1
 ```
 
+Optional Teams-driven flow:
+
+```powershell
+cd deployment
+.\deploy-foundry-env.ps1 -UseTeamsChatFlow
+```
+
 The script will:
 
 1. 🔑 Resolve subscription IDs dynamically by name (`zolab` and `Security`)
@@ -116,6 +126,29 @@ The script will:
 8. 🔒 Assign RBAC roles to the `zolab-ai-dev` group and the Foundry managed identity
 9. 📊 Configure diagnostic settings on Key Vault and Blob Storage
 10. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
+
+When `-UseTeamsChatFlow` is enabled, the script creates or reuses a self-owned Teams group chat named `Microsoft Foundry Deployments`, prompts for the model selection in that chat, waits for a valid reply, and posts the final build success/failure notification there. Reply with either the menu number or the model name.
+The same Teams chat also receives a complete teardown status report after cleanup operations when `-UseTeamsChatFlow` is used.
+
+### Teams Command Listener
+
+```powershell
+cd deployment
+.\teams-command-dispatch.ps1
+```
+
+Once the listener is running, send one of these commands in the Teams chat:
+
+- `build it`
+- `teardown 'zolab-ai-6bmycg'`
+
+The listener validates the request, then asks for confirmation:
+
+- Build: reply `1` to build or `2` to abort
+- Teardown: reply `1` to confirm teardown or `2` to abort
+
+By default, the confirmation prompt stays open for 30 minutes before it expires.
+After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
 
 Upon completion, the script outputs all resource names and writes `build_info.json` at the repo root for notebook configuration.
 
@@ -142,6 +175,13 @@ The generated `build_info.json` includes:
 ```powershell
 cd deployment
 .\deploy-foundry-env.ps1 -Cleanup
+```
+
+Target a single deployment resource group:
+
+```powershell
+cd deployment
+.\deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-6bmycg
 ```
 
 Cleanup will:

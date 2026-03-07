@@ -1,0 +1,280 @@
+function Convert-TeamsChatMessageToPlainText {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Content
+    )
+
+    $text = [System.Net.WebUtility]::HtmlDecode($Content)
+    $text = [regex]::Replace($text, '<[^>]+>', ' ')
+    $text = [regex]::Replace($text, '\s+', ' ')
+    $text.Trim()
+}
+
+function Normalize-FoundryTeamsToken {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Text
+    )
+
+    ([regex]::Replace($Text.ToLowerInvariant(), '[^a-z0-9]', '')).Trim()
+}
+
+function Resolve-FoundryTeamsChoiceFromMessage {
+    param(
+        [Parameter(Mandatory)]
+        [string]$MessageText,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedChoices
+    )
+
+    $trimmed = $MessageText.Trim()
+    if (-not $trimmed) {
+        return $null
+    }
+
+    if ($trimmed -match '^\d+$') {
+        $selectedIndex = [int]$trimmed
+        if ($selectedIndex -ge 1 -and $selectedIndex -le $AllowedChoices.Count) {
+            return $AllowedChoices[$selectedIndex - 1]
+        }
+    }
+
+    $normalizedInput = Normalize-FoundryTeamsToken -Text $trimmed
+    foreach ($choice in $AllowedChoices) {
+        if ($choice.Equals($trimmed, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $choice
+        }
+
+        if ((Normalize-FoundryTeamsToken -Text $choice) -eq $normalizedInput) {
+            return $choice
+        }
+    }
+
+    $null
+}
+
+function Resolve-AiModelChoiceFromMessage {
+    param(
+        [Parameter(Mandatory)]
+        [string]$MessageText,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedChoices
+    )
+
+    Resolve-FoundryTeamsChoiceFromMessage -MessageText $MessageText -AllowedChoices $AllowedChoices
+}
+
+function Resolve-FoundryTeamsCommandFromMessage {
+    param(
+        [Parameter(Mandatory)]
+        [string]$MessageText
+    )
+
+    $trimmed = $MessageText.Trim()
+    if (-not $trimmed) {
+        return $null
+    }
+
+    if ($trimmed -match '^(?i)build\s+it$') {
+        return [pscustomobject]@{
+            CommandType = 'build'
+            CommandText = $trimmed
+        }
+    }
+
+    if ($trimmed -match '^(?i)teardown\s+["'']?([A-Za-z0-9-]+)["'']?$') {
+        return [pscustomobject]@{
+            CommandType       = 'teardown'
+            CommandText       = $trimmed
+            ResourceGroupName = $matches[1]
+        }
+    }
+
+    $null
+}
+
+function Get-OrCreate-FoundryTeamsChat {
+    param(
+        [Parameter(Mandatory)]
+        [string]$UserId,
+
+        [Parameter(Mandatory)]
+        [string]$Topic
+    )
+
+    $existingChat = Get-MgChat -All |
+        Where-Object { $_.ChatType -eq 'group' -and $_.Topic -eq $Topic } |
+        Sort-Object @{ Expression = { $_.LastUpdatedDateTime }; Descending = $true } |
+        Select-Object -First 1
+
+    if ($existingChat) {
+        return $existingChat
+    }
+
+    $selfMember = @{
+        '@odata.type'     = '#microsoft.graph.aadUserConversationMember'
+        roles             = @('owner')
+        'user@odata.bind' = "https://graph.microsoft.com/v1.0/users('$UserId')"
+    }
+
+    New-MgChat -BodyParameter @{
+        chatType = 'group'
+        topic    = $Topic
+        members  = @($selfMember)
+    }
+}
+
+function Send-FoundryTeamsChatMessage {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ChatId,
+
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    $htmlLines = foreach ($line in ($Message -split "`r?`n")) {
+        ([System.Net.WebUtility]::HtmlEncode($line)).Replace(' ', '&nbsp;')
+    }
+    $htmlMessage = $htmlLines -join '<br/>'
+
+    New-MgChatMessage -ChatId $ChatId -BodyParameter @{
+        body = @{
+            contentType = 'html'
+            content     = $htmlMessage
+        }
+    }
+}
+
+function Wait-FoundryTeamsChatChoice {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ChatId,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedChoices,
+
+        [Parameter(Mandatory)]
+        [datetime]$PromptCreatedDateTime,
+
+        [string]$PromptMessageId,
+
+        [int]$TimeoutMinutes = 30,
+
+        [int]$PollIntervalSeconds = 10
+    )
+
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $processedMessageIds = [System.Collections.Generic.HashSet[string]]::new()
+
+    while ((Get-Date) -lt $deadline) {
+        $messages = Get-MgChatMessage -ChatId $ChatId -Top 20
+        foreach ($message in ($messages | Sort-Object CreatedDateTime)) {
+            if ($PromptMessageId -and $message.Id -eq $PromptMessageId) {
+                continue
+            }
+
+            if ($message.CreatedDateTime -le $PromptCreatedDateTime) {
+                continue
+            }
+
+            if (-not $processedMessageIds.Add($message.Id)) {
+                continue
+            }
+
+            $messageText = Convert-TeamsChatMessageToPlainText -Content $message.Body.Content
+            $resolvedChoice = Resolve-FoundryTeamsChoiceFromMessage -MessageText $messageText -AllowedChoices $AllowedChoices
+            if ($resolvedChoice) {
+                return [pscustomobject]@{
+                    MessageId   = $message.Id
+                    MessageText = $messageText
+                    Choice      = $resolvedChoice
+                }
+            }
+        }
+
+        Start-Sleep -Seconds $PollIntervalSeconds
+    }
+
+    throw "Timed out waiting for a Teams response after $TimeoutMinutes minutes."
+}
+
+function Wait-FoundryTeamsChatResponse {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ChatId,
+
+        [Parameter(Mandatory)]
+        [string[]]$AllowedChoices,
+
+        [Parameter(Mandatory)]
+        [datetime]$PromptCreatedDateTime,
+
+        [string]$PromptMessageId,
+
+        [int]$TimeoutMinutes = 30,
+
+        [int]$PollIntervalSeconds = 10
+    )
+
+    Wait-FoundryTeamsChatChoice `
+        -ChatId $ChatId `
+        -AllowedChoices $AllowedChoices `
+        -PromptCreatedDateTime $PromptCreatedDateTime `
+        -PromptMessageId $PromptMessageId `
+        -TimeoutMinutes $TimeoutMinutes `
+        -PollIntervalSeconds $PollIntervalSeconds
+}
+
+function Wait-FoundryTeamsChatCommand {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ChatId,
+
+        [Parameter(Mandatory)]
+        [datetime]$PromptCreatedDateTime,
+
+        [string]$PromptMessageId,
+
+        [int]$TimeoutMinutes = 60,
+
+        [int]$PollIntervalSeconds = 10
+    )
+
+    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $processedMessageIds = [System.Collections.Generic.HashSet[string]]::new()
+
+    while ((Get-Date) -lt $deadline) {
+        $messages = Get-MgChatMessage -ChatId $ChatId -Top 20
+        foreach ($message in ($messages | Sort-Object CreatedDateTime)) {
+            if ($PromptMessageId -and $message.Id -eq $PromptMessageId) {
+                continue
+            }
+
+            if ($message.CreatedDateTime -le $PromptCreatedDateTime) {
+                continue
+            }
+
+            if (-not $processedMessageIds.Add($message.Id)) {
+                continue
+            }
+
+            $messageText = Convert-TeamsChatMessageToPlainText -Content $message.Body.Content
+            $resolvedCommand = Resolve-FoundryTeamsCommandFromMessage -MessageText $messageText
+            if ($resolvedCommand) {
+                return [pscustomobject]@{
+                    MessageId         = $message.Id
+                    MessageText       = $messageText
+                    CommandType       = $resolvedCommand.CommandType
+                    ResourceGroupName = $resolvedCommand.ResourceGroupName
+                }
+            }
+        }
+
+        Start-Sleep -Seconds $PollIntervalSeconds
+    }
+
+    throw "Timed out waiting for a Teams command after $TimeoutMinutes minutes."
+}
