@@ -130,6 +130,25 @@ The script will:
 When `-UseTeamsChatFlow` is enabled, the script creates or reuses a self-owned Teams group chat named `Microsoft Foundry Deployments`, prompts for the model selection in that chat, waits for a valid reply, and posts the final build success/failure notification there. Reply with either the menu number or the model name.
 The same Teams chat also receives a complete teardown status report after cleanup operations when `-UseTeamsChatFlow` is used.
 
+Microsoft Graph requirements for this flow:
+
+- Sign in to Microsoft Graph with the DIB tenant account that will operate the chat flow (for this repo, `lireland@dibsecurity.onmicrosoft.com`).
+- Teams chat permissions required for both the build script and the listener:
+  - `User.Read`
+  - `Chat.Create`
+  - `Chat.ReadWrite`
+  - `ChatMessage.Send`
+- Additional deployment permissions still required by `deploy-foundry-env.ps1` because it manages the `zolab-ai-dev` Entra group:
+  - `Group.ReadWrite.All`
+  - `GroupMember.ReadWrite.All`
+
+Helpful notes:
+
+- The scripts reconnect with `Connect-MgGraph -ContextScope CurrentUser`, so once you consent these scopes they can be reused by later sessions under the same Windows profile.
+- The automation intentionally uses a self-owned **group chat** named `Microsoft Foundry Deployments`; that is the supported pattern for this workflow.
+- If you change listener command handling, restart the detached listener so the running process picks up the new code.
+- Use `listener status` after startup to confirm the listener is online with the expected account, chat topic, PID, and current UTC time.
+
 ### Teams Command Listener
 
 ```powershell
