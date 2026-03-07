@@ -116,6 +116,39 @@ function Ensure-AzureSession {
     }
 }
 
+function Get-GraphUserObjectId {
+    param(
+        [string]$Account
+    )
+
+    if (-not $Account) {
+        return $null
+    }
+
+    $graphUser = Get-MgUser -UserId $Account -ErrorAction SilentlyContinue
+    if (-not $graphUser) {
+        return $null
+    }
+
+    $graphUser.Id
+}
+
+function Test-GraphGroupMembership {
+    param(
+        [string]$GroupId,
+        [string]$DirectoryObjectId
+    )
+
+    if (-not $GroupId -or -not $DirectoryObjectId) {
+        return $false
+    }
+
+    $memberIds = Get-MgGroupMember -GroupId $GroupId -All -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty Id
+
+    $memberIds -contains $DirectoryObjectId
+}
+
 function Write-BuildStatus {
     param(
         [Parameter(Mandatory)]
@@ -926,9 +959,9 @@ function Get-FoundryBuildStatusLines {
     $userStatus = "$CurrentUserAccount membership could not be checked ❌"
     $group = Get-MgGroup -Filter "displayName eq '$GroupDisplayName'" -ErrorAction SilentlyContinue
     if ($group) {
-        $statusUser = Get-MgUser -UserId $CurrentUserAccount -ErrorAction SilentlyContinue
-        if ($statusUser) {
-            $isMember = Get-MgGroupMember -GroupId $group.Id | Where-Object { $_.Id -eq $statusUser.Id }
+        $statusUserId = Get-GraphUserObjectId -Account $CurrentUserAccount
+        if ($statusUserId) {
+            $isMember = Test-GraphGroupMembership -GroupId $group.Id -DirectoryObjectId $statusUserId
             $userStatus = if ($isMember) {
                 "$CurrentUserAccount added to $GroupDisplayName ✅"
             } else {
@@ -1087,7 +1120,7 @@ if (-not $ctx -or $missingScopes.Count -gt 0) {
 
 $teamsChatId = $null
 $currentUser = $ctx
-$userId = $null
+$userId = Get-GraphUserObjectId -Account $currentUser.Account
 $azureSession = $null
 
 if ($UseTeamsChatFlow) {
@@ -1095,7 +1128,10 @@ if ($UseTeamsChatFlow) {
         throw "UseTeamsChatFlow requires a Microsoft Graph connection in the dibsecurity.onmicrosoft.com tenant."
     }
 
-    $userId = (Get-MgUser -UserId $currentUser.Account).Id
+    if (-not $userId) {
+        throw "Unable to resolve the Microsoft Graph user object for '$($currentUser.Account)'."
+    }
+
     $teamsChat = Get-OrCreate-FoundryTeamsChat -UserId $userId -Topic $TeamsChatTopic
     $teamsChatId = $teamsChat.Id
 }
@@ -1204,7 +1240,7 @@ if ($Cleanup) {
                     "No role assignments found for $groupDisplayName ℹ️"
                 }
 
-                $isMember = Get-MgGroupMember -GroupId $groupObjectId | Where-Object { $_.Id -eq $userId }
+                $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
                 if ($isMember) {
                     Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
                     $userStatus = "Removed $($currentUser.Account) from $groupDisplayName ✅"
@@ -1418,8 +1454,12 @@ try {
         throw "UseTeamsChatFlow requires a Microsoft Graph connection in the dibsecurity.onmicrosoft.com tenant."
     }
 
-    $userId = (Get-MgUser -UserId $currentUser.Account).Id
-    $isMember = Get-MgGroupMember -GroupId $groupObjectId | Where-Object { $_.Id -eq $userId }
+    $userId = Get-GraphUserObjectId -Account $currentUser.Account
+    if (-not $userId) {
+        throw "Unable to resolve the Microsoft Graph user object for '$($currentUser.Account)'."
+    }
+
+    $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
     if ($isMember) {
         Write-Host "Current user ($($currentUser.Account)) is already a member of '$groupDisplayName'"
     } else {
