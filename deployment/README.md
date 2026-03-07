@@ -135,7 +135,8 @@ The same Teams chat also receives a complete teardown status report after cleanu
 
 Microsoft Graph requirements for this flow:
 
-- Sign in to Microsoft Graph with the DIB tenant account that will operate the chat flow (`agent007@bondent.onmicrosoft.com`).
+- Sign in to Microsoft Graph with the DIB tenant account that will operate the chat flow (`lireland@DibSecurity.onmicrosoft.com`).
+- Ensure the **Microsoft Graph Command Line Tools** enterprise application in the tenant has tenant-wide admin consent for the delegated scopes used by this workflow.
 - Teams chat permissions required for both the build script and the listener:
   - `User.Read`
   - `Chat.Create`
@@ -145,9 +146,20 @@ Microsoft Graph requirements for this flow:
   - `Group.ReadWrite.All`
   - `GroupMember.ReadWrite.All`
 
+Recommended admin-consent baseline for `Microsoft Graph Command Line Tools`:
+
+- `User.Read`
+- `Chat.Create`
+- `Chat.ReadWrite`
+- `ChatMessage.Send`
+- `Group.ReadWrite.All`
+- `GroupMember.ReadWrite.All`
+
 Helpful notes:
 
-- The scripts reconnect with `Connect-MgGraph -ContextScope CurrentUser`, so once you consent these scopes they can be reused by later sessions under the same Windows profile.
+- The scripts reconnect with `Connect-MgGraph -ContextScope CurrentUser`, so once tenant-wide admin consent is in place the delegated scopes can be reused by later sessions under the same Windows profile.
+- Admin consent is persistent, but the signed-in Graph token is not. After PIM elevation, new consent, or any role/scope change, reconnect with `Connect-MgGraph` and restart the listener so it picks up a fresh token.
+- If the chat scopes are missing, or the token was issued before the latest consent/PIM state, Teams commands can appear to arrive but the listener can fail to respond. The most common symptom is `403 Forbidden` / `InsufficientPrivileges` from `New-MgChatMessage`, followed by a missing heartbeat/build-status/build reply in the chat.
 - Teams-triggered runs now validate both the Az PowerShell context and the Azure CLI sign-in before deployment work starts; if either one is using the wrong account, the build fails fast with a remediation message instead of creating a partially visible environment.
 - The automation intentionally uses a self-owned **group chat** named `Microsoft Foundry Deployments`; that is the supported pattern for this workflow.
 - `zolab-ai-dev` now receives `Reader` on each deployment resource group so the App Insights resource and Foundry App Insights connection remain visible after Teams-triggered builds.
