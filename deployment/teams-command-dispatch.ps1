@@ -6,6 +6,7 @@ param(
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
     [int]$CommandTimeoutMinutes = 60,
     [int]$ConfirmationTimeoutMinutes = 30,
+    [int]$HeartbeatIntervalMinutes = 30,
     [int]$PollIntervalSeconds = 10
 )
 
@@ -15,7 +16,8 @@ $ErrorActionPreference = "Stop"
 
 $deployScript = Join-Path $PSScriptRoot 'deploy-foundry-env.ps1'
 $subscriptionId = (Get-AzSubscription -SubscriptionName "zolab").Id
-$listenerStartTimeUtc = (Get-Date).ToUniversalTime()
+$listenerStartTime = Get-Date
+$listenerStartTimeUtc = $listenerStartTime.ToUniversalTime()
 $listenerScriptName = Split-Path -Leaf $PSCommandPath
 
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Teams)) {
@@ -182,7 +184,7 @@ function Get-ListenerHeartbeatLines {
     $uptime = if ($process) {
         Format-ListenerDuration -Duration ((Get-Date) - $process.StartTime)
     } else {
-        Format-ListenerDuration -Duration ((Get-Date).ToUniversalTime() - $listenerStartTimeUtc)
+        Format-ListenerDuration -Duration ((Get-Date) - $listenerStartTime)
     }
 
     $memoryUsage = if ($process) {
@@ -206,14 +208,12 @@ function Get-ListenerHeartbeatLines {
     }
 
     $lastResponse = if ($global:FoundryTeamsLastResponse) {
-        $sentAt = $global:FoundryTeamsLastResponse.SentAtUtc.ToString('u')
-        "$sentAt - $($global:FoundryTeamsLastResponse.Preview)"
+        $global:FoundryTeamsLastResponse.SentAtUtc.ToString('u')
     } else {
         'No Teams response has been sent yet.'
     }
 
     @(
-        '💓 Heartbeat'
         "🟢 Status: Online ✅"
         "📜 Script: $listenerScriptName"
         "🆔 PID: $PID"
@@ -221,7 +221,7 @@ function Get-ListenerHeartbeatLines {
         "⏱️ Uptime: $uptime"
         "🧠 Memory: $memoryUsage"
         "💬 Last response: $lastResponse"
-        "🔗 Graph state: $graphState 🔌"
+        "🔗 Graph API: $graphState 🔌"
         "📢 Listening in: $ChatTopic"
         "👤 Identity: $Account"
         "🕒 Checked at: $((Get-Date).ToUniversalTime().ToString('u'))"
@@ -231,24 +231,37 @@ function Get-ListenerHeartbeatLines {
 try {
     [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ((Get-ListenerHelpLines) -join "`n"))
     Write-Host "Listener online. PID=$PID Account=$($ctx.Account) Topic=$TeamsChatTopic UTC=$((Get-Date).ToUniversalTime().ToString('u'))"
+    $nextAutomaticHeartbeatUtc = $listenerStartTimeUtc.AddMinutes($HeartbeatIntervalMinutes)
 
     while ($true) {
-        $commandPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
-            @(
-                "Waiting for the next command."
-                "Send 'build it' to start a fresh deployment, 'heartbeat' for listener health, 'build status <resource-group>' to get the current deployment report, 'teardown <resource-group>' to remove a deployment, or 'stop listener' to shut me down."
-            ) -join "`n"
-        )
+        $commandWaitStartedAt = (Get-Date).ToUniversalTime()
+        $commandWaitDeadlineUtc = $commandWaitStartedAt.AddMinutes($CommandTimeoutMinutes)
+        if ($HeartbeatIntervalMinutes -gt 0 -and $nextAutomaticHeartbeatUtc -lt $commandWaitDeadlineUtc) {
+            $commandWaitDeadlineUtc = $nextAutomaticHeartbeatUtc
+        }
 
         try {
             $command = Wait-FoundryTeamsChatCommand `
                 -ChatId $chat.Id `
-                -PromptCreatedDateTime $commandPrompt.CreatedDateTime `
-                -PromptMessageId $commandPrompt.Id `
+                -PromptCreatedDateTime $commandWaitStartedAt `
+                -DeadlineAt $commandWaitDeadlineUtc `
                 -TimeoutMinutes $CommandTimeoutMinutes `
                 -PollIntervalSeconds $PollIntervalSeconds
         } catch {
             if ($_.Exception.Message -like 'Timed out waiting for a Teams command*') {
+                $currentUtc = (Get-Date).ToUniversalTime()
+                if ($HeartbeatIntervalMinutes -gt 0 -and $currentUtc -ge $nextAutomaticHeartbeatUtc) {
+                    $heartbeatLines = Get-ListenerHeartbeatLines `
+                        -Account $ctx.Account `
+                        -ChatTopic $TeamsChatTopic
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ($heartbeatLines -join "`n"))
+                    Write-Host "Automatic heartbeat sent."
+                    do {
+                        $nextAutomaticHeartbeatUtc = $nextAutomaticHeartbeatUtc.AddMinutes($HeartbeatIntervalMinutes)
+                    } while ($nextAutomaticHeartbeatUtc -le (Get-Date).ToUniversalTime())
+                    continue
+                }
+
                 Write-Host "No Teams command received during the last wait window. Continuing to listen..."
                 continue
             }

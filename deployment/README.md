@@ -182,9 +182,10 @@ The listener validates the request, then asks for confirmation:
 - Listener status / `?`: no confirmation required
 
 By default, the confirmation prompt stays open for 30 minutes before it expires.
+The listener also posts an automatic heartbeat to the Teams chat every 30 minutes while it remains online.
 After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
 The listener stays online until you explicitly send `stop listener` in the Teams chat.
-Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph state, chat topic, and running identity.
+Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph API connectivity, chat topic, and running identity.
 
 Upon completion, the script outputs all resource names and writes `build_info-<suffix>.json` at the repo root for notebook configuration.
 

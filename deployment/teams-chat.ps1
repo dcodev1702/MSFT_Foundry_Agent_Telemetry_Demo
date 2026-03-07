@@ -297,13 +297,19 @@ function Wait-FoundryTeamsChatCommand {
 
         [int]$TimeoutMinutes = 60,
 
+        [datetime]$DeadlineAt,
+
         [int]$PollIntervalSeconds = 10
     )
 
-    $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
+    $deadline = if ($PSBoundParameters.ContainsKey('DeadlineAt')) {
+        $DeadlineAt.ToUniversalTime()
+    } else {
+        (Get-Date).ToUniversalTime().AddMinutes($TimeoutMinutes)
+    }
     $processedMessageIds = [System.Collections.Generic.HashSet[string]]::new()
 
-    while ((Get-Date) -lt $deadline) {
+    while ((Get-Date).ToUniversalTime() -lt $deadline) {
         $messages = Get-MgChatMessage -ChatId $ChatId -Top 20
         foreach ($message in ($messages | Sort-Object CreatedDateTime)) {
             if ($PromptMessageId -and $message.Id -eq $PromptMessageId) {
