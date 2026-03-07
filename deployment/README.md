@@ -132,7 +132,7 @@ The same Teams chat also receives a complete teardown status report after cleanu
 
 Microsoft Graph requirements for this flow:
 
-- Sign in to Microsoft Graph with the DIB tenant account that will operate the chat flow (for this repo, `agent007@bondent.onmicrosoft.com`).
+- Sign in to Microsoft Graph with the DIB tenant account that will operate the chat flow (`agent007@bondent.onmicrosoft.com`).
 - Teams chat permissions required for both the build script and the listener:
   - `User.Read`
   - `Chat.Create`
