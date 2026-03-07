@@ -69,17 +69,64 @@ This removes the need to hardcode the Foundry project endpoint in the notebook o
 These **must** be set before calling `instrument()`:
 
 ```python
+from uuid import uuid4
+
+from azure.core.settings import settings
+from opentelemetry import baggage, context as otel_context, trace
+from opentelemetry.sdk.resources import Resource
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+settings.tracing_implementation = "opentelemetry"
+
 # ---------------------------------------------------------------------------
 # Phase 1: Trace settings (must be set before instrumentation)
 # ---------------------------------------------------------------------------
 os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
 os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = "gen_ai_latest_experimental"
 os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
-os.environ.setdefault("OTEL_SERVICE_NAME", "foundry-ai-agent-demo")
-
-# Enable end-to-end correlation between client and service spans
+os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
 os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
 os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
+
+project_name = foundry_proj_ep.rstrip("/").split("/")[-1] if "foundry_proj_ep" in globals() else "unknown-project"
+os.environ["OTEL_SERVICE_NAME"] = f"foundry-ai-agent-1702"
+os.environ["OTEL_TRACES_SAMPLER"] = "microsoft.fixed_percentage"
+os.environ["OTEL_TRACES_SAMPLER_ARG"] = "1.0"
+
+if "telemetry_session_id" not in globals():
+    telemetry_session_id = str(uuid4())
+
+# -----------------------------------------------------------------------------
+# Phase 2: Backend setup (Microsoft Foundry -> Application Insights connection)
+# -----------------------------------------------------------------------------
+application_insights_connection_string = project_client.telemetry.get_application_insights_connection_string()
+
+resource = Resource.create(
+    {
+        "service.name": os.environ["OTEL_SERVICE_NAME"],
+        "service.namespace": "foundry-agent-1702",
+        "service.instance.id": telemetry_session_id,
+        "deployment.environment": "demo",
+        "foundry.project.name": project_name,
+    }
+)
+
+# Configure Azure Monitor as the tracing backend.
+configure_azure_monitor(
+    connection_string=application_insights_connection_string,
+    resource=resource,
+    sampling_ratio=1.0,
+)
+
+# -----------------------------------------------------------------------------
+# Phase 3: SDK instrumentation
+# -----------------------------------------------------------------------------
+AIProjectInstrumentor().instrument(enable_content_recording=True)
+
+# -----------------------------------------------------------------------------
+# Phase 4: Tracer handle for custom spans in later sections
+# -----------------------------------------------------------------------------
+tracer = trace.get_tracer(__name__)
 ```
 
 ### MCP Tool Setup
