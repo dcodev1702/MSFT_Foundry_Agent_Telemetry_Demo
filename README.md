@@ -105,7 +105,7 @@ The notebook produces traces across three observability surfaces:
 
 **Application Insights**
 
-![Application Insights telemetry view for traced operations](https://github.com/user-attachments/assets/1392ab5a-b390-4e84-9113-3e67b441f0a5)
+![Application Insights telemetry view for traced operations](https://github.com/user-attachments/assets/37387f46-cc48-462a-9bb6-b42abc5f259d)
 
 **Application Insights**
 
