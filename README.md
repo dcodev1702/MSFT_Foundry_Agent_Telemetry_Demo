@@ -113,7 +113,7 @@ The notebook produces traces across three observability surfaces:
 
 **Log Analytics - End-to-End Trace Correlation**
 
-![End-to-end trace correlation view across observability tools](https://github.com/user-attachments/assets/a991fb07-9f6e-4609-a5a8-d6416d501086)
+![End-to-end trace correlation view across observability tools](https://github.com/user-attachments/assets/15cc0aea-7af5-4b9c-9b4c-a8ec86f9df9c)
 
 ---
 
