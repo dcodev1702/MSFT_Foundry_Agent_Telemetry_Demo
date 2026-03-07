@@ -1,4 +1,6 @@
 .venv/
+__pycache__/
+*.pyc
 stories.json
 .ipynb_checkpoints/
 *.jpg
