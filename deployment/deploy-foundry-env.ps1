@@ -154,7 +154,7 @@ function Start-TeamsProgressNotifier {
         [string]$ChatId,
         [string]$Message,
         [string]$TeamsChatHelperPath,
-        [int]$IntervalSeconds = 120
+        [int]$IntervalSeconds = 60
     )
 
     if (-not $ChatId -or -not $Message) {
