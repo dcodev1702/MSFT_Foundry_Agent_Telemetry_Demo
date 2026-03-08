@@ -103,8 +103,8 @@ deployment/
 
 Additional design references:
 
-- `teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
-- `teams-bot-automation-architecture-overview.docx` — human-readable architecture overview covering components, roles, phases, and operational guidance
+- `python-teams-bot-sample\teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
+- `python-teams-bot-sample\teams-bot-automation-architecture-overview.docx` — human-readable architecture overview covering components, roles, phases, and operational guidance
 
 ---
 

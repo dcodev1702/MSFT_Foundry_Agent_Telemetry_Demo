@@ -34,6 +34,8 @@ This sample is intentionally small and study-focused:
 - `models.py` - command and job models
 - `sample-worker.ps1` - PowerShell handoff example
 - `requirements.txt` - Python dependencies
+- `teams-bot-automation-implementation-guide.md` - detailed LLM-oriented implementation guide
+- `teams-bot-automation-architecture-overview.docx` - human-readable architecture overview
 
 ## Run locally
 
