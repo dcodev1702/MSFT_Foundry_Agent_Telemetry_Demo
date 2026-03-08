@@ -9,10 +9,13 @@ param location string
 @description('6-char alphanumeric suffix appended to every resource name')
 param suffix string
 
+@description('Prefix used to construct all resource names')
+param namePrefix string
+
 @description('Object ID of the zolab-ai-dev Entra security group')
 param aiDevGroupObjectId string
 
-@description('Full resource ID of the Log Analytics Workspace (DIBSecCom in Security sub)')
+@description('Full resource ID of the Log Analytics Workspace')
 param logAnalyticsWorkspaceId string
 
 @description('Deployment name to create for the selected AI model')
@@ -33,12 +36,28 @@ param aiModelSkuName string
 @description('SKU capacity for the selected AI model deployment')
 param aiModelSkuCapacity int
 
-// ── Resource Names ──
-var storageAccountName = 'zolabaifndrysa${suffix}'
-var keyVaultName = 'zolabaifndrykv${suffix}'
-var appInsightsName = 'zolabaifndryai${suffix}'
-var aiFoundryName = 'zolabai-foundry-${suffix}'
-var aiProjectName = 'zolabai-fndry-proj-${suffix}'
+// ── SKUs & Retention ──
+@description('Storage account SKU')
+param storageSkuName string
+
+@description('Storage account access tier')
+param storageAccessTier string
+
+@description('Key Vault soft-delete retention in days')
+param kvSoftDeleteRetentionDays int
+
+@description('Application Insights retention in days')
+param appInsightsRetentionDays int
+
+@description('AI Foundry (Cognitive Services) SKU')
+param aiServicesSkuName string
+
+// ── Resource Names (derived from namePrefix + suffix) ──
+var storageAccountName = '${namePrefix}fndrysa${suffix}'
+var keyVaultName       = '${namePrefix}fndrykv${suffix}'
+var appInsightsName    = '${namePrefix}fndryai${suffix}'
+var aiFoundryName      = '${namePrefix}-foundry-${suffix}'
+var aiProjectName      = '${namePrefix}-fndry-proj-${suffix}'
 
 // ── Built-in RBAC Role Definition IDs ──
 var roles = {
@@ -62,10 +81,10 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2024-01-01' = {
   location: location
   kind: 'StorageV2'
   sku: {
-    name: 'Standard_LRS'
+    name: storageSkuName
   }
   properties: {
-    accessTier: 'Hot'
+    accessTier: storageAccessTier
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
@@ -100,7 +119,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-04-01-preview' = {
     enabledForTemplateDeployment: true
     enabledForDiskEncryption: true
     enableSoftDelete: true
-    softDeleteRetentionInDays: 7
+    softDeleteRetentionInDays: kvSoftDeleteRetentionDays
     enablePurgeProtection: true
     enableRbacAuthorization: true
     publicNetworkAccess: 'Disabled'
@@ -111,7 +130,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2024-04-01-preview' = {
   }
 }
 
-// ── Application Insights (telemetry → DIBSecCom LAW in Security sub) ──
+// ── Application Insights (telemetry → LAW) ──
 resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
   name: appInsightsName
   location: location
@@ -120,7 +139,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
     Application_Type: 'web'
     IngestionMode: 'LogAnalytics'
     WorkspaceResourceId: logAnalyticsWorkspaceId
-    RetentionInDays: 90
+    RetentionInDays: appInsightsRetentionDays
     publicNetworkAccessForIngestion: 'Enabled'
     publicNetworkAccessForQuery: 'Enabled'
   }
@@ -135,7 +154,7 @@ resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
     type: 'SystemAssigned'
   }
   sku: {
-    name: 'S0'
+    name: aiServicesSkuName
   }
   properties: {
     customSubDomainName: aiFoundryName
@@ -157,8 +176,6 @@ resource aiFoundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06
 }
 
 // ── Application Insights Connection (links Foundry Traces → App Insights) ──
-// Use a project-scoped connection so Foundry shows "This project only" while
-// keeping the same target resource and connection-string-backed credentials.
 resource appInsightsConnection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-06-01' = {
   parent: aiFoundryProject
   name: '${aiFoundryName}-appinsights'
@@ -198,7 +215,7 @@ resource aiModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@202
 //  DIAGNOSTIC SETTINGS
 // ════════════════════════════════════════════════════════════════
 
-// ── Key Vault Diagnostic Settings (allLogs → DIBSecCom LAW) ──
+// ── Key Vault Diagnostic Settings (allLogs → LAW) ──
 resource kvDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: '${keyVaultName}-audit'
   scope: keyVault
@@ -224,7 +241,7 @@ resource kvDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview
   }
 }
 
-// ── Blob Storage Diagnostic Settings (allLogs → DIBSecCom LAW) ──
+// ── Blob Storage Diagnostic Settings (allLogs → LAW) ──
 resource blobService 'Microsoft.Storage/storageAccounts/blobServices@2024-01-01' existing = {
   parent: storageAccount
   name: 'default'
@@ -259,6 +276,7 @@ resource blobDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-previ
 }
 
 // ════════════════════════════════════════════════════════════════
+//  RBAC – zolab-ai-dev security group
 // ════════════════════════════════════════════════════════════════
 
 resource aiDevRoleAIDeveloper 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
