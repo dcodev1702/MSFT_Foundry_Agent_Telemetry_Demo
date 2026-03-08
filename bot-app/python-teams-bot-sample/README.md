@@ -40,7 +40,7 @@ This sample is intentionally small and study-focused:
 ## Run locally
 
 ```powershell
-cd deployment\python-teams-bot-sample
+cd bot-app\python-teams-bot-sample
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -56,7 +56,7 @@ The sample host listens on `http://localhost:3978/api/messages`.
 When the bot receives `build it`, `teardown`, `list builds`, or `build status`, it writes a JSON job file into:
 
 ```text
-deployment\python-teams-bot-sample\.queue\pending
+bot-app\python-teams-bot-sample\.queue\pending
 ```
 
 You can inspect the file or pass it to the sample PowerShell worker:
