@@ -1,4 +1,23 @@
-aiohttp
-botbuilder-core
-botbuilder-schema
-botbuilder-integration-aiohttp
+# ════════════════════════════════════════════════════════════════
+# Microsoft 365 Agents SDK + supporting packages
+# ════════════════════════════════════════════════════════════════
+
+# M365 Agents SDK (Bot Framework successor)
+microsoft-agents-activity==0.8.0
+microsoft-agents-hosting-core==0.8.0
+microsoft-agents-hosting-aiohttp==0.8.0
+microsoft-agents-hosting-teams==0.8.0
+microsoft-agents-authentication-msal==0.8.0
+
+# Web framework (required by hosting-aiohttp)
+aiohttp>=3.11.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# System metrics for heartbeat
+psutil>=5.9.0
+
+# Microsoft Graph SDK (Team + channel creation)
+msgraph-sdk>=1.0.0
+azure-identity>=1.15.0

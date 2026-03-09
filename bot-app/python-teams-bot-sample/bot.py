@@ -1,10 +1,24 @@
+# ════════════════════════════════════════════════════════════════
+# bot.py — Handler registration for the Foundry Teams Bot
+#
+# Uses the M365 Agents SDK decorator pattern to register message
+# and conversation-update handlers on an AgentApplication instance.
+#
+# All Bot Framework SDK imports have been replaced with their
+# M365 Agents SDK equivalents.
+# ════════════════════════════════════════════════════════════════
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 
-from botbuilder.core import MessageFactory, TurnContext
-from botbuilder.core.teams import TeamsActivityHandler
+from microsoft_agents.hosting.core import (
+    AgentApplication,
+    MessageFactory,
+    TurnContext,
+    TurnState,
+)
 
 from command_parser import parse_command
 from conversation_store import JsonConversationStore
@@ -12,165 +26,266 @@ from job_dispatcher import FileJobDispatcher
 from models import QueuedJob
 
 
-def utc_now() -> str:
+def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
-class FoundryTeamsBot(TeamsActivityHandler):
-    def __init__(self, dispatcher: FileJobDispatcher, store: JsonConversationStore):
-        self.dispatcher = dispatcher
-        self.store = store
-        self._last_response_utc = "No Teams response has been sent yet."
+# ── Module-level state ────────────────────────────────────────
+_last_response_utc: str = "No Teams response has been sent yet."
 
-    async def on_message_activity(self, turn_context: TurnContext):
-        self._save_conversation(turn_context)
 
-        command = parse_command(turn_context.activity.text)
+# ── Helpers ────────────────────────────────────────────────────
+
+def strip_bot_mention(text: str | None) -> str:
+    """Remove Teams <at>…</at> mention tags from message text."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"<at>.*?</at>", "", text, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _get_requester(activity) -> str:
+    """Extract a human-readable requester name from the activity."""
+    from_property = activity.from_property
+    if not from_property:
+        return "unknown-user"
+    return (
+        getattr(from_property, "name", None)
+        or getattr(from_property, "aad_object_id", None)
+        or getattr(from_property, "id", None)
+        or "unknown-user"
+    )
+
+
+def _get_conversation_scope(activity) -> str:
+    """Build a team:channel scope string from channel_data."""
+    channel_data = activity.channel_data or {}
+    team = channel_data.get("team", {})
+    channel = channel_data.get("channel", {})
+    return (
+        f"team:{team.get('id', 'unknown')}"
+        f"|channel:{channel.get('id', activity.conversation.id)}"
+    )
+
+
+def _get_help_text() -> str:
+    return "\n".join([
+        "**Supported commands:**",
+        "- `build it` — deploy with default model selection",
+        "- `build it <model>` — deploy with specified model",
+        "- `list builds` — list all active Foundry deployments",
+        "- `build status <resource-group>` — check a specific deployment",
+        "- `teardown <resource-group>` — remove a Foundry deployment",
+        "- `heartbeat` — check bot health and metrics",
+        "- `listener status` — check worker and queue status",
+        "- `help` — show this message",
+    ])
+
+
+def _get_listener_status_text(dispatcher: FileJobDispatcher) -> str:
+    app_id = os.getenv(
+        "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID", "<bot-app-id>"
+    )
+    return "\n".join([
+        "🟢 Bot status: Online ✅",
+        "⚙️ Worker status: Running",
+        f"📦 Queue depth: {dispatcher.queue_depth()}",
+        f"🤖 Bot identity: {app_id}",
+        f"🕒 Checked at: {_utc_now()}",
+    ])
+
+
+# ── Save helpers ───────────────────────────────────────────────
+
+def _save_conversation(
+    activity, store: JsonConversationStore, context: TurnContext
+) -> None:
+    """Persist conversation metadata and reference for proactive messaging."""
+    channel_data = activity.channel_data or {}
+    team = channel_data.get("team", {})
+    channel = channel_data.get("channel", {})
+    tenant = channel_data.get("tenant", {})
+
+    store.save(
+        activity.conversation.id,
+        {
+            "conversationId": activity.conversation.id,
+            "conversationType": getattr(
+                activity.conversation, "conversation_type", None
+            ),
+            "serviceUrl": activity.service_url,
+            "channelId": activity.channel_id,
+            "teamId": team.get("id"),
+            "teamsChannelId": channel.get("id"),
+            "tenantId": tenant.get("id"),
+            "savedUtc": _utc_now(),
+        },
+    )
+
+    # Save full ConversationReference for proactive messaging
+    try:
+        ref = activity.get_conversation_reference()
+        store.save_reference(
+            activity.conversation.id, ref.model_dump(by_alias=True)
+        )
+    except Exception:
+        pass  # best-effort
+
+    # Save ClaimsIdentity for proactive messaging auth
+    try:
+        identity = context.identity
+        if identity:
+            store.save_identity(
+                activity.conversation.id,
+                {
+                    "claims": dict(identity.claims) if identity.claims else {},
+                    "is_authenticated": identity.is_authenticated,
+                    "authentication_type": identity.authentication_type,
+                },
+            )
+    except Exception:
+        pass  # best-effort
+
+
+# ════════════════════════════════════════════════════════════════
+#  HANDLER REGISTRATION
+# ════════════════════════════════════════════════════════════════
+
+def register_handlers(
+    agent_app: AgentApplication,
+    *,
+    dispatcher: FileJobDispatcher,
+    store: JsonConversationStore,
+    heartbeat_service=None,
+) -> None:
+    """Register all bot message and event handlers on the AgentApplication."""
+
+    # ── Message Handler ────────────────────────────────────────
+    @agent_app.activity("message")
+    async def on_message(context: TurnContext, state: TurnState) -> None:
+        global _last_response_utc
+
+        activity = context.activity
+        _save_conversation(activity, store, context)
+
+        # Strip Teams @mention tags before parsing
+        raw_text = strip_bot_mention(activity.text)
+        command = parse_command(raw_text)
+
+        # ── Immediate-response commands ────────────────────────
+
         if command.kind == "help":
-            await self._send(turn_context, self._help_text())
+            await context.send_activity(MessageFactory.text(_get_help_text()))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
             return
 
         if command.kind == "unknown":
-            await self._send(
-                turn_context,
-                "I did not recognize that command.\n\n" + self._help_text(),
-            )
+            msg = "I did not recognize that command.\n\n" + _get_help_text()
+            await context.send_activity(MessageFactory.text(msg))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
             return
 
         if command.kind == "heartbeat":
-            await self._send(turn_context, self._heartbeat_text(turn_context))
+            channel_data = activity.channel_data or {}
+            channel = channel_data.get("channel", {})
+            team = channel_data.get("team", {})
+            listening_in = channel.get("id") or activity.conversation.id
+
+            if heartbeat_service:
+                text = heartbeat_service.get_heartbeat_text(
+                    requester=_get_requester(activity),
+                    team_id=team.get("id", "unknown"),
+                    channel_id=listening_in,
+                )
+            else:
+                text = "\n".join([
+                    "🟢 Status: Online ✅",
+                    "📜 Script: foundry-teams-bot (M365 Agents SDK)",
+                    f"🆔 PID: {os.getpid()}",
+                    f"💬 Last response: {_last_response_utc}",
+                    f"📢 Listening in: team={team.get('id', 'unknown')} "
+                    f"channel={listening_in}",
+                    f"👤 Identity: {_get_requester(activity)}",
+                    f"🕒 Checked at: {_utc_now()}",
+                ])
+
+            await context.send_activity(MessageFactory.text(text))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
             return
 
         if command.kind == "listener-status":
-            await self._send(turn_context, self._listener_status_text())
+            text = _get_listener_status_text(dispatcher)
+            await context.send_activity(MessageFactory.text(text))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
             return
+
+        # ── Queue-based commands ───────────────────────────────
 
         job = QueuedJob(
             operation=command.kind,
-            requested_by=self._requester(turn_context),
-            conversation_id=turn_context.activity.conversation.id,
-            conversation_scope=self._conversation_scope(turn_context),
+            requested_by=_get_requester(activity),
+            conversation_id=activity.conversation.id,
+            conversation_scope=_get_conversation_scope(activity),
             model=command.model,
             resource_group=command.resource_group,
             source_command=command.raw_text,
-            arguments={
-                "requiresConfirmation": command.requires_confirmation,
-            },
+            arguments={"requiresConfirmation": command.requires_confirmation},
         )
-        job_path = self.dispatcher.enqueue(job)
+        job_path = dispatcher.enqueue(job)
 
         if command.kind == "build":
             ack = (
-                f"Queued `build it` as job `{job.job_id}`.\n"
-                f"Model: `{command.model or 'prompt later / default selection path'}`\n"
-                "The worker should post `🚧 One moment ..the Bob's are still building! 🚧` every 1 minute during active deployment."
+                f"✅ Queued `build it` as job `{job.job_id}`.\n"
+                f"Model: `{command.model or 'default selection path'}`\n"
+                "The worker will post progress updates every 60 seconds "
+                "during deployment."
             )
         elif command.kind == "teardown":
             ack = (
-                f"Queued `teardown` for `{command.resource_group}` as job `{job.job_id}`.\n"
+                f"✅ Queued `teardown` for `{command.resource_group}` "
+                f"as job `{job.job_id}`.\n"
                 f"Queue file: `{job_path.name}`\n"
-                "The worker should post `🚧 Pls hold while we teardown: <resource-group> 🚧` every 1 minute during active cleanup."
+                "The worker will post progress updates every 60 seconds "
+                "during cleanup."
             )
         elif command.kind == "build-status":
             ack = (
-                f"Queued `build status` for `{command.resource_group}` as job `{job.job_id}`.\n"
+                f"✅ Queued `build status` for `{command.resource_group}` "
+                f"as job `{job.job_id}`.\n"
                 f"Queue file: `{job_path.name}`"
             )
-        else:
+        else:  # list-builds
             ack = (
-                f"Queued `list builds` as job `{job.job_id}`.\n"
+                f"✅ Queued `list builds` as job `{job.job_id}`.\n"
                 f"Queue file: `{job_path.name}`"
             )
 
-        await self._send(turn_context, ack)
+        await context.send_activity(MessageFactory.text(ack))
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
 
-    def _save_conversation(self, turn_context: TurnContext) -> None:
-        activity = turn_context.activity
-        channel_data = activity.channel_data or {}
-        team = channel_data.get("team", {})
-        channel = channel_data.get("channel", {})
-        tenant = channel_data.get("tenant", {})
+    # ── Conversation Update Handler ────────────────────────────
+    @agent_app.conversation_update("membersAdded")
+    async def on_members_added(context: TurnContext, state: TurnState) -> None:
+        _save_conversation(context.activity, store, context)
 
-        self.store.save(
-            activity.conversation.id,
-            {
-                "conversationId": activity.conversation.id,
-                "conversationType": getattr(activity.conversation, "conversation_type", None),
-                "serviceUrl": activity.service_url,
-                "channelId": activity.channel_id,
-                "teamId": team.get("id"),
-                "teamsChannelId": channel.get("id"),
-                "tenantId": tenant.get("id"),
-                "savedUtc": utc_now(),
-            },
-        )
+        for member in context.activity.members_added or []:
+            # Only send welcome when the bot itself is added
+            if member.id != context.activity.recipient.id:
+                continue
 
-    def _requester(self, turn_context: TurnContext) -> str:
-        from_property = turn_context.activity.from_property
-        if not from_property:
-            return "unknown-user"
-        return (
-            getattr(from_property, "name", None)
-            or getattr(from_property, "aad_object_id", None)
-            or getattr(from_property, "id", None)
-            or "unknown-user"
-        )
-
-    def _conversation_scope(self, turn_context: TurnContext) -> str:
-        channel_data = turn_context.activity.channel_data or {}
-        team = channel_data.get("team", {})
-        channel = channel_data.get("channel", {})
-        return f"team:{team.get('id', 'unknown')}|channel:{channel.get('id', turn_context.activity.conversation.id)}"
-
-    def _heartbeat_text(self, turn_context: TurnContext) -> str:
-        channel_data = turn_context.activity.channel_data or {}
-        channel = channel_data.get("channel", {})
-        team = channel_data.get("team", {})
-        listening_in = channel.get("id") or turn_context.activity.conversation.id
-
-        return "\n".join(
-            [
-                "🟢 Status: Online ✅",
-                "📜 Script: python-teams-bot-sample",
-                "🆔 PID: <runtime-pid>",
-                f"🖥️ pwsh version: {os.getenv('SAMPLE_WORKER_PWSH_VERSION', '<worker-pwsh-version>')}",
-                "⏱️ Uptime: <uptime>",
-                "🧠 Memory: <memory-usage>",
-                f"💬 Last response: {self._last_response_utc}",
-                "🔗 Graph API: <Connected|Disconnected> 🔌",
-                f"📢 Listening in: team={team.get('id', 'unknown')} channel={listening_in}",
-                f"👤 Identity: {self._requester(turn_context)}",
-                f"🕒 Checked at: {utc_now()}",
-            ]
-        )
-
-    def _listener_status_text(self) -> str:
-        return "\n".join(
-            [
-                "🟢 Bot status: Online ✅",
-                "⚙️ Worker status: Waiting for queue processing",
-                f"📦 Queue depth: {self.dispatcher.queue_depth()}",
-                "🤖 Bot identity: <bot-app-id>",
-                "🔐 Automation identity: <automation-app-id>",
-                f"🕒 Checked at: {utc_now()}",
-            ]
-        )
-
-    def _help_text(self) -> str:
-        return "\n".join(
-            [
-                "Supported commands:",
-                "- build it",
-                "- build it <model>",
-                "- list builds",
-                "- build status <resource-group>",
-                "- teardown <resource-group>",
-                "- heartbeat",
-                "- listener status",
-                "- help",
-            ]
-        )
-
-    async def _send(self, turn_context: TurnContext, text: str) -> None:
-        await turn_context.send_activity(MessageFactory.text(text))
-        self._last_response_utc = utc_now()
+            welcome = (
+                "👋 **Hello! I'm the Foundry Bot.**\n\n"
+                "I manage Azure AI Foundry deployments from this "
+                "Teams channel.\n\n" + _get_help_text()
+            )
+            await context.send_activity(MessageFactory.text(welcome))
