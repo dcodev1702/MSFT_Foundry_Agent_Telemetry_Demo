@@ -13,7 +13,7 @@ param(
     [switch]$ListBuilds,
     [string]$BuildStatusResourceGroup,
     [switch]$UseTeamsChatFlow,
-    [int]$TeamsChatSelectionTimeoutMinutes = 30,
+    [int]$TeamsChatSelectionTimeoutMinutes = 10,
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments'
 )
 
