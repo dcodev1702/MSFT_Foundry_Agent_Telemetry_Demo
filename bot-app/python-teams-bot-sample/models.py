@@ -20,6 +20,17 @@ class FoundryCommand:
 
 
 @dataclass(slots=True)
+class TeardownSession:
+    """Tracks multi-turn teardown selection state for a conversation."""
+    builds: list                       # [{"number": 1, "rg": "zolab-ai-xxx", "model": "gpt-4.1-mini"}, ...]
+    state: str                         # "selecting" or "confirming"
+    selected_rg: str | None = None
+    created_at: float = field(
+        default_factory=lambda: datetime.now(timezone.utc).timestamp()
+    )
+
+
+@dataclass(slots=True)
 class QueuedJob:
     operation: str
     requested_by: str

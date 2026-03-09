@@ -103,6 +103,7 @@ register_handlers(
     dispatcher=dispatcher,
     store=store,
     heartbeat_service=heartbeat_service,
+    deploy_script=DEPLOY_SCRIPT,
 )
 
 
