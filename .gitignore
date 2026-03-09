@@ -11,3 +11,8 @@ stories.json
 *.ico
 build_info.json
 build_info-*.json
+
+# Bot runtime state (file-based queue and conversation store)
+.queue/
+.state/
+.env

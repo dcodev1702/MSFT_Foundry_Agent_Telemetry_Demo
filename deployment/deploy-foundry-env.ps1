@@ -14,7 +14,8 @@ param(
     [string]$BuildStatusResourceGroup,
     [switch]$UseTeamsChatFlow,
     [int]$TeamsChatSelectionTimeoutMinutes = 30,
-    [string]$TeamsChatTopic = 'Microsoft Foundry Deployments'
+    [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
+    [string]$SelectedAiModel   # Non-interactive model selection (bypasses PromptForChoice)
 )
 
 $ErrorActionPreference = "Stop"
@@ -1761,7 +1762,22 @@ try {
     }
 
     # ── Select and validate AI model ──
-    if ($UseTeamsChatFlow) {
+    if ($SelectedAiModel) {
+        # Non-interactive path: validate against allowed list, then resolve
+        $allowedChoices = Get-AllowedAiModelChoices
+        if ($SelectedAiModel -notin $allowedChoices) {
+            throw "Invalid AI model '$SelectedAiModel'. Allowed models: $($allowedChoices -join ', ')"
+        }
+        Write-Host "Non-interactive model selection: '$SelectedAiModel'"
+        $selectedAiModelSpec = Resolve-AiModelSpecification `
+            -ModelChoice $SelectedAiModel `
+            -Location $location `
+            -SubscriptionId $subscriptionId `
+            -DefaultCapacity $defaultModelCapacity
+        if (-not $selectedAiModelSpec) {
+            throw "AI model '$SelectedAiModel' is not currently deployable in $location."
+        }
+    } elseif ($UseTeamsChatFlow) {
         $selectedAiModelSpec = Select-DeployableAiModelFromTeamsChat `
             -AllowedChoices (Get-AllowedAiModelChoices) `
             -Location $location `
