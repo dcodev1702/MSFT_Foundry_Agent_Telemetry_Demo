@@ -1,6 +1,6 @@
 ﻿# Listen for Teams chat commands and dispatch Foundry build or teardown actions.
 # Usage:
-#   .\teams-command-dispatch.ps1
+#   pwsh ./teams-command-dispatch.ps1
 
 param(
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
@@ -35,18 +35,7 @@ $requiredGraphScopes = @(
     'ChatMessage.Send'
 )
 
-$ctx = Get-MgContext
-$missingScopes = if ($ctx) {
-    $requiredGraphScopes | Where-Object { $_ -notin $ctx.Scopes }
-} else {
-    $requiredGraphScopes
-}
-
-if (-not $ctx -or $missingScopes.Count -gt 0) {
-    Write-Host "Connecting to Microsoft Graph..."
-    Connect-MgGraph -Scopes $requiredGraphScopes -ContextScope CurrentUser -NoWelcome | Out-Null
-    $ctx = Get-MgContext
-}
+$ctx = Connect-FoundryGraphIfNeeded -Scopes $requiredGraphScopes
 
 if ($ctx.Account -notmatch '@dibsecurity\.onmicrosoft\.com$') {
     throw "Teams command dispatch requires a Microsoft Graph connection in the dibsecurity.onmicrosoft.com tenant."

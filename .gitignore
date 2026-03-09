@@ -16,3 +16,4 @@ build_info-*.json
 .queue/
 .state/
 .env
+.claude/

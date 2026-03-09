@@ -1,19 +1,19 @@
 ﻿# Deploy (or clean up) Azure AI Foundry Environment
 # Pre-req: Az PowerShell, Microsoft.Graph PowerShell, Azure CLI with Bicep
 # Usage:
-#   .\deploy-foundry-env.ps1              # deploy all resources + RBAC
-#   .\deploy-foundry-env.ps1 -UseTeamsChatFlow
-#   .\deploy-foundry-env.ps1 -ListBuilds
-#   .\deploy-foundry-env.ps1 -BuildStatusResourceGroup zolab-ai-abc123
-#   .\deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-abc123
-#   .\deploy-foundry-env.ps1 -Cleanup     # tear down resources + RBAC (keeps Entra group)
+#   pwsh ./deploy-foundry-env.ps1              # deploy all resources + RBAC
+#   pwsh ./deploy-foundry-env.ps1 -UseTeamsChatFlow
+#   pwsh ./deploy-foundry-env.ps1 -ListBuilds
+#   pwsh ./deploy-foundry-env.ps1 -BuildStatusResourceGroup zolab-ai-abc123
+#   pwsh ./deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-abc123
+#   pwsh ./deploy-foundry-env.ps1 -Cleanup     # tear down resources + RBAC (keeps Entra group)
 param(
     [switch]$Cleanup,
     [string]$CleanupResourceGroup,
     [switch]$ListBuilds,
     [string]$BuildStatusResourceGroup,
     [switch]$UseTeamsChatFlow,
-    [int]$TeamsChatSelectionTimeoutMinutes = 30,
+    [int]$TeamsChatSelectionTimeoutMinutes = 10,
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
     [string]$SelectedAiModel   # Non-interactive model selection (bypasses PromptForChoice)
 )
@@ -199,19 +199,10 @@ Import-Module Microsoft.Graph.Teams
     'ChatMessage.Send'
 )
 
-`$ctx = Get-MgContext
-`$missingScopes = if (`$ctx) {
-    `$requiredGraphScopes | Where-Object { `$_ -notin `$ctx.Scopes }
-} else {
-    `$requiredGraphScopes
-}
+    [void](Connect-FoundryGraphIfNeeded -Scopes `$requiredGraphScopes)
 
-if (-not `$ctx -or `$missingScopes.Count -gt 0) {
-    Connect-MgGraph -Scopes `$requiredGraphScopes -ContextScope CurrentUser -NoWelcome | Out-Null
-}
-
-while (-not (Test-Path -LiteralPath `$StopFilePath)) {
-    Start-Sleep -Seconds `$IntervalSeconds
+    while (-not (Test-Path -LiteralPath `$StopFilePath)) {
+        Start-Sleep -Seconds `$IntervalSeconds
     if (Test-Path -LiteralPath `$StopFilePath) {
         break
     }
@@ -222,19 +213,28 @@ while (-not (Test-Path -LiteralPath `$StopFilePath)) {
 
     [System.IO.File]::WriteAllText($scriptPath, $scriptContent, $utf8Bom)
 
-    $process = Start-Process -FilePath 'pwsh.exe' `
-        -ArgumentList @(
-            '-NoLogo',
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            $scriptPath
-        ) `
-        -RedirectStandardOutput $stdoutPath `
-        -RedirectStandardError $stderrPath `
-        -WindowStyle Hidden `
-        -PassThru
+    $pwshPath = Get-FoundryPowerShellPath
+    $pwshArguments = @(
+        '-NoLogo',
+        '-NoProfile'
+    )
+    if ($IsWindows) {
+        $pwshArguments += @('-ExecutionPolicy', 'Bypass')
+    }
+    $pwshArguments += @('-File', $scriptPath)
+
+    $startProcessParams = @{
+        FilePath               = $pwshPath
+        ArgumentList           = $pwshArguments
+        RedirectStandardOutput = $stdoutPath
+        RedirectStandardError  = $stderrPath
+        PassThru               = $true
+    }
+    if ($IsWindows) {
+        $startProcessParams.WindowStyle = 'Hidden'
+    }
+
+    $process = Start-Process @startProcessParams
 
     [pscustomobject]@{
         Process      = $process
@@ -1352,18 +1352,7 @@ if ($UseTeamsChatFlow) {
     )
 }
 
-$ctx = Get-MgContext
-$missingScopes = if ($ctx) {
-    $requiredGraphScopes | Where-Object { $_ -notin $ctx.Scopes }
-} else {
-    $requiredGraphScopes
-}
-
-if (-not $ctx -or $missingScopes.Count -gt 0) {
-    Write-Host "Connecting to Microsoft Graph..."
-    Connect-MgGraph -Scopes $requiredGraphScopes -ContextScope CurrentUser -NoWelcome
-    $ctx = Get-MgContext
-}
+$ctx = Connect-FoundryGraphIfNeeded -Scopes $requiredGraphScopes
 
 $teamsChatId = $null
 $currentUser = $ctx
@@ -1828,7 +1817,7 @@ try {
         Write-Host "Deploying AI Foundry environment..."
         $deployOutput = az deployment sub create `
             --location $location `
-            --template-file "$PSScriptRoot\main.bicep" `
+            --template-file (Join-Path $PSScriptRoot 'main.bicep') `
             --name "foundry-ai-env-$suffix" `
             --parameters `
                 aiDevGroupObjectId=$groupObjectId `
@@ -1881,7 +1870,7 @@ try {
 
         $lawOutput = az deployment sub create `
             --location $location `
-            --template-file "$PSScriptRoot\law-rbac.bicep" `
+            --template-file (Join-Path $PSScriptRoot 'law-rbac.bicep') `
             --name "law-rbac-zolab-ai-dev" `
             --parameters aiDevGroupObjectId=$groupObjectId `
             --output json 2>&1
