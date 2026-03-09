@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=https://aka.ms/teams-app-test-tool-config/0.1.1/config.schema.json
+version: "0.1.1"
+tenantId: 00000000-0000-0000-0000-000000000001
+
+bot:
+  id: bot-the-builder-id
+  name: "bot-the-builder"
+
+currentUser:
+  id: user-id-0
+  name: "DCODEV1702"
+  userPrincipleName: dcodev1702@dibsecurity.onmicrosoft.com
+  aadObjectId: 00000000-0000-0000-0000-000000000020
+  givenName: DCODEV
+  surname: "1702"
+  email: dcodev1702@dibsecurity.onmicrosoft.com
+
+users:
+  - id: user-id-1
+    name: "User 2"
+    userPrincipleName: user2@example.com
+    aadObjectId: 00000000-0000-0000-0000-000000000021
+    givenName: User
+    surname: Two
+    email: user2@example.com
+  - id: user-id-2
+    name: "User 3"
+    userPrincipleName: user3@example.com
+    aadObjectId: 00000000-0000-0000-0000-000000000022
+    givenName: User
+    surname: Three
+    email: user3@example.com
+  - id: user-id-3
+    name: "User 4"
+    userPrincipleName: user4@example.com
+    aadObjectId: 00000000-0000-0000-0000-000000000023
+    givenName: User
+    surname: Four
+    email: user4@example.com
+  - id: user-id-4
+    name: "User 5"
+    userPrincipleName: user5@example.com
+    aadObjectId: 00000000-0000-0000-0000-000000000024
+    givenName: User
+    surname: Five
+    email: user5@example.com
+  - id: user-id-5
+    name: "User 6"
+    userPrincipleName: user6@example.com
+    aadObjectId: 00000000-0000-0000-0000-000000000025
+    givenName: User
+    surname: Six
+    email: user6@example.com
+
+personalChat:
+  id: personal-chat-id
+
+groupChat:
+  id: group-chat-id
+  name: Group Chat
+
+team:
+  id: team-id
+  name: Microsoft Foundry Deployments
+  aadGroupId: 00000000-0000-0000-0000-000000000031
+  channels:
+    - id: channel-bot-the-builder-id
+      name: bot-the-builder
