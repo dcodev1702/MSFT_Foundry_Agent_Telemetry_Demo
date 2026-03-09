@@ -24,6 +24,60 @@ function Normalize-FoundryTeamsToken {
     ([regex]::Replace($Text.ToLowerInvariant(), '[^a-z0-9]', '')).Trim()
 }
 
+function Get-FoundryGraphContextScope {
+    $configuredScope = $env:FOUNDRY_GRAPH_CONTEXT_SCOPE
+    if (-not [string]::IsNullOrWhiteSpace($configuredScope)) {
+        $normalizedScope = $configuredScope.Trim()
+        if ($normalizedScope -notin @('CurrentUser', 'Process')) {
+            throw "FOUNDRY_GRAPH_CONTEXT_SCOPE must be either 'CurrentUser' or 'Process'."
+        }
+
+        return $normalizedScope
+    }
+
+    'CurrentUser'
+}
+
+function Get-FoundryPowerShellPath {
+    $pwshCommand = Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue
+    if (-not $pwshCommand) {
+        throw "PowerShell 7 ('pwsh') is required but was not found on PATH."
+    }
+
+    if ($pwshCommand.Path) {
+        return $pwshCommand.Path
+    }
+
+    if ($pwshCommand.Source) {
+        return $pwshCommand.Source
+    }
+
+    $pwshCommand.Name
+}
+
+function Connect-FoundryGraphIfNeeded {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Scopes
+    )
+
+    $ctx = Get-MgContext
+    $missingScopes = if ($ctx) {
+        $Scopes | Where-Object { $_ -notin $ctx.Scopes }
+    } else {
+        $Scopes
+    }
+
+    if (-not $ctx -or $missingScopes.Count -gt 0) {
+        $graphContextScope = Get-FoundryGraphContextScope
+        Write-Host "Connecting to Microsoft Graph using ContextScope '$graphContextScope'..."
+        Connect-MgGraph -Scopes $Scopes -ContextScope $graphContextScope -NoWelcome | Out-Null
+        $ctx = Get-MgContext
+    }
+
+    $ctx
+}
+
 function Resolve-FoundryTeamsChoiceFromMessage {
     param(
         [AllowEmptyString()]

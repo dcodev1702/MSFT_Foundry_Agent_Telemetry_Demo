@@ -19,7 +19,7 @@ Before running the deployment, ensure the following are in place:
 | **Az PowerShell Module** | Installed and authenticated — `Install-Module Az -Scope CurrentUser` |
 | **Microsoft.Graph PowerShell** | Auto-installed by the script if missing (`Microsoft.Graph.Groups`; `Microsoft.Graph.Teams` when `-UseTeamsChatFlow` is enabled) |
 
-Use `pwsh` (PowerShell 7) to launch the deployment and Teams listener scripts on Windows so UTF-8 output renders and parses consistently.
+Use `pwsh` (PowerShell 7) to launch the deployment and Teams listener scripts on both macOS and Windows so the same commands, encoding, and module behavior are used everywhere.
 
 ---
 
@@ -103,9 +103,9 @@ deployment/
 
 Additional design references:
 
-- `python-teams-bot-sample\teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
-- `bot-app\docs\teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
-- `bot-app\docs\teams-bot-automation-architecture-overview.docx` — human-readable architecture overview covering components, roles, phases, and operational guidance
+- `python-teams-bot-sample/teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
+- `bot-app/docs/teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
+- `bot-app/docs/teams-bot-automation-architecture-overview.docx` — human-readable architecture overview covering components, roles, phases, and operational guidance
 
 ---
 
@@ -113,14 +113,14 @@ Additional design references:
 
 ```powershell
 cd deployment
-.\deploy-foundry-env.ps1
+pwsh ./deploy-foundry-env.ps1
 ```
 
 Optional Teams-driven flow:
 
 ```powershell
 cd deployment
-.\deploy-foundry-env.ps1 -UseTeamsChatFlow
+pwsh ./deploy-foundry-env.ps1 -UseTeamsChatFlow
 ```
 
 The script will:
@@ -163,7 +163,7 @@ Recommended admin-consent baseline for `Microsoft Graph Command Line Tools`:
 
 Helpful notes:
 
-- The scripts reconnect with `Connect-MgGraph -ContextScope CurrentUser`, so once tenant-wide admin consent is in place the delegated scopes can be reused by later sessions under the same Windows profile.
+- The scripts default to `Connect-MgGraph -ContextScope CurrentUser` on every platform so auth state can be reused consistently. If a macOS/Linux shell cannot write the Graph auth cache, either fix the cache directory permissions or override the session with `FOUNDRY_GRAPH_CONTEXT_SCOPE=Process`.
 - Admin consent is persistent, but the signed-in Graph token is not. After PIM elevation, new consent, or any role/scope change, reconnect with `Connect-MgGraph` and restart the listener so it picks up a fresh token.
 - If the chat scopes are missing, or the token was issued before the latest consent/PIM state, Teams commands can appear to arrive but the listener can fail to respond. The most common symptom is `403 Forbidden` / `InsufficientPrivileges` from `New-MgChatMessage`, followed by a missing heartbeat/build-status/build reply in the chat.
 - Teams-triggered runs now validate both the Az PowerShell context and the Azure CLI sign-in before deployment work starts; if either one is using the wrong account, the build fails fast with a remediation message instead of creating a partially visible environment.
@@ -176,7 +176,7 @@ Helpful notes:
 
 ```powershell
 cd deployment
-pwsh .\teams-command-dispatch.ps1
+pwsh ./teams-command-dispatch.ps1
 ```
 
 Once the listener is running, send one of these commands in the Teams chat:
@@ -232,14 +232,14 @@ The generated `build_info-<suffix>.json` includes:
 
 ```powershell
 cd deployment
-.\deploy-foundry-env.ps1 -Cleanup
+pwsh ./deploy-foundry-env.ps1 -Cleanup
 ```
 
 Target a single deployment resource group:
 
 ```powershell
 cd deployment
-.\deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-6bmycg
+pwsh ./deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-6bmycg
 ```
 
 Cleanup will:
