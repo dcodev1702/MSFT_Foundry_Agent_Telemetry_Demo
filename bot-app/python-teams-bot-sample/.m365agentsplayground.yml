@@ -54,6 +54,7 @@ users:
 
 personalChat:
   id: personal-chat-id
+  name: "Microsoft Foundry Deployment"
 
 groupChat:
   id: group-chat-id
