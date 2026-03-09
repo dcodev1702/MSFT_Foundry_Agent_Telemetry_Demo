@@ -69,7 +69,7 @@ def _get_conversation_scope(activity) -> str:
 
 
 def _get_help_text() -> str:
-    return "\n".join([
+    return "<br>".join([
         "**Supported commands:**",
         "- `build it` — deploy with default model selection",
         "- `build it <model>` — deploy with specified model",
@@ -86,7 +86,7 @@ def _get_listener_status_text(dispatcher: FileJobDispatcher) -> str:
     app_id = os.getenv(
         "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID", "<bot-app-id>"
     )
-    return "\n".join([
+    return "<br>".join([
         "🟢 Bot status: Online ✅",
         "⚙️ Worker status: Running",
         f"📦 Queue depth: {dispatcher.queue_depth()}",
@@ -202,7 +202,7 @@ def register_handlers(
                     channel_id=listening_in,
                 )
             else:
-                text = "\n".join([
+                text = "<br>".join([
                     "🟢 Status: Online ✅",
                     "📜 Script: foundry-teams-bot (M365 Agents SDK)",
                     f"🆔 PID: {os.getpid()}",

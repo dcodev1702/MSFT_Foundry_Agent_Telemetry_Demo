@@ -99,4 +99,4 @@ class HeartbeatService:
 
         lines.append(f"🕒 Checked at: {now.strftime('%Y-%m-%d %H:%M:%SZ')}")
 
-        return "\n".join(lines)
+        return "<br>".join(lines)
