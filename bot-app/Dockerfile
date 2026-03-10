@@ -11,7 +11,7 @@
 #   docker run -p 8000:8000 --env-file bot-app/python-teams-bot-sample/.env zolab-bot:latest
 # ════════════════════════════════════════════════════════════════
 
-FROM python:3.14-slim AS base
+FROM python:3.13-slim-bookworm AS base
 
 # Avoid interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -73,13 +73,6 @@ COPY bot-app/python-teams-bot-sample/ /app/bot-app/python-teams-bot-sample/
 
 # ── Python dependencies ──────────────────────────────────────────
 RUN pip install --no-cache-dir -r /app/bot-app/python-teams-bot-sample/requirements.txt
-
-# ── Runtime directories ──────────────────────────────────────────
-RUN mkdir -p /app/bot-app/python-teams-bot-sample/.queue/pending \
-             /app/bot-app/python-teams-bot-sample/.queue/running \
-             /app/bot-app/python-teams-bot-sample/.queue/completed \
-             /app/bot-app/python-teams-bot-sample/.queue/failed \
-             /app/bot-app/python-teams-bot-sample/.state
 
 # ── Startup ──────────────────────────────────────────────────────
 WORKDIR /app/bot-app/python-teams-bot-sample
