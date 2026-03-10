@@ -21,7 +21,9 @@ ALLOWED_MODELS: list[str] = [
 
 @dataclass(slots=True)
 class BuildSession:
-    """Tracks model selection state for a bare 'build it' command."""
+    """Tracks model selection + confirmation state for build commands."""
+    state: str = "selecting"              # "selecting" or "confirming"
+    selected_model: str | None = None
     created_at: float = field(
         default_factory=lambda: datetime.now(timezone.utc).timestamp()
     )

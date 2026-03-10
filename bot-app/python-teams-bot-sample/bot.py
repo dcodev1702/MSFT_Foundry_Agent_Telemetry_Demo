@@ -341,69 +341,108 @@ async def _handle_build_selection(
     dispatcher: FileJobDispatcher,
     heartbeat_service=None,
 ) -> None:
-    """Process a user's model-selection reply during an active BuildSession."""
+    """Process a user's reply during an active BuildSession."""
     global _last_response_utc
     activity = context.activity
-    choice = raw_text.strip()
+    session = _build_sessions[conv_id]
+    choice = raw_text.strip().lower()
 
-    # Cancel
-    if choice.lower() == "cancel":
-        del _build_sessions[conv_id]
-        await context.send_activity(
-            MessageFactory.text("Build cancelled.")
-        )
-        _last_response_utc = _utc_now()
-        if heartbeat_service:
-            heartbeat_service.update_last_response(_last_response_utc)
-        return
-
-    # Resolve model — by number or name
-    selected_model: str | None = None
-
-    if choice.isdigit():
-        idx = int(choice)
-        if 1 <= idx <= len(ALLOWED_MODELS):
-            selected_model = ALLOWED_MODELS[idx - 1]
-    else:
-        for model in ALLOWED_MODELS:
-            if choice.lower() == model.lower():
-                selected_model = model
-                break
-
-    if selected_model is None:
-        await context.send_activity(
-            MessageFactory.text(
-                f"Invalid selection: `{choice}`\n\n" + _model_selection_prompt()
+    # ── Selecting state: user is picking a model ──────────────
+    if session.state == "selecting":
+        if choice == "cancel":
+            del _build_sessions[conv_id]
+            await context.send_activity(
+                MessageFactory.text("Build cancelled.")
             )
-        )
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # Resolve model — by number or name
+        selected_model: str | None = None
+        raw_choice = raw_text.strip()
+
+        if raw_choice.isdigit():
+            idx = int(raw_choice)
+            if 1 <= idx <= len(ALLOWED_MODELS):
+                selected_model = ALLOWED_MODELS[idx - 1]
+        else:
+            for model in ALLOWED_MODELS:
+                if choice == model.lower():
+                    selected_model = model
+                    break
+
+        if selected_model is None:
+            await context.send_activity(
+                MessageFactory.text(
+                    f"Invalid selection: `{raw_choice}`\n\n"
+                    + _model_selection_prompt()
+                )
+            )
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # Transition to confirming
+        session.state = "confirming"
+        session.selected_model = selected_model
+
+        await context.send_activity(MessageFactory.text(
+            f"⚠️ **Confirm build with model `{selected_model}`?**\n\n"
+            f"Reply `confirm` to proceed or `abort` to cancel."
+        ))
         _last_response_utc = _utc_now()
         if heartbeat_service:
             heartbeat_service.update_last_response(_last_response_utc)
         return
 
-    # Valid model — clear session and queue the build
-    del _build_sessions[conv_id]
+    # ── Confirming state: user confirms or aborts ─────────────
+    if session.state == "confirming":
+        if choice == "confirm":
+            selected_model = session.selected_model
+            del _build_sessions[conv_id]
 
-    job = QueuedJob(
-        operation="build",
-        requested_by=_get_requester(activity),
-        conversation_id=conv_id,
-        conversation_scope=_get_conversation_scope(activity),
-        model=selected_model,
-        source_command=f"build it {selected_model}",
-    )
-    dispatcher.enqueue(job)
+            job = QueuedJob(
+                operation="build",
+                requested_by=_get_requester(activity),
+                conversation_id=conv_id,
+                conversation_scope=_get_conversation_scope(activity),
+                model=selected_model,
+                source_command=f"build it {selected_model}",
+            )
+            dispatcher.enqueue(job)
 
-    ack = (
-        f"✅ Queued `build it` as job `{job.job_id}`.\n"
-        f"Model: `{selected_model}`\n"
-        "The worker will post progress updates every 60 seconds "
-        "during deployment."
-    )
-    await context.send_activity(MessageFactory.text(ack))
-    _last_response_utc = _utc_now()
-    if heartbeat_service:
-        heartbeat_service.update_last_response(_last_response_utc)
+            ack = (
+                f"✅ Queued `build it` as job `{job.job_id}`.\n"
+                f"Model: `{selected_model}`\n"
+                "The worker will post progress updates every 60 seconds "
+                "during deployment."
+            )
+            await context.send_activity(MessageFactory.text(ack))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        if choice in ("abort", "cancel"):
+            del _build_sessions[conv_id]
+            await context.send_activity(
+                MessageFactory.text("Build cancelled.")
+            )
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # Unrecognized input during confirmation
+        await context.send_activity(MessageFactory.text(
+            "Reply `confirm` to proceed or `abort` to cancel."
+        ))
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -573,7 +612,7 @@ def register_handlers(
 
         # ── Queue-based commands ───────────────────────────────
 
-        # Build requires a valid model — start selection if missing/invalid
+        # Build requires a valid model + confirmation
         if command.kind == "build":
             if command.model is None:
                 _build_sessions[conv_id] = BuildSession()
@@ -598,6 +637,36 @@ def register_handlers(
                     heartbeat_service.update_last_response(_last_response_utc)
                 return
 
+            # Valid model specified — skip to confirmation
+            _build_sessions[conv_id] = BuildSession(
+                state="confirming", selected_model=command.model,
+            )
+            await context.send_activity(MessageFactory.text(
+                f"⚠️ **Confirm build with model `{command.model}`?**\n\n"
+                f"Reply `confirm` to proceed or `abort` to cancel."
+            ))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # Teardown with explicit RG — requires confirmation
+        if command.kind == "teardown":
+            _teardown_sessions[conv_id] = TeardownSession(
+                builds=[], state="confirming",
+                selected_rg=command.resource_group,
+            )
+            await context.send_activity(MessageFactory.text(
+                f"⚠️ **Confirm teardown of `{command.resource_group}`?**\n\n"
+                f"Reply `confirm` to proceed or `abort` to cancel."
+            ))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # ── Non-destructive queue commands (no confirmation) ──
+
         job = QueuedJob(
             operation=command.kind,
             requested_by=_get_requester(activity),
@@ -610,22 +679,7 @@ def register_handlers(
         )
         job_path = dispatcher.enqueue(job)
 
-        if command.kind == "build":
-            ack = (
-                f"✅ Queued `build it` as job `{job.job_id}`.\n"
-                f"Model: `{command.model}`\n"
-                "The worker will post progress updates every 60 seconds "
-                "during deployment."
-            )
-        elif command.kind == "teardown":
-            ack = (
-                f"✅ Queued `teardown` for `{command.resource_group}` "
-                f"as job `{job.job_id}`.\n"
-                f"Queue file: `{job_path.name}`\n"
-                "The worker will post progress updates every 60 seconds "
-                "during cleanup."
-            )
-        elif command.kind == "build-status":
+        if command.kind == "build-status":
             ack = (
                 f"✅ Queued `build status` for `{command.resource_group}` "
                 f"as job `{job.job_id}`.\n"
