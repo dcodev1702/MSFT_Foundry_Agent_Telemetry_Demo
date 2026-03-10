@@ -10,6 +10,23 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
 
 
+# Must match PowerShell's Get-AllowedAiModelChoices (deploy-foundry-env.ps1)
+ALLOWED_MODELS: list[str] = [
+    "gpt-4.1-mini",
+    "gpt-5.3",
+    "gpt-5.4",
+    "grok-4-1-fast-reasoning",
+]
+
+
+@dataclass(slots=True)
+class BuildSession:
+    """Tracks model selection state for a bare 'build it' command."""
+    created_at: float = field(
+        default_factory=lambda: datetime.now(timezone.utc).timestamp()
+    )
+
+
 @dataclass(slots=True)
 class FoundryCommand:
     kind: str

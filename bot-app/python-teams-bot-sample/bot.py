@@ -27,7 +27,7 @@ from microsoft_agents.hosting.core import (
 from command_parser import parse_command
 from conversation_store import JsonConversationStore
 from job_dispatcher import FileJobDispatcher
-from models import QueuedJob, TeardownSession
+from models import ALLOWED_MODELS, BuildSession, QueuedJob, TeardownSession
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +39,28 @@ def _utc_now() -> str:
 # ── Module-level state ────────────────────────────────────────
 _last_response_utc: str = "No Teams response has been sent yet."
 
+# Build model-selection sessions — keyed by conversation ID
+_build_sessions: dict[str, BuildSession] = {}
+BUILD_SESSION_TIMEOUT = 600  # 10 minutes
+
 # Teardown session state — keyed by conversation ID
 _teardown_sessions: dict[str, TeardownSession] = {}
-SESSION_TIMEOUT = 300  # 5 minutes
+TEARDOWN_SESSION_TIMEOUT = 300  # 5 minutes
 
 
-# ── Teardown session helpers ──────────────────────────────────
+# ── Session helpers ───────────────────────────────────────────
 
 def _expire_sessions() -> None:
-    """Remove expired teardown sessions."""
+    """Remove expired build and teardown sessions."""
     now = time.time()
-    expired = [k for k, v in _teardown_sessions.items()
-               if now - v.created_at > SESSION_TIMEOUT]
-    for k in expired:
+    expired_build = [k for k, v in _build_sessions.items()
+                     if now - v.created_at > BUILD_SESSION_TIMEOUT]
+    for k in expired_build:
+        del _build_sessions[k]
+
+    expired_teardown = [k for k, v in _teardown_sessions.items()
+                        if now - v.created_at > TEARDOWN_SESSION_TIMEOUT]
+    for k in expired_teardown:
         del _teardown_sessions[k]
 
 
@@ -138,7 +147,7 @@ def _get_conversation_scope(activity) -> str:
 def _get_help_text() -> str:
     return "<br>".join([
         "**Supported commands:**",
-        "- `build it` — deploy with default model selection",
+        "- `build it` — deploy (prompts for model selection)",
         "- `build it <model>` — deploy with specified model",
         "- `list builds` — list all active Foundry deployments",
         "- `build status <resource-group>` — check a specific deployment",
@@ -161,6 +170,17 @@ def _get_listener_status_text(dispatcher: FileJobDispatcher) -> str:
         f"🤖 Bot identity: {app_id}",
         f"🕒 Checked at: {_utc_now()}",
     ])
+
+
+# ── Build model-selection helpers ─────────────────────────────
+
+def _model_selection_prompt() -> str:
+    lines = ["**Select a model for your build:**\n"]
+    for i, model in enumerate(ALLOWED_MODELS, 1):
+        lines.append(f"{i}. `{model}`")
+    lines.append("\nReply with a **number** or the **model name**.")
+    lines.append("Type `cancel` to abort.")
+    return "\n".join(lines)
 
 
 # ── Save helpers ───────────────────────────────────────────────
@@ -310,6 +330,81 @@ async def _handle_teardown_response(
     return False
 
 
+# ── Build-selection handler ────────────────────────────────────
+
+async def _handle_build_selection(
+    context: TurnContext,
+    raw_text: str,
+    conv_id: str,
+    *,
+    dispatcher: FileJobDispatcher,
+    heartbeat_service=None,
+) -> None:
+    """Process a user's model-selection reply during an active BuildSession."""
+    global _last_response_utc
+    activity = context.activity
+    choice = raw_text.strip()
+
+    # Cancel
+    if choice.lower() == "cancel":
+        del _build_sessions[conv_id]
+        await context.send_activity(
+            MessageFactory.text("Build cancelled.")
+        )
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Resolve model — by number or name
+    selected_model: str | None = None
+
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(ALLOWED_MODELS):
+            selected_model = ALLOWED_MODELS[idx - 1]
+    else:
+        for model in ALLOWED_MODELS:
+            if choice.lower() == model.lower():
+                selected_model = model
+                break
+
+    if selected_model is None:
+        await context.send_activity(
+            MessageFactory.text(
+                f"Invalid selection: `{choice}`\n\n" + _model_selection_prompt()
+            )
+        )
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Valid model — clear session and queue the build
+    del _build_sessions[conv_id]
+
+    job = QueuedJob(
+        operation="build",
+        requested_by=_get_requester(activity),
+        conversation_id=conv_id,
+        conversation_scope=_get_conversation_scope(activity),
+        model=selected_model,
+        source_command=f"build it {selected_model}",
+    )
+    dispatcher.enqueue(job)
+
+    ack = (
+        f"✅ Queued `build it` as job `{job.job_id}`.\n"
+        f"Model: `{selected_model}`\n"
+        "The worker will post progress updates every 60 seconds "
+        "during deployment."
+    )
+    await context.send_activity(MessageFactory.text(ack))
+    _last_response_utc = _utc_now()
+    if heartbeat_service:
+        heartbeat_service.update_last_response(_last_response_utc)
+
+
 # ════════════════════════════════════════════════════════════════
 #  HANDLER REGISTRATION
 # ════════════════════════════════════════════════════════════════
@@ -336,8 +431,17 @@ def register_handlers(
         raw_text = strip_bot_mention(activity.text)
         conv_id = activity.conversation.id
 
-        # ── Check for active teardown session ────────────────
+        # ── Check for active sessions ─────────────────────────
         _expire_sessions()
+
+        if conv_id in _build_sessions:
+            await _handle_build_selection(
+                context, raw_text, conv_id,
+                dispatcher=dispatcher,
+                heartbeat_service=heartbeat_service,
+            )
+            return
+
         if conv_id in _teardown_sessions:
             handled = await _handle_teardown_response(
                 context, conv_id, raw_text, activity,
@@ -468,10 +572,35 @@ def register_handlers(
 
         # ── Queue-based commands ───────────────────────────────
 
+        # Build requires a valid model — start selection if missing/invalid
+        if command.kind == "build":
+            if command.model is None:
+                _build_sessions[conv_id] = BuildSession()
+                await context.send_activity(
+                    MessageFactory.text(_model_selection_prompt())
+                )
+                _last_response_utc = _utc_now()
+                if heartbeat_service:
+                    heartbeat_service.update_last_response(_last_response_utc)
+                return
+
+            if command.model.lower() not in [m.lower() for m in ALLOWED_MODELS]:
+                _build_sessions[conv_id] = BuildSession()
+                await context.send_activity(
+                    MessageFactory.text(
+                        f"Unknown model `{command.model}`.\n\n"
+                        + _model_selection_prompt()
+                    )
+                )
+                _last_response_utc = _utc_now()
+                if heartbeat_service:
+                    heartbeat_service.update_last_response(_last_response_utc)
+                return
+
         job = QueuedJob(
             operation=command.kind,
             requested_by=_get_requester(activity),
-            conversation_id=activity.conversation.id,
+            conversation_id=conv_id,
             conversation_scope=_get_conversation_scope(activity),
             model=command.model,
             resource_group=command.resource_group,
@@ -483,7 +612,7 @@ def register_handlers(
         if command.kind == "build":
             ack = (
                 f"✅ Queued `build it` as job `{job.job_id}`.\n"
-                f"Model: `{command.model or 'default selection path'}`\n"
+                f"Model: `{command.model}`\n"
                 "The worker will post progress updates every 60 seconds "
                 "during deployment."
             )
