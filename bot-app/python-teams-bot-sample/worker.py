@@ -6,11 +6,15 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from microsoft_agents.activity import Activity, ActivityTypes, Attachment
 
 if TYPE_CHECKING:
     from proactive import ProactiveMessenger
@@ -89,11 +93,40 @@ class BackgroundWorker:
 
             # Send final result to conversation
             if result:
-                truncated = result[:3000]
-                await self._proactive.send_to_conversation(
-                    conversation_id,
-                    f"✅ Job `{job_id}` (`{operation}`) completed:\n\n```\n{truncated}\n```",
-                )
+                sent_with_attachment = False
+
+                # For build operations, attach the build_info JSON file
+                if operation == "build":
+                    build_info = self._find_build_info(result)
+                    if build_info:
+                        file_path, file_content = build_info
+                        activity = self._build_info_activity(
+                            job_id, operation, file_path, file_content,
+                        )
+                        sent_with_attachment = (
+                            await self._proactive.send_activity_to_conversation(
+                                conversation_id, activity,
+                            )
+                        )
+                        if sent_with_attachment:
+                            logger.info(
+                                "Sent build_info attachment %s for job %s",
+                                file_path.name, job_id,
+                            )
+                        else:
+                            logger.warning(
+                                "Failed to send build_info attachment for job %s, "
+                                "falling back to text",
+                                job_id,
+                            )
+
+                # Fallback: text-only (non-build ops, or attachment failed)
+                if not sent_with_attachment:
+                    truncated = result[:3000]
+                    await self._proactive.send_to_conversation(
+                        conversation_id,
+                        f"✅ Job `{job_id}` (`{operation}`) completed:\n\n```\n{truncated}\n```",
+                    )
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)
 
@@ -228,3 +261,100 @@ class BackgroundWorker:
             )
 
         return output
+
+    # ── Build-info attachment helpers ─────────────────────────
+
+    _SUFFIX_RE = re.compile(r"Generated suffix:\s*(\w+)")
+
+    def _find_build_info(self, stdout_output: str) -> tuple[Path, dict] | None:
+        """Locate and read the build_info JSON created by a successful build.
+
+        Strategy 1: parse stdout for 'Generated suffix: <suffix>' (deterministic).
+        Strategy 2: glob for newest build_info-*.json in repo root (fallback).
+        """
+        repo_root = self._deploy_script.parent.parent  # deployment/ → repo root
+
+        # Strategy 1 — extract suffix from PowerShell stdout
+        match = self._SUFFIX_RE.search(stdout_output)
+        if match:
+            suffix = match.group(1)
+            candidate = repo_root / f"build_info-{suffix}.json"
+            if candidate.is_file():
+                try:
+                    content = json.loads(candidate.read_text(encoding="utf-8"))
+                    return (candidate, content)
+                except (json.JSONDecodeError, OSError) as exc:
+                    logger.warning("Failed to read %s: %s", candidate, exc)
+
+        # Strategy 2 — newest build_info-*.json by mtime
+        candidates = sorted(
+            repo_root.glob("build_info-*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for candidate in candidates:
+            try:
+                content = json.loads(candidate.read_text(encoding="utf-8"))
+                return (candidate, content)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Failed to read %s: %s", candidate, exc)
+
+        return None
+
+    @staticmethod
+    def _build_info_activity(
+        job_id: str,
+        operation: str,
+        file_path: Path,
+        file_content: dict,
+    ) -> Activity:
+        """Create an Activity with an Adaptive Card + downloadable file attachment."""
+        filename = file_path.name
+        pretty_json = json.dumps(file_content, indent=2)
+
+        # Adaptive Card — renders nicely in Teams / Playground
+        adaptive_card = {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": f"✅ Build Completed — {filename}",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"```json\n{pretty_json}\n```",
+                    "wrap": True,
+                    "fontType": "Monospace",
+                    "size": "Small",
+                },
+            ],
+        }
+        card_attachment = Attachment(
+            content_type="application/vnd.microsoft.card.adaptive",
+            content=adaptive_card,
+        )
+
+        # Raw JSON file attachment for download
+        raw_bytes = file_path.read_bytes()
+        b64_content = base64.b64encode(raw_bytes).decode("ascii")
+        file_attachment = Attachment(
+            content_type="application/json",
+            content_url=f"data:application/json;base64,{b64_content}",
+            name=filename,
+        )
+
+        # Text fallback for channels that don't render Adaptive Cards
+        text_fallback = (
+            f"✅ Job `{job_id}` (`{operation}`) completed.\n\n"
+            f"**{filename}:**\n```json\n{pretty_json}\n```"
+        )
+
+        return Activity(
+            type=ActivityTypes.message,
+            text=text_fallback,
+            attachments=[card_attachment, file_attachment],
+        )
