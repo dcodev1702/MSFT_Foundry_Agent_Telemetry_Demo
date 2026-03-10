@@ -1,0 +1,75 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.17",
+  "version": "1.0.0",
+  "id": "ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef",
+  "developer": {
+    "name": "DIB Security",
+    "websiteUrl": "https://dibsecurity.onmicrosoft.com",
+    "privacyUrl": "https://dibsecurity.onmicrosoft.com/privacy",
+    "termsOfUseUrl": "https://dibsecurity.onmicrosoft.com/terms"
+  },
+  "name": {
+    "short": "Bot the Builder",
+    "full": "Bot the Builder - Azure Foundry Agent"
+  },
+  "description": {
+    "short": "Deploys and manages Azure AI Foundry environments via Teams",
+    "full": "Bot the Builder provisions Azure AI Foundry environments on demand. Send commands like 'build it', 'list builds', 'build status', and 'teardown' to manage your cloud infrastructure directly from Microsoft Teams."
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "accentColor": "#0078D4",
+  "bots": [
+    {
+      "botId": "ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef",
+      "scopes": [
+        "personal",
+        "team",
+        "groupChat"
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": [
+            "personal",
+            "team",
+            "groupChat"
+          ],
+          "commands": [
+            {
+              "title": "build it",
+              "description": "Deploy a new Azure AI Foundry environment"
+            },
+            {
+              "title": "list builds",
+              "description": "List all deployed Foundry environments"
+            },
+            {
+              "title": "build status",
+              "description": "Check the status of a specific deployment"
+            },
+            {
+              "title": "teardown",
+              "description": "Remove a deployed Foundry environment"
+            },
+            {
+              "title": "health",
+              "description": "Check bot health and system status"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "zolab-bot-app-botprd.azurewebsites.net"
+  ]
+}
