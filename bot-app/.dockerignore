@@ -1,0 +1,25 @@
+# Dev / runtime artifacts
+.env
+.queue/
+.state/
+__pycache__/
+*.pyc
+*.pyo
+
+# Git
+.git/
+.gitignore
+
+# Build info (generated per-deployment)
+build_info.json
+build_info-*.json
+
+# Secrets
+.bot-secrets.json
+
+# IDE
+.vscode/
+.idea/
+
+# Claude workspace
+.claude/

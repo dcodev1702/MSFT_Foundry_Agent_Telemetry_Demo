@@ -1,7 +1,9 @@
 # ════════════════════════════════════════════════════════════════
-# worker.py — Background job worker
-# Polls .queue/pending/ for queued jobs, executes them via
+# worker.py — Background job worker (Azure Queue Storage)
+#
+# Polls Azure Queue Storage for queued jobs, executes them via
 # PowerShell, and sends results back via proactive messaging.
+# Authenticates via DefaultAzureCredential (Entra ID / RBAC).
 # ════════════════════════════════════════════════════════════════
 from __future__ import annotations
 
@@ -11,6 +13,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from azure.storage.queue import QueueClient
 
 if TYPE_CHECKING:
     from proactive import ProactiveMessenger
@@ -23,25 +27,22 @@ def _utc_now() -> str:
 
 
 class BackgroundWorker:
-    """Async background worker that processes queued jobs by invoking PowerShell."""
+    """Async background worker that processes queued jobs from Azure Queue Storage."""
 
-    POLL_INTERVAL = 5       # seconds between queue polls
-    PROGRESS_INTERVAL = 60  # seconds between progress messages
+    POLL_INTERVAL = 5        # seconds between queue polls
+    PROGRESS_INTERVAL = 60   # seconds between progress messages
+    VISIBILITY_TIMEOUT = 600 # 10 min — job must complete within this window
 
     def __init__(
         self,
-        queue_path: Path,
+        queue_client: QueueClient,
         proactive: ProactiveMessenger,
         deploy_script: Path,
     ):
-        self._queue_path = queue_path
+        self._queue_client = queue_client
         self._proactive = proactive
         self._deploy_script = deploy_script
         self._running = False
-
-        # Ensure queue subdirectories exist
-        for sub in ("pending", "running", "completed", "failed"):
-            (self._queue_path / sub).mkdir(parents=True, exist_ok=True)
 
     def stop(self) -> None:
         self._running = False
@@ -49,7 +50,7 @@ class BackgroundWorker:
     async def run(self) -> None:
         """Main poll loop — runs until stop() is called."""
         self._running = True
-        logger.info("BackgroundWorker started — polling %s", self._queue_path / "pending")
+        logger.info("BackgroundWorker started — polling Azure Queue Storage")
 
         while self._running:
             try:
@@ -61,52 +62,58 @@ class BackgroundWorker:
     # ── Internal ───────────────────────────────────────────────
 
     async def _poll_once(self) -> None:
-        pending_dir = self._queue_path / "pending"
-        jobs = sorted(pending_dir.glob("*.json"))
-        if not jobs:
+        loop = asyncio.get_event_loop()
+
+        # receive_messages is synchronous — run in executor
+        messages = await loop.run_in_executor(
+            None,
+            lambda: list(
+                self._queue_client.receive_messages(
+                    messages_per_page=1,
+                    visibility_timeout=self.VISIBILITY_TIMEOUT,
+                )
+            ),
+        )
+
+        if not messages:
             return
 
-        job_file = jobs[0]
-        job_data = json.loads(job_file.read_text(encoding="utf-8"))
-        job_id = job_data.get("job_id", job_file.stem)
+        msg = messages[0]
+        job_data = json.loads(msg.content)
+        job_id = job_data.get("job_id", "unknown")
         operation = job_data.get("operation", "unknown")
         conversation_id = job_data.get("conversation_id", "")
 
-        # Move to running
-        running_file = self._queue_path / "running" / job_file.name
-        job_file.rename(running_file)
-        logger.info("Processing job %s — operation: %s", job_id, operation)
+        logger.info(
+            "Processing job %s — operation: %s (dequeue_count=%d)",
+            job_id, operation, msg.dequeue_count,
+        )
 
         try:
             result = await self._execute_job(job_data, conversation_id)
 
-            # Move to completed
-            completed_file = self._queue_path / "completed" / job_file.name
-            job_data["completed_utc"] = _utc_now()
-            job_data["result"] = result[:4000] if result else ""
-            completed_file.write_text(json.dumps(job_data, indent=2), encoding="utf-8")
-            running_file.unlink(missing_ok=True)
+            # Delete message on success
+            await loop.run_in_executor(
+                None, lambda: self._queue_client.delete_message(msg),
+            )
 
-            # Send final result to conversation
             if result:
                 truncated = result[:3000]
                 await self._proactive.send_to_conversation(
                     conversation_id,
-                    f"✅ Job `{job_id}` (`{operation}`) completed:\n\n```\n{truncated}\n```",
+                    f"Job `{job_id}` (`{operation}`) completed:\n\n```\n{truncated}\n```",
                 )
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)
 
-            # Move to failed
-            failed_file = self._queue_path / "failed" / job_file.name
-            job_data["failed_utc"] = _utc_now()
-            job_data["error"] = str(e)
-            failed_file.write_text(json.dumps(job_data, indent=2), encoding="utf-8")
-            running_file.unlink(missing_ok=True)
+            # Delete the poison message
+            await loop.run_in_executor(
+                None, lambda: self._queue_client.delete_message(msg),
+            )
 
             await self._proactive.send_to_conversation(
                 conversation_id,
-                f"❌ Job `{job_id}` (`{operation}`) failed:\n\n```\n{str(e)[:2000]}\n```",
+                f"Job `{job_id}` (`{operation}`) failed:\n\n```\n{str(e)[:2000]}\n```",
             )
 
     async def _execute_job(self, job_data: dict, conversation_id: str) -> str:
@@ -139,7 +146,7 @@ class BackgroundWorker:
         return await self._run_powershell(
             args,
             conversation_id,
-            progress_msg="🚧 One moment ..the Bob's are still building! 🚧",
+            progress_msg="One moment ..the Bob's are still building!",
         )
 
     async def _run_teardown(
@@ -156,7 +163,7 @@ class BackgroundWorker:
         return await self._run_powershell(
             args,
             conversation_id,
-            progress_msg=f"🚧 Pls hold while we teardown: {resource_group} 🚧",
+            progress_msg=f"Pls hold while we teardown: {resource_group}",
         )
 
     async def _run_build_status(self, resource_group: str | None) -> str:

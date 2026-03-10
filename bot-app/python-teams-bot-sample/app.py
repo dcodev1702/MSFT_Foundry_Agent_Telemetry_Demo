@@ -33,9 +33,10 @@ from microsoft_agents.hosting.core import (
     TurnState,
 )
 
-from conversation_store import JsonConversationStore
-from job_dispatcher import FileJobDispatcher
+from conversation_store import BlobConversationStore
+from job_dispatcher import AzureQueueJobDispatcher
 from proactive import ProactiveMessenger
+from storage_config import get_queue_client
 from worker import BackgroundWorker
 from heartbeat import HeartbeatService
 
@@ -48,8 +49,6 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ──────────────────────────────────────────────────────
 BASE_PATH = Path(__file__).resolve().parent
-QUEUE_PATH = BASE_PATH / ".queue"
-STORE_PATH = BASE_PATH / ".state" / "conversations.json"
 
 # Default deploy script path: two levels up → deployment/
 DEFAULT_DEPLOY_SCRIPT = str(
@@ -60,6 +59,7 @@ DEFAULT_DEPLOY_SCRIPT = str(
 load_dotenv(BASE_PATH / ".env")
 PORT = int(os.getenv("PORT", "3978"))
 DEPLOY_SCRIPT = Path(os.getenv("DEPLOY_SCRIPT_PATH", DEFAULT_DEPLOY_SCRIPT))
+WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── M365 Agents SDK Configuration ─────────────────────────────
 agents_sdk_config = load_configuration_from_env(environ)
@@ -79,12 +79,13 @@ agent_app = AgentApplication[TurnState](
 )
 
 # ── Business Services ─────────────────────────────────────────
-dispatcher = FileJobDispatcher(QUEUE_PATH)
-store = JsonConversationStore(STORE_PATH)
+queue_client = get_queue_client()
+dispatcher = AzureQueueJobDispatcher(queue_client=queue_client)
+store = BlobConversationStore()
 proactive = ProactiveMessenger(adapter=adapter, store=store)
 
 worker = BackgroundWorker(
-    queue_path=QUEUE_PATH,
+    queue_client=queue_client,
     proactive=proactive,
     deploy_script=DEPLOY_SCRIPT,
 )
@@ -127,24 +128,28 @@ async def health_check(request: web.Request) -> web.Response:
 
 # ── Lifecycle Hooks ────────────────────────────────────────────
 async def on_startup(app: web.Application) -> None:
-    logger.info("Starting background worker and heartbeat service …")
-    app["worker_task"] = asyncio.create_task(worker.run())
-    app["heartbeat_task"] = asyncio.create_task(heartbeat_service.run())
+    if WORKER_ENABLED:
+        logger.info("Starting background worker and heartbeat service …")
+        app["worker_task"] = asyncio.create_task(worker.run())
+        app["heartbeat_task"] = asyncio.create_task(heartbeat_service.run())
+    else:
+        logger.info("Worker disabled (WORKER_ENABLED=false) — ACI handles execution")
 
 
 async def on_shutdown(app: web.Application) -> None:
-    logger.info("Shutting down background services …")
-    worker.stop()
-    heartbeat_service.stop()
+    if WORKER_ENABLED:
+        logger.info("Shutting down background services …")
+        worker.stop()
+        heartbeat_service.stop()
 
-    for task_name in ("worker_task", "heartbeat_task"):
-        task = app.get(task_name)
-        if task and not task.done():
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        for task_name in ("worker_task", "heartbeat_task"):
+            task = app.get(task_name)
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
 
 # ── Application Factory ───────────────────────────────────────

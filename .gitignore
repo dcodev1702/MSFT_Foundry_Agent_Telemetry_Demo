@@ -16,4 +16,5 @@ build_info-*.json
 .queue/
 .state/
 .env
+.bot-secrets.json
 .claude/
