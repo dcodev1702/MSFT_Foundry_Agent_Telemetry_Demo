@@ -23,7 +23,7 @@ from microsoft_agents.hosting.core import (
 from command_parser import parse_command
 from conversation_store import JsonConversationStore
 from job_dispatcher import FileJobDispatcher
-from models import QueuedJob
+from models import ALLOWED_MODELS, BuildSession, QueuedJob
 
 
 def _utc_now() -> str:
@@ -32,6 +32,8 @@ def _utc_now() -> str:
 
 # ── Module-level state ────────────────────────────────────────
 _last_response_utc: str = "No Teams response has been sent yet."
+_build_sessions: dict[str, BuildSession] = {}
+SESSION_TIMEOUT = 600  # 10 minutes
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -71,7 +73,7 @@ def _get_conversation_scope(activity) -> str:
 def _get_help_text() -> str:
     return "\n".join([
         "**Supported commands:**",
-        "- `build it` — deploy with default model selection",
+        "- `build it` — deploy (prompts for model selection)",
         "- `build it <model>` — deploy with specified model",
         "- `list builds` — list all active Foundry deployments",
         "- `build status <resource-group>` — check a specific deployment",
@@ -93,6 +95,28 @@ def _get_listener_status_text(dispatcher: FileJobDispatcher) -> str:
         f"🤖 Bot identity: {app_id}",
         f"🕒 Checked at: {_utc_now()}",
     ])
+
+
+# ── Build-session helpers ─────────────────────────────────────
+
+def _expire_sessions() -> None:
+    """Remove build sessions older than SESSION_TIMEOUT."""
+    now = datetime.now(timezone.utc).timestamp()
+    expired = [
+        cid for cid, s in _build_sessions.items()
+        if now - s.created_at > SESSION_TIMEOUT
+    ]
+    for cid in expired:
+        del _build_sessions[cid]
+
+
+def _model_selection_prompt() -> str:
+    lines = ["**Select a model for your build:**\n"]
+    for i, model in enumerate(ALLOWED_MODELS, 1):
+        lines.append(f"{i}. `{model}`")
+    lines.append("\nReply with a **number** or the **model name**.")
+    lines.append("Type `cancel` to abort.")
+    return "\n".join(lines)
 
 
 # ── Save helpers ───────────────────────────────────────────────
@@ -147,6 +171,81 @@ def _save_conversation(
         pass  # best-effort
 
 
+# ── Build-selection handler ────────────────────────────────────
+
+async def _handle_build_selection(
+    context: TurnContext,
+    raw_text: str,
+    conversation_id: str,
+    *,
+    dispatcher: FileJobDispatcher,
+    heartbeat_service=None,
+) -> None:
+    """Process a user's model-selection reply during an active BuildSession."""
+    global _last_response_utc
+    activity = context.activity
+    choice = raw_text.strip()
+
+    # Cancel
+    if choice.lower() == "cancel":
+        del _build_sessions[conversation_id]
+        await context.send_activity(
+            MessageFactory.text("Build cancelled.")
+        )
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Resolve model — by number or name
+    selected_model: str | None = None
+
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(ALLOWED_MODELS):
+            selected_model = ALLOWED_MODELS[idx - 1]
+    else:
+        for model in ALLOWED_MODELS:
+            if choice.lower() == model.lower():
+                selected_model = model
+                break
+
+    if selected_model is None:
+        await context.send_activity(
+            MessageFactory.text(
+                f"Invalid selection: `{choice}`\n\n" + _model_selection_prompt()
+            )
+        )
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Valid model — clear session and queue the build
+    del _build_sessions[conversation_id]
+
+    job = QueuedJob(
+        operation="build",
+        requested_by=_get_requester(activity),
+        conversation_id=conversation_id,
+        conversation_scope=_get_conversation_scope(activity),
+        model=selected_model,
+        source_command=f"build it {selected_model}",
+    )
+    dispatcher.enqueue(job)
+
+    ack = (
+        f"✅ Queued `build it` as job `{job.job_id}`.\n"
+        f"Model: `{selected_model}`\n"
+        "The worker will post progress updates every 60 seconds "
+        "during deployment."
+    )
+    await context.send_activity(MessageFactory.text(ack))
+    _last_response_utc = _utc_now()
+    if heartbeat_service:
+        heartbeat_service.update_last_response(_last_response_utc)
+
+
 # ════════════════════════════════════════════════════════════════
 #  HANDLER REGISTRATION
 # ════════════════════════════════════════════════════════════════
@@ -170,6 +269,18 @@ def register_handlers(
 
         # Strip Teams @mention tags before parsing
         raw_text = strip_bot_mention(activity.text)
+        conversation_id = activity.conversation.id
+
+        # ── Active build-session? Handle model selection ──────
+        _expire_sessions()
+        if conversation_id in _build_sessions:
+            await _handle_build_selection(
+                context, raw_text, conversation_id,
+                dispatcher=dispatcher,
+                heartbeat_service=heartbeat_service,
+            )
+            return
+
         command = parse_command(raw_text)
 
         # ── Immediate-response commands ────────────────────────
@@ -229,10 +340,35 @@ def register_handlers(
 
         # ── Queue-based commands ───────────────────────────────
 
+        # Build requires a valid model — start selection if missing/invalid
+        if command.kind == "build":
+            if command.model is None:
+                _build_sessions[conversation_id] = BuildSession()
+                await context.send_activity(
+                    MessageFactory.text(_model_selection_prompt())
+                )
+                _last_response_utc = _utc_now()
+                if heartbeat_service:
+                    heartbeat_service.update_last_response(_last_response_utc)
+                return
+
+            if command.model.lower() not in [m.lower() for m in ALLOWED_MODELS]:
+                _build_sessions[conversation_id] = BuildSession()
+                await context.send_activity(
+                    MessageFactory.text(
+                        f"Unknown model `{command.model}`.\n\n"
+                        + _model_selection_prompt()
+                    )
+                )
+                _last_response_utc = _utc_now()
+                if heartbeat_service:
+                    heartbeat_service.update_last_response(_last_response_utc)
+                return
+
         job = QueuedJob(
             operation=command.kind,
             requested_by=_get_requester(activity),
-            conversation_id=activity.conversation.id,
+            conversation_id=conversation_id,
             conversation_scope=_get_conversation_scope(activity),
             model=command.model,
             resource_group=command.resource_group,
@@ -244,7 +380,7 @@ def register_handlers(
         if command.kind == "build":
             ack = (
                 f"✅ Queued `build it` as job `{job.job_id}`.\n"
-                f"Model: `{command.model or 'default selection path'}`\n"
+                f"Model: `{command.model}`\n"
                 "The worker will post progress updates every 60 seconds "
                 "during deployment."
             )
