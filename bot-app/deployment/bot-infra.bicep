@@ -3,9 +3,10 @@
 //
 // Subscription-scoped deployment that creates:
 //   - A resource group for bot resources
+//   - Azure Container Registry (Basic)
+//   - User-Assigned Managed Identity (with Graph permissions)
 //   - App Service Plan (Linux, B1)
-//   - App Service (Python 3.11, M365 Agents SDK)
-//   - System-assigned Managed Identity with RBAC
+//   - App Service (container deployment from ACR)
 //
 // Usage:
 //   az deployment sub create \
@@ -38,8 +39,8 @@ param botResourceGroupName string = 'zolab-bot-${suffix}'
 @description('App Service Plan SKU (B1 for dev/pilot, S1+ for production)')
 param appServicePlanSku string = 'B1'
 
-@description('Python runtime version for App Service')
-param pythonVersion string = '3.11'
+@description('Deploy App Service Plan + App Service (set false when B1 quota not yet approved)')
+param deployAppService bool = true
 
 // ── Resource Group ────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ module botResources 'modules/bot-resources.bicep' = {
     botAppId: botAppId
     tenantId: tenantId
     appServicePlanSku: appServicePlanSku
-    pythonVersion: pythonVersion
+    deployAppService: deployAppService
   }
 }
 
@@ -69,3 +70,9 @@ output resourceGroupName string = botRg.name
 output appServiceName string = botResources.outputs.appServiceName
 output appServiceUrl string = botResources.outputs.appServiceUrl
 output managedIdentityPrincipalId string = botResources.outputs.managedIdentityPrincipalId
+output managedIdentityClientId string = botResources.outputs.managedIdentityClientId
+output managedIdentityResourceId string = botResources.outputs.managedIdentityResourceId
+output acrLoginServer string = botResources.outputs.acrLoginServer
+output acrName string = botResources.outputs.acrName
+output botServiceName string = botResources.outputs.botServiceName
+output messagingEndpoint string = botResources.outputs.messagingEndpoint

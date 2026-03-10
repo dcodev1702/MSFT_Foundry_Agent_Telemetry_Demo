@@ -12,11 +12,10 @@
 using './bot-infra.bicep'
 
 // ── Required (override at deploy time) ────────────────────────
-param suffix   = '<REQUIRED>'
-param botAppId = '<REQUIRED>'
-param tenantId = '<REQUIRED>'
+param suffix   = 'botprd'
+param botAppId = 'ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef'
+param tenantId = 'b22dee98-83da-4207-b9ab-5ba931866f44'
 
 // ── Optional (defaults are fine for dev/pilot) ────────────────
 param location           = 'eastus2'
 param appServicePlanSku  = 'B1'
-param pythonVersion      = '3.11'

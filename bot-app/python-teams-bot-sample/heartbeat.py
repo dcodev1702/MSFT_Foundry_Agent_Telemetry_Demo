@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 import psutil
 
 if TYPE_CHECKING:
-    from conversation_store import JsonConversationStore
-    from job_dispatcher import FileJobDispatcher
+    from conversation_store import BlobConversationStore
+    from job_dispatcher import AzureQueueJobDispatcher
     from proactive import ProactiveMessenger
 
 logger = logging.getLogger(__name__)
@@ -30,8 +30,8 @@ class HeartbeatService:
     def __init__(
         self,
         proactive: ProactiveMessenger,
-        store: JsonConversationStore,
-        dispatcher: FileJobDispatcher,
+        store: BlobConversationStore,
+        dispatcher: AzureQueueJobDispatcher,
     ):
         self._proactive = proactive
         self._store = store

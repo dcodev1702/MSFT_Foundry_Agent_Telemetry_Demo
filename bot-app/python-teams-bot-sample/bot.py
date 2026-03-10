@@ -25,8 +25,8 @@ from microsoft_agents.hosting.core import (
 )
 
 from command_parser import parse_command
-from conversation_store import JsonConversationStore
-from job_dispatcher import FileJobDispatcher
+from conversation_store import BlobConversationStore
+from job_dispatcher import AzureQueueJobDispatcher
 from models import ALLOWED_MODELS, BuildSession, QueuedJob, TeardownSession
 
 logger = logging.getLogger(__name__)
@@ -452,8 +452,8 @@ async def _handle_build_selection(
 def register_handlers(
     agent_app: AgentApplication,
     *,
-    dispatcher: FileJobDispatcher,
-    store: JsonConversationStore,
+    dispatcher: AzureQueueJobDispatcher,
+    store: BlobConversationStore,
     heartbeat_service=None,
     deploy_script: Path | None = None,
 ) -> None:
@@ -677,19 +677,29 @@ def register_handlers(
             source_command=command.raw_text,
             arguments={"requiresConfirmation": command.requires_confirmation},
         )
-        job_path = dispatcher.enqueue(job)
+        dispatcher.enqueue(job)
 
-        if command.kind == "build-status":
+        if command.kind == "build":
             ack = (
-                f"✅ Queued `build status` for `{command.resource_group}` "
+                f"Queued `build it` as job `{job.job_id}`.\n"
+                f"Model: `{command.model}`\n"
+                "The worker will post progress updates every 60 seconds "
+                "during deployment."
+            )
+        elif command.kind == "teardown":
+            ack = (
+                f"Queued `teardown` for `{command.resource_group}` "
                 f"as job `{job.job_id}`.\n"
-                f"Queue file: `{job_path.name}`"
+                "The worker will post progress updates every 60 seconds "
+                "during cleanup."
+            )
+        elif command.kind == "build-status":
+            ack = (
+                f"Queued `build status` for `{command.resource_group}` "
+                f"as job `{job.job_id}`."
             )
         else:  # list-builds
-            ack = (
-                f"✅ Queued `list builds` as job `{job.job_id}`.\n"
-                f"Queue file: `{job_path.name}`"
-            )
+            ack = f"Queued `list builds` as job `{job.job_id}`."
 
         await context.send_activity(MessageFactory.text(ack))
         _last_response_utc = _utc_now()

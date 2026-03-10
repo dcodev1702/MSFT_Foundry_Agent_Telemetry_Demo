@@ -1,0 +1,14 @@
+.env
+.queue/
+.state/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.bot-secrets.json
+.vscode/
+.idea/
+.claude/
+build_info.json
+build_info-*.json
