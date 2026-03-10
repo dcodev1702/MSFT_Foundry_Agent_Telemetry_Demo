@@ -39,13 +39,14 @@ def _utc_now() -> str:
 # ── Module-level state ────────────────────────────────────────
 _last_response_utc: str = "No Teams response has been sent yet."
 
+# Session timeout for build and teardown flows
+SESSION_TIMEOUT = 300  # 5 minutes
+
 # Build model-selection sessions — keyed by conversation ID
 _build_sessions: dict[str, BuildSession] = {}
-BUILD_SESSION_TIMEOUT = 600  # 10 minutes
 
 # Teardown session state — keyed by conversation ID
 _teardown_sessions: dict[str, TeardownSession] = {}
-TEARDOWN_SESSION_TIMEOUT = 300  # 5 minutes
 
 
 # ── Session helpers ───────────────────────────────────────────
@@ -54,12 +55,12 @@ def _expire_sessions() -> None:
     """Remove expired build and teardown sessions."""
     now = time.time()
     expired_build = [k for k, v in _build_sessions.items()
-                     if now - v.created_at > BUILD_SESSION_TIMEOUT]
+                     if now - v.created_at > SESSION_TIMEOUT]
     for k in expired_build:
         del _build_sessions[k]
 
     expired_teardown = [k for k, v in _teardown_sessions.items()
-                        if now - v.created_at > TEARDOWN_SESSION_TIMEOUT]
+                        if now - v.created_at > SESSION_TIMEOUT]
     for k in expired_teardown:
         del _teardown_sessions[k]
 
