@@ -96,6 +96,7 @@ deployment/
 ├── main.bicep                       # Subscription-scoped entry point (Foundry env)
 ├── law-rbac.bicep                   # Cross-sub LAW RBAC (Security subscription)
 ├── Dockerfile.worker                # Worker container (Python + PowerShell + Az CLI + Bicep)
+├── deploy-worker-app.sh             # Worker deploy script (local Docker build + ACR push + Bicep)
 ├── modules/
 │   ├── resources.bicep              # Foundry resources, diagnostics, and RBAC
 │   ├── law-rbac.bicep               # LAW role assignment module
@@ -110,7 +111,7 @@ bot-app/
 │   ├── color.png                    # 192x192 bot icon
 │   └── outline.png                  # 32x32 outline icon
 ├── deployment/
-│   ├── deploy-bot-app.sh            # Bot deploy script (ACR build + Bicep + RBAC)
+│   ├── deploy-bot-app.sh            # Bot deploy script (local Docker build + Bicep + RBAC)
 │   ├── bot-infra.bicep              # Subscription-scoped bot infrastructure
 │   └── modules/
 │       └── bot-resources.bicep      # Container App + ACR + Bot Service + UAMI
@@ -165,7 +166,14 @@ When this deployment runs under the worker managed identity, that identity must 
 
 `Contributor` alone is not enough for the RBAC portion because it explicitly excludes `Microsoft.Authorization/*/Write`.
 
-For worker rollouts, avoid relying on a retagged `latest` image if you need deterministic pickup in Azure Container Instances. `worker-infra.bicep` now accepts `workerImageTag`, so you can deploy a unique image tag and know the recreated ACI pulled the intended build.
+For worker rollouts, avoid relying on a retagged `latest` image if you need deterministic pickup in Azure Container Instances. `worker-infra.bicep` now accepts `workerImageTag`, and `deployment/deploy-worker-app.sh` performs a local Docker `--no-cache --pull` build, pushes both an immutable tag and `latest`, and then deploys ACI pinned to the immutable tag.
+
+Worker local deployment:
+
+```bash
+cd /path/to/repo
+bash deployment/deploy-worker-app.sh
+```
 
 When `-UseTeamsChatFlow` is enabled, the script creates or reuses a self-owned Teams group chat named `Microsoft Foundry Deployments`, prompts for the model selection in that chat, waits for a valid reply, and posts the final build success/failure notification there. Reply with either the menu number or the model name.
 The same Teams chat also receives a complete teardown status report after cleanup operations when `-UseTeamsChatFlow` is used.

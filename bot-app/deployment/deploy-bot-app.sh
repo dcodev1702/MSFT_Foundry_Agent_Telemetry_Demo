@@ -13,6 +13,7 @@
 #
 # Prerequisites:
 #   - az login (authenticated)
+#   - local Docker daemon available
 #   - bot-app/deployment/.bot-secrets.json exists
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -50,6 +51,11 @@ if ! az account show &>/dev/null; then
     exit 1
 fi
 
+if ! docker version &>/dev/null; then
+  echo "ERROR: Docker is not available. Start Docker Desktop and retry." >&2
+  exit 1
+fi
+
 if [[ ! -f "${SECRETS_FILE}" ]]; then
     echo "ERROR: ${SECRETS_FILE} not found." >&2
     exit 1
@@ -75,15 +81,20 @@ echo ""
 
 # ── Step 1: Build & push bot container to ACR ────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│ Step 1/4: Building bot container image in ACR               │"
+echo "│ Step 1/4: Building bot container image locally              │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
-az acr build \
-  --registry "${BOT_ACR_NAME}" \
-  --image "zolab-bot:${BOT_IMAGE_TAG}" \
-  --image zolab-bot:latest \
-  --file bot-app/Dockerfile \
+az acr login --name "${BOT_ACR_NAME}"
+
+docker build --no-cache \
+  --pull \
+  -t "${BOT_ACR_NAME}.azurecr.io/zolab-bot:${BOT_IMAGE_TAG}" \
+  -t "${BOT_ACR_NAME}.azurecr.io/zolab-bot:latest" \
+  -f bot-app/Dockerfile \
   .
+
+docker push "${BOT_ACR_NAME}.azurecr.io/zolab-bot:${BOT_IMAGE_TAG}"
+docker push "${BOT_ACR_NAME}.azurecr.io/zolab-bot:latest"
 
 echo "  ✓ Bot container images pushed to ${BOT_ACR_NAME}.azurecr.io/zolab-bot:${BOT_IMAGE_TAG} and :latest"
 echo ""

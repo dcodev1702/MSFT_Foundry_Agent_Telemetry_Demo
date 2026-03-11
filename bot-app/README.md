@@ -214,5 +214,5 @@ Zip the contents of `bot-app/teams-app/` and upload that package in Teams as a c
 
 - The bot infrastructure and the Foundry environment deployment are separate concerns. The bot lives under `bot-app/`; the Foundry environment lives under `deployment/` at the repo root.
 - The bot Container App and the worker container are intentionally split so long-running PowerShell work does not block Teams request handling.
-- The deploy script in `bot-app/deployment/` rebuilds and republishes the bot image and then redeploys the bot infrastructure.
-- The worker image is defined in [../deployment/Dockerfile.worker](../deployment/Dockerfile.worker) because it shares the same PowerShell/Bicep automation code used by the root deployment flow.
+- The deploy script in `bot-app/deployment/` now performs a local Docker `--no-cache --pull` rebuild, pushes the bot image to the bot ACR, and then redeploys the bot infrastructure.
+- The worker image is defined in [../deployment/Dockerfile.worker](../deployment/Dockerfile.worker) because it shares the same PowerShell/Bicep automation code used by the root deployment flow. Use [../deployment/deploy-worker-app.sh](../deployment/deploy-worker-app.sh) for the worker’s local Docker `--no-cache --pull` build, push, and rollout path.
