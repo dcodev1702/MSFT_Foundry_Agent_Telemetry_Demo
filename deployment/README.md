@@ -90,22 +90,44 @@ The deployment script requires an AI model selection and only allows these optio
 
 ```
 deployment/
-├── deploy-foundry-env.ps1        # Orchestration script (deploy + cleanup)
-├── teams-command-dispatch.ps1    # Teams chat command listener for build/teardown
-├── teams-chat.ps1                # Teams chat helpers for Graph-based selection/notifications
-├── main.bicep                    # Subscription-scoped entry point
-├── law-rbac.bicep                # Cross-sub LAW RBAC (Security subscription)
+├── deploy-foundry-env.ps1           # Orchestration script (deploy + cleanup)
+├── teams-command-dispatch.ps1       # Teams chat command listener for build/teardown
+├── teams-chat.ps1                   # Teams chat helpers for Graph-based selection/notifications
+├── main.bicep                       # Subscription-scoped entry point (Foundry env)
+├── law-rbac.bicep                   # Cross-sub LAW RBAC (Security subscription)
+├── Dockerfile.worker                # Worker container (Python + PowerShell + Az CLI + Bicep)
 ├── modules/
-│   ├── resources.bicep           # All resources, diagnostics, and RBAC
-│   └── law-rbac.bicep            # LAW role assignment module
-└── README.md                     # You are here 📍
+│   ├── resources.bicep              # Foundry resources, diagnostics, and RBAC
+│   ├── law-rbac.bicep               # LAW role assignment module
+│   └── worker-resources.bicep       # ACI worker + Storage (Queue + Blob)
+├── worker-infra.bicep               # Worker infrastructure entry point
+└── README.md                        # You are here
+
+bot-app/
+├── Dockerfile                       # Bot container (Python + M365 Agents SDK)
+├── teams-app/
+│   ├── manifest.json                # Teams app manifest (sideloading)
+│   ├── color.png                    # 192x192 bot icon
+│   └── outline.png                  # 32x32 outline icon
+├── deployment/
+│   ├── deploy-bot-app.sh            # Bot deploy script (ACR build + Bicep + RBAC)
+│   ├── bot-infra.bicep              # Subscription-scoped bot infrastructure
+│   └── modules/
+│       └── bot-resources.bicep      # Container App + ACR + Bot Service + UAMI
+└── python-teams-bot-sample/
+    ├── app.py                       # aiohttp host + M365 Agents SDK adapter
+    ├── bot.py                       # Teams message/event handlers
+    ├── worker.py                    # Background queue worker
+    ├── worker_standalone.py         # Standalone worker entry point
+    ├── proactive.py                 # Proactive messaging service
+    ├── heartbeat.py                 # Periodic heartbeat broadcaster
+    ├── command_parser.py            # Command parser
+    ├── conversation_store.py        # Azure Blob conversation store
+    ├── job_dispatcher.py            # Azure Queue job dispatcher
+    ├── storage_config.py            # Shared Azure credential config
+    ├── models.py                    # Data models
+    └── requirements.txt             # Python dependencies
 ```
-
-Additional design references:
-
-- `python-teams-bot-sample/teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
-- `bot-app/docs/teams-bot-automation-implementation-guide.md` — detailed implementation playbook for replacing the delegated Teams listener with a Teams bot plus automation app model
-- `bot-app/docs/teams-bot-automation-architecture-overview.docx` — human-readable architecture overview covering components, roles, phases, and operational guidance
 
 ---
 
@@ -265,6 +287,57 @@ $groupDisplayName       = "zolab-ai-dev"
 ```
 
 No hardcoded subscription GUIDs — subscriptions are looked up by display name.
+
+---
+
+## 🤖 Bot Infrastructure (Container Apps)
+
+The `bot-app/` directory contains a separate deployment for **Bot the Builder**, a Teams bot that manages Foundry deployments via chat commands.
+
+### Architecture
+
+```
+Teams ──► Azure Bot Service (F0, SingleTenant)
+              │
+              ▼
+     Azure Container App (zolab-bot-ca-botprd)
+     ┌─────────────────────────────────────────┐
+     │  M365 Agents SDK  │  aiohttp (:8000)    │
+     │  JWT Auth          │  Heartbeat (15m)    │
+     │  Proactive Msgs    │  UAMI Auth          │
+     └────────┬───────────┬────────────────────┘
+              │           │
+    ┌─────────▼───┐  ┌────▼──────────┐
+    │ Azure Queue │  │  Azure Blob   │
+    │  (botjobs)  │  │  (botstate)   │
+    └──────┬──────┘  └───────────────┘
+           │
+           ▼
+     ACI Worker (zolab-worker-aci-botprd)
+     ┌─────────────────────────────────────────┐
+     │  Polls queue ──► PowerShell/Bicep        │
+     │  Sends results ──► Proactive messaging   │
+     └─────────────────────────────────────────┘
+```
+
+### Key Components
+
+| Component | Resource | Details |
+|-----------|----------|---------|
+| Bot Server | Azure Container App | M365 Agents SDK, auto-TLS, UAMI for ACR/Storage |
+| Worker | Azure Container Instance | PowerShell 7.4 + Az CLI + Bicep, polls Azure Queue |
+| Queue | Azure Queue Storage | RBAC-only (`allowSharedKeyAccess: false`) |
+| State | Azure Blob Storage | Conversation refs + identities for proactive messaging |
+| Identity | User-Assigned MI | Single UAMI for bot + worker (ACR, Storage, Az ops) |
+| Logging | DIBSecCom LAW | Cross-subscription logging to Security sub |
+
+### Bot Deploy
+
+```bash
+bash bot-app/deployment/deploy-bot-app.sh
+```
+
+See [`bot-app/python-teams-bot-sample/README.md`](../bot-app/python-teams-bot-sample/README.md) for full bot documentation.
 
 ---
 

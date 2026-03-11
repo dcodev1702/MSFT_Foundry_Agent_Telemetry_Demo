@@ -167,7 +167,23 @@ The notebook produces traces across three observability surfaces:
 ## 🏗️ Infrastructure
 
 The `deployment/` directory contains Bicep IaC to provision the full AI Foundry environment — see [`deployment/README.md`](deployment/README.md) for details.
-That deployment guide also documents the Teams command listener, including `build it`, `list builds`, `build status`, `teardown`, `listener status`, `?`, and `stop listener`.
+
+### Bot the Builder (Teams Bot)
+
+The `bot-app/` directory contains **Bot the Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status`, `teardown`, `heartbeat`).
+
+```
+Teams ──► Bot Service ──► Container App (M365 Agents SDK)
+                               │
+                          Queue Storage ──► ACI Worker (PowerShell/Bicep)
+```
+
+- **Azure Container App** — bot web server with auto-TLS and UAMI auth
+- **ACI Worker** — polls Azure Queue, executes PowerShell deployments, sends results back via proactive messaging
+- **Azure Queue + Blob Storage** — RBAC-only (no shared keys), conversation state in Blob
+- **Cross-sub logging** — all Container Apps logs go to `DIBSecCom` LAW in the Security subscription
+
+See [`bot-app/python-teams-bot-sample/README.md`](bot-app/python-teams-bot-sample/README.md) for full bot documentation and [`deployment/README.md`](deployment/README.md) for the Teams command listener.
 
 ---
 

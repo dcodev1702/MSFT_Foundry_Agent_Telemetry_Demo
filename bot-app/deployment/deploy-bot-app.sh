@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════
-# deploy-bot-app.sh — Deploy Bot App Service + container image
+# deploy-bot-app.sh — Deploy Bot Container App + container image
 #
-# Runs steps 1–4 to bring the bot online after B1 quota approval:
-#   1. Deploy Bicep (App Service Plan + App Service)
-#   2. Set the client secret on App Service
+# Runs steps 1–4 to bring the bot online:
+#   1. Build & push bot container image to ACR
+#   2. Deploy Bicep (Container Apps Env + Container App + Bot Service)
 #   3. Grant bot UAMI Storage RBAC on worker storage account
-#   4. Build & push bot container to ACR
+#   4. Verify deployment and show endpoint
 #
 # Usage (from repo root):
 #   bash bot-app/deployment/deploy-bot-app.sh
 #
 # Prerequisites:
 #   - az login (authenticated)
-#   - B1 App Service Plan quota approved for eastus2
 #   - bot-app/deployment/.bot-secrets.json exists
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
@@ -25,13 +24,18 @@ TENANT_ID="b22dee98-83da-4207-b9ab-5ba931866f44"
 LOCATION="eastus2"
 
 RG_BOT="zolab-bot-${SUFFIX}"
-APP_SERVICE_NAME="zolab-bot-app-${SUFFIX}"
+CONTAINER_APP_NAME="zolab-bot-ca-${SUFFIX}"
 BOT_ACR_NAME="zolabbotacr${SUFFIX}"
 
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
 
 UAMI_PRINCIPAL_ID="e9a17b6f-74e3-44f4-ae3e-14dd48d5c251"
+
+# DIBSecCom LAW in Security subscription — all logs go here
+SECURITY_SUB="192ad012-896e-4f14-8525-c37a2a9640f9"
+LAW_RG="Sentinel"
+LAW_NAME="DIBSecCom"
 
 SECRETS_FILE="bot-app/deployment/.bot-secrets.json"
 
@@ -53,14 +57,37 @@ fi
 
 BOT_SECRET=$(python3 -c "import json; print(json.load(open('${SECRETS_FILE}'))['password'])")
 
+# Fetch DIBSecCom LAW credentials (cross-subscription)
+LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
+  --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
+  --subscription "${SECURITY_SUB}" --query customerId -o tsv)
+LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys \
+  --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
+  --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv)
+echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
+
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║  Bot App Service Deployment                                 ║"
+echo "║  Bot Container App Deployment                               ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
-# ── Step 1: Deploy Bicep (App Service Plan + App Service) ────────
+# ── Step 1: Build & push bot container to ACR ────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│ Step 1/4: Deploying App Service infrastructure (Bicep)      │"
+echo "│ Step 1/4: Building bot container image in ACR               │"
+echo "└──────────────────────────────────────────────────────────────┘"
+
+az acr build \
+  --registry "${BOT_ACR_NAME}" \
+  --image zolab-bot:latest \
+  --file bot-app/Dockerfile \
+  .
+
+echo "  ✓ Bot container image pushed to ${BOT_ACR_NAME}.azurecr.io/zolab-bot:latest"
+echo ""
+
+# ── Step 2: Deploy Bicep (Container App + Bot Service) ────────────
+echo "┌──────────────────────────────────────────────────────────────┐"
+echo "│ Step 2/4: Deploying Container App infrastructure (Bicep)    │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
 az deployment sub create \
@@ -70,24 +97,12 @@ az deployment sub create \
     suffix="${SUFFIX}" \
     botAppId="${BOT_APP_ID}" \
     tenantId="${TENANT_ID}" \
-    deployAppService=true \
+    botAppSecret="${BOT_SECRET}" \
+    logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
+    logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
   --output none
 
-echo "  ✓ App Service Plan + App Service deployed"
-echo ""
-
-# ── Step 2: Set client secret on App Service ─────────────────────
-echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│ Step 2/4: Setting client secret on App Service              │"
-echo "└──────────────────────────────────────────────────────────────┘"
-
-az webapp config appsettings set \
-  --name "${APP_SERVICE_NAME}" \
-  --resource-group "${RG_BOT}" \
-  --settings "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET=${BOT_SECRET}" \
-  --output none
-
-echo "  ✓ Client secret configured"
+echo "  ✓ Container App + Bot Service deployed"
 echo ""
 
 # ── Step 3: Grant bot UAMI Storage RBAC on worker storage ────────
@@ -116,18 +131,18 @@ az role assignment create \
 echo "  ✓ Storage Queue + Blob RBAC granted on ${WORKER_STORAGE_ACCOUNT}"
 echo ""
 
-# ── Step 4: Build & push bot container to ACR ────────────────────
+# ── Step 4: Verify deployment ─────────────────────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│ Step 4/4: Building bot container image in ACR               │"
+echo "│ Step 4/4: Verifying deployment                              │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
-az acr build \
-  --registry "${BOT_ACR_NAME}" \
-  --image zolab-bot:latest \
-  --file bot-app/Dockerfile \
-  .
+CA_FQDN=$(az containerapp show \
+  --name "${CONTAINER_APP_NAME}" \
+  --resource-group "${RG_BOT}" \
+  --query "properties.configuration.ingress.fqdn" \
+  -o tsv)
 
-echo "  ✓ Bot container image pushed to ${BOT_ACR_NAME}.azurecr.io/zolab-bot:latest"
+echo "  ✓ Container App FQDN: ${CA_FQDN}"
 echo ""
 
 # ── Done ─────────────────────────────────────────────────────────
@@ -135,12 +150,15 @@ echo "╔═══════════════════════�
 echo "║  Deployment complete!                                       ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║                                                             ║"
-echo "║  App Service: https://${APP_SERVICE_NAME}.azurewebsites.net ║"
-echo "║  Bot Endpoint: .../api/messages                             ║"
+echo "║  Container App: https://${CA_FQDN}                          "
+echo "║  Bot Endpoint:  https://${CA_FQDN}/api/messages              "
+echo "║                                                             ║"
+echo "║  Useful commands:                                           ║"
+echo "║    az containerapp logs show -n ${CONTAINER_APP_NAME} -g ${RG_BOT}"
+echo "║    az containerapp revision list -n ${CONTAINER_APP_NAME} -g ${RG_BOT} -o table"
 echo "║                                                             ║"
 echo "║  Next steps:                                                ║"
-echo "║    1. az webapp restart -n ${APP_SERVICE_NAME} -g ${RG_BOT} ║"
-echo "║    2. az webapp log tail -n ${APP_SERVICE_NAME} -g ${RG_BOT}║"
-echo "║    3. Open Teams → Bot the Builder → send 'health'         ║"
+echo "║    1. Open Teams → Bot the Builder → send 'health'         ║"
+echo "║    2. Test 'list builds' and 'build it' commands            ║"
 echo "║                                                             ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
