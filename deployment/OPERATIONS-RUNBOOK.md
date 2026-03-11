@@ -28,6 +28,8 @@ BOT_SECRET=$(bash deployment/get-bot-secret.sh)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show --resource-group Sentinel --workspace-name DIBSecCom --subscription 192ad012-896e-4f14-8525-c37a2a9640f9 --query customerId -o tsv)
 LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys --resource-group Sentinel --workspace-name DIBSecCom --subscription 192ad012-896e-4f14-8525-c37a2a9640f9 --query primarySharedKey -o tsv)
 BOT_APP_REGISTRATION_NAME=$(az ad app show --id ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef --query displayName -o tsv)
+CURRENT_USER_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
+OPERATOR_GROUP_OBJECT_ID=$(az ad group list --filter "displayName eq 'zolab-ai-dev'" --query '[0].id' -o tsv)
 
 az deployment sub create \
   --location eastus2 \
@@ -40,6 +42,8 @@ az deployment sub create \
     logAnalyticsCustomerId="$LAW_CUSTOMER_ID" \
     logAnalyticsSharedKey="$LAW_SHARED_KEY" \
     logAnalyticsWorkspaceResourceId=/subscriptions/192ad012-896e-4f14-8525-c37a2a9640f9/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom \
+    operatorPrincipalId="$CURRENT_USER_OBJECT_ID" \
+    operatorGroupPrincipalId="$OPERATOR_GROUP_OBJECT_ID" \
     botAppRegistrationName="$BOT_APP_REGISTRATION_NAME" \
     botImageTag="<prior-bot-tag>"
 ```

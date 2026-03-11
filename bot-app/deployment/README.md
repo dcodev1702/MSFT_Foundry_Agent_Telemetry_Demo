@@ -45,6 +45,7 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | Key Vault auditing | Diagnostic settings on the bot Key Vault stream to DIBSecCom LAW |
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
 | Bot Azure access | UAMI attached to the Container App and granted `Key Vault Secrets User` on the bot Key Vault |
+| Shared operator access | `zolab-ai-dev` is granted `Key Vault Secrets User` on the bot Key Vault so additional operators can run deploy scripts |
 | Worker storage access | Additional RBAC assigned by `deploy-bot-app.sh` |
 
 ---
@@ -65,7 +66,7 @@ bot-app/deployment/
 |---|---|
 | [deploy-bot-app.sh](deploy-bot-app.sh) | End-to-end bot image build, infra deploy, RBAC wiring, and verification |
 | [bot-infra.bicep](bot-infra.bicep) | Subscription-scoped entry point for bot resources |
-| [bot-infra.bicepparam](bot-infra.bicepparam) | Parameter defaults for the bot deployment |
+| [bot-infra.bicepparam](bot-infra.bicepparam) | Parameter defaults for the bot deployment, including shared Key Vault operator access |
 | [modules/bot-resources.bicep](modules/bot-resources.bicep) | Container App, ACR, UAMI, and Azure Bot Service resources |
 
 ---
@@ -108,6 +109,7 @@ The deploy script resolves these values at runtime:
 - Bot app ID
 - Tenant ID
 - Bot app secret from `zolabbotkv<suffix>` secret `bot-app-client-secret`
+- Shared Entra operator group (`zolab-ai-dev`) so new Key Vaults preserve multi-operator secret access
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription
 - Worker storage scope for RBAC assignment
 

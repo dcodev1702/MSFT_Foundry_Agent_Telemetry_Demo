@@ -43,7 +43,13 @@ if ! docker version &>/dev/null; then
     exit 1
 fi
 
+BOT_SECRET_OVERRIDE_PRESENT=0
+if [[ -n "${BOT_SECRET:-}" ]]; then
+  BOT_SECRET_OVERRIDE_PRESENT=1
+fi
+
 BOT_SECRET="$(resolve_bot_secret)"
+BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
 WORKER_IMAGE_TAG="workerfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 WORKER_BUILD_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 WORKER_BUILD_COMMIT=$(git rev-parse HEAD)

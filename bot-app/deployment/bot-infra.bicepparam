@@ -19,3 +19,4 @@ param tenantId = 'b22dee98-83da-4207-b9ab-5ba931866f44'
 // ── Optional (defaults are fine for dev/pilot) ────────────────
 param location           = 'eastus2'
 param appServicePlanSku  = 'B1'
+param operatorGroupPrincipalId = '8b75f31d-b624-4e40-837e-65692e9a5922'

@@ -35,6 +35,9 @@ param logAnalyticsWorkspaceResourceId string
 @description('Object ID of the current deployment operator to grant Key Vault secret access')
 param operatorPrincipalId string = ''
 
+@description('Object ID of the shared operator group to grant Key Vault secret access')
+param operatorGroupPrincipalId string = ''
+
 @description('Bot app registration display name')
 param botAppRegistrationName string = 'unknown-app-registration'
 
@@ -171,6 +174,16 @@ resource operatorKeyVaultSecretsOfficer 'Microsoft.Authorization/roleAssignments
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsOfficer)
     principalId: operatorPrincipalId
     principalType: 'User'
+  }
+}
+
+resource operatorGroupKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(operatorGroupPrincipalId)) {
+  scope: keyVault
+  name: guid(keyVault.id, operatorGroupPrincipalId, roles.keyVaultSecretsUser)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsUser)
+    principalId: operatorGroupPrincipalId
+    principalType: 'Group'
   }
 }
 

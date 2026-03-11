@@ -54,6 +54,9 @@ param logAnalyticsWorkspaceResourceId string
 @description('Object ID of the current deployment operator to grant Key Vault secret access')
 param operatorPrincipalId string = ''
 
+@description('Object ID of the shared operator group to grant Key Vault secret access')
+param operatorGroupPrincipalId string = ''
+
 @description('Bot app registration display name')
 param botAppRegistrationName string = 'unknown-app-registration'
 
@@ -82,6 +85,7 @@ module botResources 'modules/bot-resources.bicep' = {
     logAnalyticsSharedKey: logAnalyticsSharedKey
     logAnalyticsWorkspaceResourceId: logAnalyticsWorkspaceResourceId
     operatorPrincipalId: operatorPrincipalId
+    operatorGroupPrincipalId: operatorGroupPrincipalId
     botAppRegistrationName: botAppRegistrationName
     botImageTag: botImageTag
   }
