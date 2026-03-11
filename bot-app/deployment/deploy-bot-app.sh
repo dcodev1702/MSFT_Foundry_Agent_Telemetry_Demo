@@ -14,9 +14,12 @@
 # Prerequisites:
 #   - az login (authenticated)
 #   - local Docker daemon available
-#   - bot-app/deployment/.bot-secrets.json exists
+#   - Key Vault secret bot-app-client-secret exists in zolabbotkv<suffix>
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/../../deployment/bot-secret-common.sh"
 
 # ── Configuration ────────────────────────────────────────────────
 SUFFIX="botprd"
@@ -38,10 +41,12 @@ SECURITY_SUB="192ad012-896e-4f14-8525-c37a2a9640f9"
 LAW_RG="Sentinel"
 LAW_NAME="DIBSecCom"
 
-SECRETS_FILE="bot-app/deployment/.bot-secrets.json"
+BOT_SECRET_SUFFIX="${SUFFIX}"
+BOT_SECRET_NAME="${BOT_SECRET_NAME:-bot-app-client-secret}"
+BOT_KEY_VAULT_NAME="${BOT_SECRET_KEYVAULT_NAME:-zolabbotkv${SUFFIX}}"
+LAW_WORKSPACE_RESOURCE_ID="/subscriptions/${SECURITY_SUB}/resourceGroups/${LAW_RG}/providers/Microsoft.OperationalInsights/workspaces/${LAW_NAME}"
 
 # ── Resolve repo root ───────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
@@ -56,14 +61,15 @@ if ! docker version &>/dev/null; then
   exit 1
 fi
 
-if [[ ! -f "${SECRETS_FILE}" ]]; then
-    echo "ERROR: ${SECRETS_FILE} not found." >&2
-    exit 1
-fi
-
-BOT_SECRET=$(python3 -c "import json; print(json.load(open('${SECRETS_FILE}'))['password'])")
+BOT_SECRET="$(resolve_bot_secret)"
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 BOT_APP_REGISTRATION_NAME="Bot-The-Builder"
+CURRENT_USER_OBJECT_ID="$(az ad signed-in-user show --query id -o tsv 2>/dev/null || true)"
+
+echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
+if [[ -n "${CURRENT_USER_OBJECT_ID}" ]]; then
+  echo "  ✓ Current operator object ID: ${CURRENT_USER_OBJECT_ID}"
+fi
 
 CURRENT_BOT_APP_REGISTRATION_NAME=$(az ad app show --id "${BOT_APP_ID}" --query displayName -o tsv)
 if [[ "${CURRENT_BOT_APP_REGISTRATION_NAME}" != "${BOT_APP_REGISTRATION_NAME}" ]]; then
@@ -120,6 +126,8 @@ az deployment sub create \
     botAppSecret="${BOT_SECRET}" \
     logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
     logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
+    logAnalyticsWorkspaceResourceId="${LAW_WORKSPACE_RESOURCE_ID}" \
+    operatorPrincipalId="${CURRENT_USER_OBJECT_ID}" \
     botAppRegistrationName="${BOT_APP_REGISTRATION_NAME}" \
     botImageTag="${BOT_IMAGE_TAG}" \
   --output none
@@ -164,7 +172,14 @@ CA_FQDN=$(az containerapp show \
   --query "properties.configuration.ingress.fqdn" \
   -o tsv)
 
+KEY_VAULT_SECRET_ID=$(az keyvault secret show \
+  --vault-name "${BOT_KEY_VAULT_NAME}" \
+  --name "${BOT_SECRET_NAME}" \
+  --query id \
+  -o tsv)
+
 echo "  ✓ Container App FQDN: ${CA_FQDN}"
+echo "  ✓ Bot Key Vault secret: ${KEY_VAULT_SECRET_ID}"
 echo ""
 
 # ── Done ─────────────────────────────────────────────────────────
@@ -173,6 +188,7 @@ echo "║  Deployment complete!                                       ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║                                                             ║"
 echo "║  Bot Image Tag: ${BOT_IMAGE_TAG}"
+echo "║  Bot Key Vault: ${BOT_KEY_VAULT_NAME}"
 echo "║  Container App: https://${CA_FQDN}                          "
 echo "║  Bot Endpoint:  https://${CA_FQDN}/api/messages              "
 echo "║                                                             ║"

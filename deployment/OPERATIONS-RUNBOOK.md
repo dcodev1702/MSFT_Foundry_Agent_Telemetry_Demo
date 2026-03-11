@@ -24,7 +24,7 @@ az containerapp revision list \
 Rollback the bot to a prior immutable image tag:
 
 ```bash
-BOT_SECRET=$(python3 -c "import json; print(json.load(open('bot-app/deployment/.bot-secrets.json'))['password'])")
+BOT_SECRET=$(bash deployment/get-bot-secret.sh)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show --resource-group Sentinel --workspace-name DIBSecCom --subscription 192ad012-896e-4f14-8525-c37a2a9640f9 --query customerId -o tsv)
 LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys --resource-group Sentinel --workspace-name DIBSecCom --subscription 192ad012-896e-4f14-8525-c37a2a9640f9 --query primarySharedKey -o tsv)
 BOT_APP_REGISTRATION_NAME=$(az ad app show --id ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef --query displayName -o tsv)
@@ -39,6 +39,7 @@ az deployment sub create \
     botAppSecret="$BOT_SECRET" \
     logAnalyticsCustomerId="$LAW_CUSTOMER_ID" \
     logAnalyticsSharedKey="$LAW_SHARED_KEY" \
+    logAnalyticsWorkspaceResourceId=/subscriptions/192ad012-896e-4f14-8525-c37a2a9640f9/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom \
     botAppRegistrationName="$BOT_APP_REGISTRATION_NAME" \
     botImageTag="<prior-bot-tag>"
 ```
@@ -70,7 +71,7 @@ az container exec \
 Rollback the worker to a prior immutable image tag:
 
 ```bash
-BOT_SECRET=$(python3 -c "import json; print(json.load(open('bot-app/deployment/.bot-secrets.json'))['password'])")
+BOT_SECRET=$(bash deployment/get-bot-secret.sh)
 
 az deployment sub create \
   --location eastus2 \

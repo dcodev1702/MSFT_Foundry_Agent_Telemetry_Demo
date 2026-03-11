@@ -12,7 +12,7 @@ This deployment is separate from the root Foundry environment deployment in [../
 |---|---|
 | Azure CLI | Installed and authenticated with access to the `zolab` subscription |
 | Docker | Local Docker daemon available for clean local image builds and pushes |
-| Bot secrets file | `bot-app/deployment/.bot-secrets.json` must exist and include the bot app password |
+| Bot secret source | Required: bot deployment Key Vault secret `bot-app-client-secret` in `zolabbotkv<suffix>` |
 | Security subscription access | Needed to read the DIBSecCom Log Analytics workspace keys in `Sentinel` |
 | ACR push permissions | Required to log in and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
@@ -31,6 +31,7 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | `zolab-bot-<suffix>` | Resource Group | Dedicated resource group for the bot surface |
 | `zolabbotacr<suffix>` | Azure Container Registry | Stores the bot image |
 | `zolab-bot-mi-<suffix>` | User-Assigned Managed Identity | Used for ACR pulls and bot-side Azure access |
+| `zolabbotkv<suffix>` | Azure Key Vault | Stores the bot app secret for bot and worker deployments |
 | `zolab-bot-env-<suffix>` | Container Apps Environment | Hosts the Container App and ships logs to DIBSecCom LAW |
 | `zolab-bot-ca-<suffix>` | Azure Container App | Hosts the aiohttp/M365 Agents SDK bot runtime |
 | `zolab-bot-<suffix>` | Azure Bot Service | Teams-facing bot registration |
@@ -41,8 +42,9 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | Capability | Implementation |
 |---|---|
 | Log destination | Cross-subscription DIBSecCom Log Analytics workspace |
+| Key Vault auditing | Diagnostic settings on the bot Key Vault stream to DIBSecCom LAW |
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
-| Bot Azure access | UAMI attached to the Container App |
+| Bot Azure access | UAMI attached to the Container App and granted `Key Vault Secrets User` on the bot Key Vault |
 | Worker storage access | Additional RBAC assigned by `deploy-bot-app.sh` |
 
 ---
@@ -105,7 +107,7 @@ The deploy script resolves these values at runtime:
 
 - Bot app ID
 - Tenant ID
-- Bot app secret from `.bot-secrets.json`
+- Bot app secret from `zolabbotkv<suffix>` secret `bot-app-client-secret`
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription
 - Worker storage scope for RBAC assignment
 

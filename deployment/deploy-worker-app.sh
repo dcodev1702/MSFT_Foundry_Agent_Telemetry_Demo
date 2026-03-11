@@ -12,6 +12,9 @@
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/bot-secret-common.sh"
+
 SUFFIX="botprd"
 LOCATION="eastus2"
 BOT_APP_ID="ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef"
@@ -25,9 +28,8 @@ MANAGED_IDENTITY_RESOURCE_ID="/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2b
 MANAGED_IDENTITY_PRINCIPAL_ID="e9a17b6f-74e3-44f4-ae3e-14dd48d5c251"
 MANAGED_IDENTITY_CLIENT_ID="59bffc04-c429-4580-9833-8ce88c088877"
 
-SECRETS_FILE="bot-app/deployment/.bot-secrets.json"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BOT_SECRET_SUFFIX="${SUFFIX}"
+BOT_SECRET_NAME="${BOT_SECRET_NAME:-bot-app-client-secret}"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
@@ -41,15 +43,12 @@ if ! docker version &>/dev/null; then
     exit 1
 fi
 
-if [[ ! -f "${SECRETS_FILE}" ]]; then
-    echo "ERROR: ${SECRETS_FILE} not found." >&2
-    exit 1
-fi
-
-BOT_SECRET=$(python3 -c "import json; print(json.load(open('${SECRETS_FILE}'))['password'])")
+BOT_SECRET="$(resolve_bot_secret)"
 WORKER_IMAGE_TAG="workerfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 WORKER_BUILD_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 WORKER_BUILD_COMMIT=$(git rev-parse HEAD)
+
+echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Worker Container Deployment                                ║"

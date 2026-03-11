@@ -29,6 +29,12 @@ param logAnalyticsCustomerId string
 @description('Log Analytics Workspace shared key — DIBSecCom in Security sub')
 param logAnalyticsSharedKey string
 
+@description('Log Analytics Workspace resource ID — DIBSecCom in Security sub')
+param logAnalyticsWorkspaceResourceId string
+
+@description('Object ID of the current deployment operator to grant Key Vault secret access')
+param operatorPrincipalId string = ''
+
 @description('Bot app registration display name')
 param botAppRegistrationName string = 'unknown-app-registration'
 
@@ -41,11 +47,16 @@ var acrName             = 'zolabbotacr${suffix}'
 var botServiceName      = 'zolab-bot-${suffix}'
 var containerEnvName    = 'zolab-bot-env-${suffix}'
 var containerAppName    = 'zolab-bot-ca-${suffix}'
+var keyVaultName        = 'zolabbotkv${suffix}'
+var botSecretName       = 'bot-app-client-secret'
+var botSecretKeyVaultUrl = 'https://${keyVaultName}${environment().suffixes.keyvaultDns}/secrets/${botSecretName}'
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
 var roles = {
   contributor: 'b24988ac-6180-42a0-ab88-20f7382dd24c'
   acrPull:     '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+  keyVaultSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6'
+  keyVaultSecretsOfficer: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -97,10 +108,88 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
   }
 }
 
+// ── Key Vault ──────────────────────────────────────────────────
+resource keyVault 'Microsoft.KeyVault/vaults@2024-04-01-preview' = {
+  name: keyVaultName
+  location: location
+  properties: {
+    tenantId: tenant().tenantId
+    sku: {
+      family: 'A'
+      name: 'standard'
+    }
+    enabledForDeployment: true
+    enabledForTemplateDeployment: true
+    enabledForDiskEncryption: true
+    enableSoftDelete: true
+    softDeleteRetentionInDays: 7
+    enablePurgeProtection: true
+    enableRbacAuthorization: true
+    publicNetworkAccess: 'Enabled'
+    networkAcls: {
+      defaultAction: 'Allow'
+      bypass: 'AzureServices'
+    }
+  }
+}
+
+resource keyVaultDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
+  name: '${keyVaultName}-audit'
+  scope: keyVault
+  properties: {
+    workspaceId: logAnalyticsWorkspaceResourceId
+    logAnalyticsDestinationType: 'AzureDiagnostics'
+    logs: [
+      {
+        categoryGroup: 'allLogs'
+        enabled: true
+      }
+    ]
+    metrics: [
+      {
+        category: 'AllMetrics'
+        enabled: false
+      }
+    ]
+  }
+}
+
+resource botManagedIdentityKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: keyVault
+  name: guid(keyVault.id, botManagedIdentity.name, roles.keyVaultSecretsUser)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsUser)
+    principalId: botManagedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource operatorKeyVaultSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(operatorPrincipalId)) {
+  scope: keyVault
+  name: guid(keyVault.id, operatorPrincipalId, roles.keyVaultSecretsOfficer)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsOfficer)
+    principalId: operatorPrincipalId
+    principalType: 'User'
+  }
+}
+
+resource botAppSecretResource 'Microsoft.KeyVault/vaults/secrets@2024-04-01-preview' = {
+  parent: keyVault
+  name: botSecretName
+  properties: {
+    value: botAppSecret
+  }
+}
+
 // ── Container App (Bot Web Server) ──────────────────────────────
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   name: containerAppName
   location: location
+  dependsOn: [
+    botManagedIdentityKeyVaultSecretsUser
+    botAppSecretResource
+  ]
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -126,7 +215,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       secrets: [
         {
           name: 'bot-app-secret'
-          value: botAppSecret
+          keyVaultUrl: botSecretKeyVaultUrl
+          identity: botManagedIdentity.id
         }
       ]
     }
@@ -258,5 +348,7 @@ output managedIdentityClientId string = botManagedIdentity.properties.clientId
 output managedIdentityResourceId string = botManagedIdentity.id
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
+output keyVaultName string = keyVault.name
+output keyVaultSecretUri string = botSecretKeyVaultUrl
 output botServiceName string = azureBot.name
 output messagingEndpoint string = 'https://${containerApp.properties.configuration.ingress.fqdn}/api/messages'

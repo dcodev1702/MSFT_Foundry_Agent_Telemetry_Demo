@@ -48,6 +48,12 @@ param logAnalyticsCustomerId string
 @description('DIBSecCom Log Analytics Workspace shared key (Security sub)')
 param logAnalyticsSharedKey string
 
+@description('DIBSecCom Log Analytics Workspace resource ID (Security sub)')
+param logAnalyticsWorkspaceResourceId string
+
+@description('Object ID of the current deployment operator to grant Key Vault secret access')
+param operatorPrincipalId string = ''
+
 @description('Bot app registration display name')
 param botAppRegistrationName string = 'unknown-app-registration'
 
@@ -74,6 +80,8 @@ module botResources 'modules/bot-resources.bicep' = {
     botAppSecret: botAppSecret
     logAnalyticsCustomerId: logAnalyticsCustomerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
+    logAnalyticsWorkspaceResourceId: logAnalyticsWorkspaceResourceId
+    operatorPrincipalId: operatorPrincipalId
     botAppRegistrationName: botAppRegistrationName
     botImageTag: botImageTag
   }
@@ -90,5 +98,7 @@ output managedIdentityClientId string = botResources.outputs.managedIdentityClie
 output managedIdentityResourceId string = botResources.outputs.managedIdentityResourceId
 output acrLoginServer string = botResources.outputs.acrLoginServer
 output acrName string = botResources.outputs.acrName
+output keyVaultName string = botResources.outputs.keyVaultName
+output keyVaultSecretUri string = botResources.outputs.keyVaultSecretUri
 output botServiceName string = botResources.outputs.botServiceName
 output messagingEndpoint string = botResources.outputs.messagingEndpoint
