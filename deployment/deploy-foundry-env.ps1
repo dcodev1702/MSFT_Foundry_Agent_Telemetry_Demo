@@ -75,7 +75,7 @@ function Get-AzureCliContext {
     $cliContextJson | ConvertFrom-Json
 }
 
-function Ensure-AzureSession {
+function Set-AzureSession {
     param(
         [Parameter(Mandatory)]
         [string]$SubscriptionId,
@@ -1529,7 +1529,7 @@ if ($UseTeamsChatFlow) {
 # ── 3. Set Azure subscription context (both Az PowerShell and az CLI) ──
 # ListBuilds and BuildStatus are read-only — skip az CLI hard validation for those modes
 $skipAzCli = ($ListBuilds -or $BuildStatusResourceGroup)
-$azureSession = Ensure-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $currentUser.Account } else { $null }) -SkipAzCliValidation:$skipAzCli
+$azureSession = Set-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $currentUser.Account } else { $null }) -SkipAzCliValidation:$skipAzCli
 Write-Host "Subscription set to $($azureSession.SubscriptionName) ($subscriptionId)"
 if ($UseTeamsChatFlow) {
     Write-Host "Azure account validated for Teams chat flow: $($azureSession.PowerShellAccount)"
