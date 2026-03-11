@@ -41,6 +41,14 @@ if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
         Write-Host "No Az session — connecting via managed identity (AZURE_CLIENT_ID=$miClientId)..."
         Connect-AzAccount -Identity -AccountId $miClientId -ErrorAction Stop | Out-Null
         Write-Host "Authenticated via managed identity."
+
+        # Also authenticate Azure CLI with managed identity
+        & az login --identity --username $miClientId --output none 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Azure CLI authenticated via managed identity."
+        } else {
+            Write-Host "WARNING: Azure CLI managed identity auth failed (non-fatal for list/cleanup operations)."
+        }
     }
 }
 

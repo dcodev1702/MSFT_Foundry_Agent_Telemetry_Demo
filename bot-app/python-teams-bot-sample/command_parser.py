@@ -51,7 +51,11 @@ def parse_command(text: str | None) -> FoundryCommand:
             )
 
     if normalized == "teardown":
-        return FoundryCommand(kind="teardown-select", raw_text=raw_text)
+        return FoundryCommand(
+            kind="teardown",
+            raw_text=raw_text,
+            requires_confirmation=True,
+        )
 
     if normalized.startswith("teardown "):
         resource_group = _strip_quotes(raw_text[len("teardown "):])

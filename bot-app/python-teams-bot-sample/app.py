@@ -36,7 +36,7 @@ from microsoft_agents.hosting.core import (
 from conversation_store import BlobConversationStore
 from job_dispatcher import AzureQueueJobDispatcher
 from proactive import ProactiveMessenger
-from storage_config import get_queue_client
+from storage_config import get_blob_service_client, get_queue_client, BLOB_CONTAINER_NAME
 from worker import BackgroundWorker
 from heartbeat import HeartbeatService
 
@@ -127,6 +127,34 @@ async def health_check(request: web.Request) -> web.Response:
     return web.json_response({"status": "healthy", "service": "foundry-teams-bot"})
 
 
+async def download_build_info(request: web.Request) -> web.Response:
+    """GET /api/download/{filename} — serve build_info files from blob storage."""
+    import re
+
+    filename = request.match_info["filename"]
+
+    # Only allow build_info-*.json filenames
+    if not re.match(r"^build_info-[a-z0-9]+\.json$", filename):
+        return web.Response(status=404, text="Not found")
+
+    try:
+        blob_client = get_blob_service_client().get_blob_client(
+            container=BLOB_CONTAINER_NAME, blob=f"builds/{filename}",
+        )
+        download = blob_client.download_blob()
+        data = download.readall()
+
+        return web.Response(
+            body=data,
+            content_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except Exception:
+        return web.Response(status=404, text="File not found")
+
+
 # ── Lifecycle Hooks ────────────────────────────────────────────
 async def on_startup(app: web.Application) -> None:
     if WORKER_ENABLED:
@@ -166,6 +194,7 @@ def create_app(argv=None) -> web.Application:
     # Routes
     app.router.add_post("/api/messages", agent_entry_point)
     app.router.add_get("/api/messages", health_check)
+    app.router.add_get("/api/download/{filename}", download_build_info)
 
     # Lifecycle
     app.on_startup.append(on_startup)

@@ -23,7 +23,13 @@ from microsoft_agents.hosting.core import (
 from command_parser import parse_command
 from conversation_store import BlobConversationStore
 from job_dispatcher import AzureQueueJobDispatcher
-from models import ALLOWED_MODELS, BuildSession, PendingConfirmation, QueuedJob
+from models import (
+    ALLOWED_MODELS,
+    BuildSession,
+    PendingConfirmation,
+    QueuedJob,
+    TeardownSession,
+)
 
 
 def _utc_now() -> str:
@@ -33,6 +39,7 @@ def _utc_now() -> str:
 # ── Module-level state ────────────────────────────────────────
 _last_response_utc: str = "No Teams response has been sent yet."
 _build_sessions: dict[str, BuildSession] = {}
+_teardown_sessions: dict[str, TeardownSession] = {}
 _pending_confirmations: dict[str, PendingConfirmation] = {}
 SESSION_TIMEOUT = 600  # 10 minutes
 
@@ -78,7 +85,8 @@ def _get_help_text() -> str:
         "- `build it <model>` — deploy with specified model",
         "- `list builds` — list all active Foundry deployments",
         "- `build status <resource-group>` — check a specific deployment",
-        "- `teardown <resource-group>` — remove a Foundry deployment",
+        "- `teardown` — remove a Foundry deployment (prompts for build selection)",
+        "- `teardown <resource-group>` — remove a specific deployment",
         "- `heartbeat` — check bot health and metrics",
         "- `listener status` — check worker and queue status",
         "- `help` — show this message",
@@ -101,20 +109,15 @@ def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
 # ── Build-session helpers ─────────────────────────────────────
 
 def _expire_sessions() -> None:
-    """Remove build sessions and pending confirmations older than SESSION_TIMEOUT."""
+    """Remove stale sessions and pending confirmations older than SESSION_TIMEOUT."""
     now = datetime.now(timezone.utc).timestamp()
-    expired = [
-        cid for cid, s in _build_sessions.items()
-        if now - s.created_at > SESSION_TIMEOUT
-    ]
-    for cid in expired:
-        del _build_sessions[cid]
-    expired_conf = [
-        cid for cid, c in _pending_confirmations.items()
-        if now - c.created_at > SESSION_TIMEOUT
-    ]
-    for cid in expired_conf:
-        del _pending_confirmations[cid]
+    for store in (_build_sessions, _teardown_sessions, _pending_confirmations):
+        expired = [
+            cid for cid, s in store.items()
+            if now - s.created_at > SESSION_TIMEOUT
+        ]
+        for cid in expired:
+            del store[cid]
 
 
 def _model_selection_prompt() -> str:
@@ -122,6 +125,36 @@ def _model_selection_prompt() -> str:
     for i, model in enumerate(ALLOWED_MODELS, 1):
         lines.append(f"{i}. `{model}`")
     lines.append("<br>Reply with a **number** or the **model name**.")
+    lines.append("Type `cancel` to abort.")
+    return "<br>".join(lines)
+
+
+def _list_foundry_builds() -> list[str]:
+    """Query Azure for zolab-ai-* resource groups (active Foundry builds)."""
+    try:
+        from azure.identity import DefaultAzureCredential
+        from azure.mgmt.resource import ResourceManagementClient
+
+        client_id = os.getenv("AZURE_CLIENT_ID")
+        credential = DefaultAzureCredential(
+            managed_identity_client_id=client_id
+        )
+        sub_id = os.getenv("AZURE_SUBSCRIPTION_ID", "08fdc492-f5aa-4601-84ae-03a37449c2ba")
+        client = ResourceManagementClient(credential, sub_id)
+        groups = client.resource_groups.list()
+        return sorted(
+            rg.name for rg in groups
+            if rg.name and rg.name.startswith("zolab-ai-")
+        )
+    except Exception:
+        return []
+
+
+def _teardown_selection_prompt(builds: list[str]) -> str:
+    lines = ["**Select a build to teardown:**<br>"]
+    for i, rg in enumerate(builds, 1):
+        lines.append(f"{i}. `{rg}`")
+    lines.append("<br>Reply with a **number** or the **resource group name**.")
     lines.append("Type `cancel` to abort.")
     return "<br>".join(lines)
 
@@ -269,6 +302,75 @@ async def _handle_build_selection(
         heartbeat_service.update_last_response(_last_response_utc)
 
 
+# ── Teardown-selection handler ────────────────────────────────
+
+async def _handle_teardown_selection(
+    context: TurnContext,
+    raw_text: str,
+    conversation_id: str,
+    *,
+    heartbeat_service=None,
+) -> None:
+    """Process a user's build-selection reply during an active TeardownSession."""
+    global _last_response_utc
+    activity = context.activity
+    choice = raw_text.strip()
+    session = _teardown_sessions[conversation_id]
+
+    # Cancel
+    if choice.lower() == "cancel":
+        del _teardown_sessions[conversation_id]
+        await context.send_activity(MessageFactory.text("Teardown cancelled."))
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Resolve resource group — by number or name
+    selected_rg: str | None = None
+
+    if choice.isdigit():
+        idx = int(choice)
+        if 1 <= idx <= len(session.builds):
+            selected_rg = session.builds[idx - 1]
+    else:
+        for rg in session.builds:
+            if choice.lower() == rg.lower():
+                selected_rg = rg
+                break
+
+    if selected_rg is None:
+        await context.send_activity(
+            MessageFactory.text(
+                f"Invalid selection: `{choice}`<br><br>"
+                + _teardown_selection_prompt(session.builds)
+            )
+        )
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Valid selection — clear session, move to confirmation
+    del _teardown_sessions[conversation_id]
+
+    pending = PendingConfirmation(
+        operation="teardown",
+        requester=_get_requester(activity),
+        resource_group=selected_rg,
+        source_command=f"teardown {selected_rg}",
+        conversation_scope=_get_conversation_scope(activity),
+    )
+    _pending_confirmations[conversation_id] = pending
+
+    await context.send_activity(
+        MessageFactory.text(_build_confirmation_prompt(pending))
+    )
+    _last_response_utc = _utc_now()
+    if heartbeat_service:
+        heartbeat_service.update_last_response(_last_response_utc)
+
+
 # ── Confirmation handler ──────────────────────────────────────
 
 async def _handle_confirmation(
@@ -368,12 +470,18 @@ def register_handlers(
         raw_text = strip_bot_mention(activity.text)
         conversation_id = activity.conversation.id
 
-        # ── Active sessions? Handle pending confirmation or model selection
+        # ── Active sessions? Handle pending confirmation or selection
         _expire_sessions()
         if conversation_id in _pending_confirmations:
             await _handle_confirmation(
                 context, raw_text, conversation_id,
                 dispatcher=dispatcher,
+                heartbeat_service=heartbeat_service,
+            )
+            return
+        if conversation_id in _teardown_sessions:
+            await _handle_teardown_selection(
+                context, raw_text, conversation_id,
                 heartbeat_service=heartbeat_service,
             )
             return
@@ -490,8 +598,29 @@ def register_handlers(
                 heartbeat_service.update_last_response(_last_response_utc)
             return
 
-        # Teardown — require confirmation before queueing
+        # Teardown — bare command lists builds for selection; with RG goes to confirm
         if command.kind == "teardown":
+            if command.resource_group is None:
+                # Bare teardown — fetch builds and prompt for selection
+                builds = _list_foundry_builds()
+                if not builds:
+                    await context.send_activity(
+                        MessageFactory.text("No active Foundry builds found.")
+                    )
+                    _last_response_utc = _utc_now()
+                    if heartbeat_service:
+                        heartbeat_service.update_last_response(_last_response_utc)
+                    return
+                _teardown_sessions[conversation_id] = TeardownSession(builds=builds)
+                await context.send_activity(
+                    MessageFactory.text(_teardown_selection_prompt(builds))
+                )
+                _last_response_utc = _utc_now()
+                if heartbeat_service:
+                    heartbeat_service.update_last_response(_last_response_utc)
+                return
+
+            # Resource group provided — go straight to confirmation
             pending = PendingConfirmation(
                 operation="teardown",
                 requester=_get_requester(activity),

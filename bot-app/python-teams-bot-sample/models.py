@@ -30,6 +30,15 @@ class BuildSession:
 
 
 @dataclass(slots=True)
+class TeardownSession:
+    """Tracks resource-group selection state for a bare 'teardown' command."""
+    builds: list[str] = field(default_factory=list)
+    created_at: float = field(
+        default_factory=lambda: datetime.now(timezone.utc).timestamp()
+    )
+
+
+@dataclass(slots=True)
 class PendingConfirmation:
     """Tracks a pending yes/no confirmation for a destructive operation."""
     operation: str  # "build" or "teardown"
