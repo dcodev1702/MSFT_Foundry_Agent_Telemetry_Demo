@@ -2,6 +2,14 @@
 
 A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry deployments via chat commands. Runs as an **Azure Container App** with a separate **ACI-hosted worker** for long-running PowerShell operations.
 
+## Related Docs
+
+| Document | Use it for |
+|----------|------------|
+| [../README.md](../README.md) | Bot workspace overview and folder-level navigation |
+| [../deployment/README.md](../deployment/README.md) | Bot infrastructure deployment, ACR build flow, and verification |
+| [../../deployment/README.md](../../deployment/README.md) | Root Foundry environment deployment and teardown automation |
+
 ## Architecture
 
 ```
@@ -141,6 +149,8 @@ bash bot-app/deployment/deploy-bot-app.sh
 ```
 
 This builds both container images, deploys the Bicep infrastructure, grants RBAC, and verifies the deployment. See `bot-app/deployment/deploy-bot-app.sh` for details.
+
+For the full bot infrastructure walkthrough, resource inventory, and rollout notes, see [../deployment/README.md](../deployment/README.md).
 
 ## Teams App
 

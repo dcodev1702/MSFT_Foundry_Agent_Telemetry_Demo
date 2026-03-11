@@ -601,6 +601,60 @@ try {
                     continue
                 }
 
+                try {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Running teardown preview for '$($targetResourceGroup.ResourceGroupName)' before any changes are made...")
+                    Write-Host "Running teardown preview for '$($targetResourceGroup.ResourceGroupName)'."
+
+                    & $deployScript -Cleanup -CleanupResourceGroup $targetResourceGroup.ResourceGroupName -PreviewCleanup -UseTeamsChatFlow -TeamsChatTopic $TeamsChatTopic
+                } catch {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                        @(
+                            "Teardown preview failed for '$($targetResourceGroup.ResourceGroupName)'."
+                            ""
+                            $_.Exception.Message
+                            ""
+                            "Listener is still online."
+                        ) -join "`n"
+                    ))
+                    Write-Warning "Teardown preview failed: $($_.Exception.Message)"
+                    continue
+                }
+
+                $finalConfirmationPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
+                    @(
+                        "Preview finished for '$($targetResourceGroup.ResourceGroupName)'."
+                        "Reply with:"
+                        "1. proceed with teardown"
+                        "2. abort"
+                        ""
+                        "This confirmation expires in $ConfirmationTimeoutMinutes minutes."
+                    ) -join "`n"
+                )
+
+                try {
+                    $finalConfirmation = Wait-FoundryTeamsChatChoice `
+                        -ChatId $chat.Id `
+                        -AllowedChoices @('proceed with teardown', 'abort') `
+                        -PromptCreatedDateTime $finalConfirmationPrompt.CreatedDateTime `
+                        -PromptMessageId $finalConfirmationPrompt.Id `
+                        -TimeoutMinutes $ConfirmationTimeoutMinutes `
+                        -PollIntervalSeconds $PollIntervalSeconds
+                } catch {
+                    if ($_.Exception.Message -like 'Timed out waiting for a Teams response*') {
+                        [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown execution confirmation timed out. Listener is still online.")
+                        Write-Host "Teardown execution confirmation timed out."
+                        continue
+                    }
+
+                    throw
+                }
+
+                if ($finalConfirmation.Choice -eq 'abort') {
+                    [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown request for '$($targetResourceGroup.ResourceGroupName)' aborted after preview. Listener is still online.")
+                    Write-Host "Teardown request aborted after preview."
+                    continue
+                }
+
                 [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message "Teardown confirmed for '$($targetResourceGroup.ResourceGroupName)'. Starting cleanup...")
                 Write-Host "Teardown confirmed for '$($targetResourceGroup.ResourceGroupName)'. Starting cleanup..."
                 try {

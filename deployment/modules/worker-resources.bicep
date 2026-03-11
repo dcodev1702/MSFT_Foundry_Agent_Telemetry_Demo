@@ -32,6 +32,12 @@ param managedIdentityPrincipalId string
 @description('Client ID of the existing User-Assigned Managed Identity')
 param managedIdentityClientId string
 
+@description('CPU requested for the worker container instance')
+param workerCpu int
+
+@description('Memory in GiB requested for the worker container instance')
+param workerMemoryInGb int
+
 // ── Resource Names ────────────────────────────────────────────
 var acrName            = 'zolabworkeracr${suffix}'
 var storageAccountName = 'zolabworkerst${suffix}'
@@ -165,8 +171,8 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
           image: '${acr.properties.loginServer}/zolab-worker:latest'
           resources: {
             requests: {
-              cpu: 1
-              memoryInGB: json('1.5')
+              cpu: workerCpu
+              memoryInGB: json(string(workerMemoryInGb))
             }
           }
           environmentVariables: [

@@ -6,10 +6,12 @@
 #   pwsh ./deploy-foundry-env.ps1 -ListBuilds
 #   pwsh ./deploy-foundry-env.ps1 -BuildStatusResourceGroup zolab-ai-abc123
 #   pwsh ./deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-abc123
+#   pwsh ./deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-abc123 -PreviewCleanup
 #   pwsh ./deploy-foundry-env.ps1 -Cleanup     # tear down resources + RBAC (keeps Entra group)
 param(
     [switch]$Cleanup,
     [string]$CleanupResourceGroup,
+    [switch]$PreviewCleanup,
     [switch]$ListBuilds,
     [string]$BuildStatusResourceGroup,
     [switch]$UseTeamsChatFlow,
@@ -21,6 +23,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot 'teams-chat.ps1')
+. (Join-Path $PSScriptRoot 'foundry-teardown.helpers.ps1')
 
 if ($CleanupResourceGroup) {
     $Cleanup = $true
@@ -32,6 +35,14 @@ if ($BuildStatusResourceGroup -and $Cleanup) {
 
 if ($ListBuilds -and ($Cleanup -or $BuildStatusResourceGroup)) {
     throw "List builds mode cannot be combined with cleanup or build status mode."
+}
+
+if ($PreviewCleanup -and -not $Cleanup) {
+    throw "Preview cleanup mode must be combined with cleanup mode."
+}
+
+if ($PreviewCleanup -and -not $CleanupResourceGroup) {
+    throw "Preview cleanup mode currently supports only targeted cleanup. Specify -CleanupResourceGroup."
 }
 
 # ── Auto-authenticate with Managed Identity when running in ACI/Container Apps ──
@@ -429,7 +440,9 @@ function Write-TeardownStatus {
 
         [string]$SecurityStatus = 'Not applicable',
 
-        [string]$UserStatus = 'Not applicable'
+        [string]$UserStatus = 'Not applicable',
+
+        [switch]$PreviewMode
     )
 
     $rows = @(
@@ -448,7 +461,7 @@ function Write-TeardownStatus {
 
     $lines = @(
         ''
-        '● 🧹🗑️ Teardown complete!'
+        $(if ($PreviewMode) { '● 🔎 Teardown preview complete!' } else { '● 🧹🗑️ Teardown complete!' })
         ''
         ("┌" + ("─" * $itemWidth) + "┬" + ("─" * $statusWidth) + "┐")
         ("│" + " Item".PadRight($itemWidth) + "│" + " Status".PadRight($statusWidth) + "│")
@@ -461,7 +474,7 @@ function Write-TeardownStatus {
 
     $lines += ("└" + ("─" * $itemWidth) + "┴" + ("─" * $statusWidth) + "┘")
     $lines += ''
-    $lines += 'Environment cleanup finished. ✅'
+    $lines += $(if ($PreviewMode) { 'No changes were made. ℹ️' } else { 'Environment cleanup finished. ✅' })
 
     $lines
 }
@@ -692,29 +705,116 @@ function Get-TargetedTeardownSharedAccessPlan {
     )
 
     $remainingBuilds = @(Get-FoundryBuildInventory -ExcludeResourceGroupName $TargetResourceGroupName)
-    $remainingBuildsForCurrentUser = @(
-        $remainingBuilds | Where-Object { $_.RequestedBy -and $_.RequestedBy -ieq $CurrentUserAccount }
+    Get-TargetedTeardownSharedAccessPlanFromInventory -RemainingBuilds $remainingBuilds
+}
+
+function Remove-FoundryManagedResourceGroupAccess {
+    param(
+        [Parameter(Mandatory)]
+        [string]$GroupObjectId,
+
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupScope,
+
+        [Parameter(Mandatory)]
+        [string]$GroupDisplayName,
+
+        [switch]$PreviewOnly
     )
-    $remainingBuildsWithUnknownOwnership = @(
-        $remainingBuilds | Where-Object { -not $_.OwnershipKnown }
+
+    $scopedAssignments = @(
+        Get-AzRoleAssignment -ObjectId $GroupObjectId -Scope $ResourceGroupScope -ErrorAction SilentlyContinue |
+            Where-Object { $_.Scope -ieq $ResourceGroupScope }
+    )
+    $assignmentPlan = Get-FoundryManagedResourceGroupAssignmentPlan `
+        -Assignments $scopedAssignments `
+        -ResourceGroupScope $ResourceGroupScope
+    $managedAssignments = @($assignmentPlan.ManagedAssignments)
+    $preservedAssignments = @($assignmentPlan.PreservedAssignments)
+
+    foreach ($assignment in $managedAssignments) {
+        Write-Host "  Managed role $($(if ($PreviewOnly) { 'planned' } else { 'matched' })): $($assignment.RoleDefinitionName) @ $($assignment.Scope)"
+    }
+    foreach ($assignment in $preservedAssignments) {
+        Write-Host "  Preserving non-managed role: $($assignment.RoleDefinitionName) @ $($assignment.Scope)"
+    }
+
+    if ($PreviewOnly) {
+        $status = if ($managedAssignments) {
+            "Would remove $($managedAssignments.Count) managed scoped assignments from $GroupDisplayName ℹ️"
+        } else {
+            "No managed scoped assignments found for $GroupDisplayName ℹ️"
+        }
+
+        if ($preservedAssignments) {
+            $status += "; would preserve $($preservedAssignments.Count) non-managed scoped assignment(s) ℹ️"
+        }
+
+        return [pscustomobject]@{
+            ManagedAssignments   = $managedAssignments
+            PreservedAssignments = $preservedAssignments
+            Status               = $status
+        }
+    }
+
+    foreach ($assignment in $managedAssignments) {
+        Write-Host "  Removing managed role: $($assignment.RoleDefinitionName) @ $($assignment.Scope)"
+        Remove-AzRoleAssignment -ObjectId $GroupObjectId `
+            -RoleDefinitionName $assignment.RoleDefinitionName `
+            -Scope $assignment.Scope `
+            -ErrorAction SilentlyContinue
+    }
+
+    $status = if ($managedAssignments) {
+        "Removed $($managedAssignments.Count) managed scoped assignments from $GroupDisplayName ✅"
+    } else {
+        "No managed scoped assignments found for $GroupDisplayName ℹ️"
+    }
+
+    if ($preservedAssignments) {
+        $status += "; preserved $($preservedAssignments.Count) non-managed scoped assignment(s) ℹ️"
+    }
+
+    [pscustomobject]@{
+        ManagedAssignments   = $managedAssignments
+        PreservedAssignments = $preservedAssignments
+        Status               = $status
+    }
+}
+
+function Get-FoundryResourceGroupCleanupPreview {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName
+    )
+
+    $cogAccounts = @(
+        Get-AzResource -ResourceGroupName $ResourceGroupName `
+            -ResourceType 'Microsoft.CognitiveServices/accounts' -ErrorAction SilentlyContinue
     )
 
     [pscustomobject]@{
-        RemainingBuilds                  = $remainingBuilds
-        RemainingBuildCount              = $remainingBuilds.Count
-        RemainingBuildNames              = @($remainingBuilds | ForEach-Object { $_.ResourceGroupName })
-        RemainingBuildsForCurrentUser    = $remainingBuildsForCurrentUser
-        RemainingBuildsForCurrentUserCount = $remainingBuildsForCurrentUser.Count
-        RemainingUnknownOwnershipBuilds  = $remainingBuildsWithUnknownOwnership
-        RemainingUnknownOwnershipCount   = $remainingBuildsWithUnknownOwnership.Count
-        ShouldRetainLawRbac              = ($remainingBuilds.Count -gt 0)
-        ShouldRetainUserMembership       = (
-            $remainingBuilds.Count -gt 0 -and (
-                $remainingBuildsForCurrentUser.Count -gt 0 -or
-                $remainingBuildsWithUnknownOwnership.Count -gt 0
-            )
-        )
+        ResourceGroupStatus = "Would delete $ResourceGroupName ℹ️"
+        CognitiveServicesStatus = if ($cogAccounts) {
+            "Would purge $($cogAccounts.Name -join ', ') after resource-group deletion ℹ️"
+        } else {
+            'No Cognitive Services purge work would be required ℹ️'
+        }
     }
+}
+
+function Get-BuildInfoRemovalPreview {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName
+    )
+
+    $buildInfoPath = Get-BuildInfoPathForResourceGroup -ResourceGroupName $ResourceGroupName
+    if (-not $buildInfoPath) {
+        return "No build_info file found for $ResourceGroupName ℹ️"
+    }
+
+    "Would remove $(Split-Path -Leaf $buildInfoPath) for $ResourceGroupName ℹ️"
 }
 
 function Get-FoundryBuildListLines {
@@ -1374,7 +1474,9 @@ function Remove-FoundryLawWorkspaceAccess {
         [string]$WorkloadSubscriptionId,
 
         [Parameter(Mandatory)]
-        [string]$GroupObjectId
+        [string]$GroupObjectId,
+
+        [switch]$PreviewOnly
     )
 
     $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
@@ -1383,29 +1485,34 @@ function Remove-FoundryLawWorkspaceAccess {
 
     try {
         $lawAssignments = Get-AzRoleAssignment -ObjectId $GroupObjectId -Scope $lawScope -ErrorAction SilentlyContinue
-        foreach ($assignment in $lawAssignments) {
-            Write-Host "  Removing: $($assignment.RoleDefinitionName) @ $($assignment.Scope)"
-            Remove-AzRoleAssignment -ObjectId $GroupObjectId `
-                -RoleDefinitionName $assignment.RoleDefinitionName `
-                -Scope $assignment.Scope `
-                -ErrorAction SilentlyContinue
-        }
-
         $lawDeployments = Get-AzSubscriptionDeployment | Where-Object { $_.DeploymentName -like 'law-rbac*' }
-        foreach ($deployment in $lawDeployments) {
-            Write-Host "Removing deployment record '$($deployment.DeploymentName)'..."
-            Remove-AzSubscriptionDeployment -Name $deployment.DeploymentName -ErrorAction SilentlyContinue
+
+        if (-not $PreviewOnly) {
+            foreach ($assignment in $lawAssignments) {
+                Write-Host "  Removing: $($assignment.RoleDefinitionName) @ $($assignment.Scope)"
+                Remove-AzRoleAssignment -ObjectId $GroupObjectId `
+                    -RoleDefinitionName $assignment.RoleDefinitionName `
+                    -Scope $assignment.Scope `
+                    -ErrorAction SilentlyContinue
+            }
+
+            foreach ($deployment in $lawDeployments) {
+                Write-Host "Removing deployment record '$($deployment.DeploymentName)'..."
+                Remove-AzSubscriptionDeployment -Name $deployment.DeploymentName -ErrorAction SilentlyContinue
+            }
         }
     } finally {
         Set-AzContext -SubscriptionId $WorkloadSubscriptionId | Out-Null
     }
 
+    $verb = if ($PreviewOnly) { 'Would remove' } else { 'Removed' }
+
     [pscustomobject]@{
         AssignmentCount = @($lawAssignments).Count
         DeploymentCount = @($lawDeployments).Count
         Status          = @(
-            if ($lawAssignments) { "Removed $($lawAssignments.Count) LAW role assignments ✅" } else { "No LAW role assignments found ℹ️" }
-            if ($lawDeployments) { "Removed $($lawDeployments.Count) LAW deployment records ✅" } else { "No LAW deployment records found ℹ️" }
+            if ($lawAssignments) { "$verb $($lawAssignments.Count) LAW role assignments $($(if ($PreviewOnly) { 'ℹ️' } else { '✅' }))" } else { "No LAW role assignments found ℹ️" }
+            if ($lawDeployments) { "$verb $($lawDeployments.Count) LAW deployment records $($(if ($PreviewOnly) { 'ℹ️' } else { '✅' }))" } else { "No LAW deployment records found ℹ️" }
         ) -join '; '
     }
 }
@@ -1543,7 +1650,11 @@ if ($Cleanup) {
     try {
         if ($UseTeamsChatFlow -and $teamsChatId) {
             $cleanupStartMessage = if ($CleanupResourceGroup) {
-                "Microsoft Foundry teardown started for '$CleanupResourceGroup'."
+                if ($PreviewCleanup) {
+                    "Microsoft Foundry teardown preview started for '$CleanupResourceGroup'."
+                } else {
+                    "Microsoft Foundry teardown started for '$CleanupResourceGroup'."
+                }
             } else {
                 "Microsoft Foundry full teardown started."
             }
@@ -1552,7 +1663,7 @@ if ($Cleanup) {
 
         $teardownProgressNotifier = $null
         try {
-            if ($UseTeamsChatFlow -and $teamsChatId) {
+            if ($UseTeamsChatFlow -and $teamsChatId -and -not $PreviewCleanup) {
                 $teardownProgressMessage = if ($CleanupResourceGroup) {
                     "🚧 Pls hold while we teardown: $CleanupResourceGroup 🚧"
                 } else {
@@ -1565,7 +1676,11 @@ if ($Cleanup) {
             }
 
             if ($CleanupResourceGroup) {
-                Write-Host "=== TARGETED CLEANUP MODE ==="
+                if ($PreviewCleanup) {
+                    Write-Host "=== TARGETED CLEANUP PREVIEW MODE ==="
+                } else {
+                    Write-Host "=== TARGETED CLEANUP MODE ==="
+                }
 
                 $targetResourceGroup = Get-AzResourceGroup -Name $CleanupResourceGroup -ErrorAction SilentlyContinue
                 if (-not $targetResourceGroup) {
@@ -1582,66 +1697,75 @@ if ($Cleanup) {
                     Write-Host "Found Entra group '$groupDisplayName' — ObjectId: $groupObjectId"
 
                     $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$CleanupResourceGroup"
-                    $rgAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -ErrorAction SilentlyContinue
-                    foreach ($a in $rgAssignments) {
-                        Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
-                        Remove-AzRoleAssignment -ObjectId $groupObjectId `
-                            -RoleDefinitionName $a.RoleDefinitionName `
-                            -Scope $a.Scope `
-                            -ErrorAction SilentlyContinue
-                    }
-                    $rbacStatus = if ($rgAssignments) {
-                        "Removed $($rgAssignments.Count) scoped assignments from $groupDisplayName ✅"
-                    } else {
-                        "No scoped assignments found for $groupDisplayName ℹ️"
-                    }
+                    $rbacCleanupResult = Remove-FoundryManagedResourceGroupAccess `
+                        -GroupObjectId $groupObjectId `
+                        -ResourceGroupScope $resourceGroupScope `
+                        -GroupDisplayName $groupDisplayName `
+                        -PreviewOnly:$PreviewCleanup
+                    $rbacStatus = $rbacCleanupResult.Status
                 } else {
                     $rbacStatus = "Entra group '$groupDisplayName' not found; scoped RBAC cleanup skipped ℹ️"
                 }
 
-                $resourceGroupCleanup = Remove-FoundryResourceGroup `
-                    -ResourceGroupName $CleanupResourceGroup `
-                    -Location $location `
-                    -SubscriptionId $subscriptionId
+                if ($PreviewCleanup) {
+                    $resourceGroupCleanup = Get-FoundryResourceGroupCleanupPreview -ResourceGroupName $CleanupResourceGroup
+                } else {
+                    $resourceGroupCleanup = Remove-FoundryResourceGroup `
+                        -ResourceGroupName $CleanupResourceGroup `
+                        -Location $location `
+                        -SubscriptionId $subscriptionId
+                }
 
                 $targetSuffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $CleanupResourceGroup
                 $deploymentName = "foundry-ai-env-$targetSuffix"
                 $deployment = Get-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
                 $deploymentRecordStatus = if ($deployment) {
-                    Write-Host "Removing deployment record '$deploymentName'..."
-                    Remove-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
-                    "Removed $deploymentName ✅"
+                    if ($PreviewCleanup) {
+                        "Would remove $deploymentName ℹ️"
+                    } else {
+                        Write-Host "Removing deployment record '$deploymentName'..."
+                        Remove-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
+                        "Removed $deploymentName ✅"
+                    }
                 } else {
                     "No deployment record named $deploymentName found ℹ️"
                 }
                 
-                $buildInfoStatus = Remove-BuildInfoForResourceGroup `
-                    -ResourceGroupName $CleanupResourceGroup
+                if ($PreviewCleanup) {
+                    $buildInfoStatus = Get-BuildInfoRemovalPreview -ResourceGroupName $CleanupResourceGroup
+                } else {
+                    $buildInfoStatus = Remove-BuildInfoForResourceGroup `
+                        -ResourceGroupName $CleanupResourceGroup
+                }
 
                 if ($group) {
                     if ($sharedAccessPlan.ShouldRetainLawRbac) {
                         $remainingBuildLabel = if ($sharedAccessPlan.RemainingBuildCount -eq 1) { 'build remains' } else { 'builds remain' }
-                        $securityStatus = "Preserved LAW RBAC because $($sharedAccessPlan.RemainingBuildCount) managed $($remainingBuildLabel): $($sharedAccessPlan.RemainingBuildNames -join ', ') ℹ️"
+                        $securityPrefix = if ($PreviewCleanup) { 'Would preserve' } else { 'Preserved' }
+                        $securityStatus = "$securityPrefix LAW RBAC because $($sharedAccessPlan.RemainingBuildCount) managed $($remainingBuildLabel): $($sharedAccessPlan.RemainingBuildNames -join ', ') ℹ️"
                     } else {
                         $lawCleanupResult = Remove-FoundryLawWorkspaceAccess `
                             -SecuritySubscriptionId $securitySubscriptionId `
                             -WorkloadSubscriptionId $subscriptionId `
-                            -GroupObjectId $groupObjectId
+                            -GroupObjectId $groupObjectId `
+                            -PreviewOnly:$PreviewCleanup
                         $securityStatus = $lawCleanupResult.Status
                     }
 
                     if ($sharedAccessPlan.ShouldRetainUserMembership) {
-                        if ($sharedAccessPlan.RemainingBuildsForCurrentUserCount -gt 0) {
-                            $userStatus = "Preserved $($currentUser.Account) in $groupDisplayName because $($sharedAccessPlan.RemainingBuildsForCurrentUserCount) owned build(s) remain ✅"
-                        } else {
-                            $unknownBuildNames = $sharedAccessPlan.RemainingUnknownOwnershipBuilds | ForEach-Object { $_.ResourceGroupName }
-                            $userStatus = "Preserved $($currentUser.Account) in $groupDisplayName because remaining build ownership is unknown for: $($unknownBuildNames -join ', ') ℹ️"
-                        }
+                        $remainingBuildLabel = if ($sharedAccessPlan.RemainingBuildCount -eq 1) { 'build remains' } else { 'builds remain' }
+                        $userPrefix = if ($PreviewCleanup) { 'Would preserve' } else { 'Preserved' }
+                        $userSuffix = if ($PreviewCleanup) { 'ℹ️' } else { '✅' }
+                        $userStatus = "$userPrefix $($currentUser.Account) in $groupDisplayName because $($sharedAccessPlan.RemainingBuildCount) managed $remainingBuildLabel $userSuffix"
                     } else {
                         $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
                         if ($isMember) {
-                            Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
-                            $userStatus = "Removed $($currentUser.Account) from $groupDisplayName because no owned builds remain ✅"
+                            if ($PreviewCleanup) {
+                                $userStatus = "Would remove $($currentUser.Account) from $groupDisplayName because no other managed builds remain ℹ️"
+                            } else {
+                                Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
+                                $userStatus = "Removed $($currentUser.Account) from $groupDisplayName because no other managed builds remain ✅"
+                            }
                         } else {
                             $userStatus = "$($currentUser.Account) was not a member of $groupDisplayName ℹ️"
                         }
@@ -1652,14 +1776,15 @@ if ($Cleanup) {
                 }
 
                 $teardownStatusLines = Write-TeardownStatus `
-                    -ScopeStatus "Targeted teardown for $CleanupResourceGroup" `
+                    -ScopeStatus $(if ($PreviewCleanup) { "Preview teardown for $CleanupResourceGroup" } else { "Targeted teardown for $CleanupResourceGroup" }) `
                     -ResourceGroupStatus $resourceGroupCleanup.ResourceGroupStatus `
                     -RbacStatus $rbacStatus `
                     -CognitiveServicesStatus $resourceGroupCleanup.CognitiveServicesStatus `
                     -DeploymentRecordStatus $deploymentRecordStatus `
                     -BuildInfoStatus $buildInfoStatus `
                     -SecurityStatus $securityStatus `
-                    -UserStatus $userStatus
+                    -UserStatus $userStatus `
+                    -PreviewMode:$PreviewCleanup
             } else {
                 Write-Host "=== CLEANUP MODE ==="
 
@@ -1968,7 +2093,7 @@ try {
         if ($UseTeamsChatFlow -and $teamsChatId) {
             $buildProgressNotifier = Start-TeamsProgressNotifier `
                 -ChatId $teamsChatId `
-                -Message "🚧 One moment ..the Bob's are still building! 🚧" `
+                -Message "🚧 👷 The Bobs Are Still Building 👷🚧 " `
                 -TeamsChatHelperPath (Join-Path $PSScriptRoot 'teams-chat.ps1')
         }
 

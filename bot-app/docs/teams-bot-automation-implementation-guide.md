@@ -314,7 +314,7 @@ The worker must emit progress checkpoints that the bot can convert into Teams me
 
 - build progress updates roughly every 1 minute while active
 - teardown progress updates roughly every 1 minute while active
-- build progress message text: `🚧 One moment ..the Bob's are still building! 🚧`
+- build progress message text: `🚧 👷 The Bobs Are Still Building 👷🚧 `
 - teardown progress message text: `🚧 Pls hold while we teardown: <resource-group> 🚧`
 - final status with details
 
@@ -678,7 +678,7 @@ Required behavior:
 2. Bot asks for model if not provided.
 3. Bot requests confirmation.
 4. Worker runs deployment.
-5. Worker posts progress every 1 minute using `🚧 One moment ..the Bob's are still building! 🚧`.
+5. Worker posts progress every 1 minute using `🚧 👷 The Bobs Are Still Building 👷🚧 `.
 6. Worker posts final success/failure with key outputs.
 7. Worker stores build metadata for later lookup.
 

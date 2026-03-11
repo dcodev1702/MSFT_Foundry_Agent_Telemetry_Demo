@@ -167,7 +167,7 @@ class BackgroundWorker:
         output = await self._run_powershell(
             args,
             conversation_id,
-            progress_msg="One moment ..the Bob's are still building!",
+            progress_msg="🚧 👷 The Bobs Are Still Building 👷🚧 ",
         )
 
         # Upload build_info file to blob storage and notify the channel

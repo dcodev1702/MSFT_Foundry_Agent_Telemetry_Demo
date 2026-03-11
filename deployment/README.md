@@ -219,12 +219,12 @@ The listener validates the request, then asks for confirmation:
 - Heartbeat: no confirmation required
 - List builds: no confirmation required
 - Build status: reply `1` to confirm or `2` to abort
-- Teardown: send `teardown` to get a numbered menu of available managed builds plus `none`, or send `teardown '<resource-group>'` directly; after a build is selected, reply `1` to confirm teardown or `2` to abort
+- Teardown: send `teardown` to get a numbered menu of available managed builds plus `none`, or send `teardown '<resource-group>'` directly; after a build is selected, reply `1` to generate a non-destructive teardown preview or `2` to abort; once the preview is posted back to Teams, reply `1` again to proceed with teardown or `2` to abort
 - Listener status / `?`: no confirmation required
 
 By default, the build, build-status, and teardown confirmation prompts stay open for 10 minutes before they expire.
 The listener also posts an automatic heartbeat to the Teams chat every 30 minutes while it remains online.
-While a build is actively running, the automation posts `🚧 One moment ..the Bob's are still building! 🚧` every 1 minute. During teardown, it posts `🚧 Pls hold while we teardown: <resource-group> 🚧` every 1 minute until the cleanup finishes.
+While a build is actively running, the automation posts `🚧 👷 The Bobs Are Still Building 👷🚧 ` every 1 minute. During teardown, it posts `🚧 Pls hold while we teardown: <resource-group> 🚧` every 1 minute until the cleanup finishes.
 After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
 The listener stays online until you explicitly send `stop listener` in the Teams chat.
 Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph API connectivity, chat topic, and running identity.
@@ -264,14 +264,23 @@ cd deployment
 pwsh ./deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-6bmycg
 ```
 
+Preview a targeted teardown without removing anything:
+
+```powershell
+cd deployment
+pwsh ./deploy-foundry-env.ps1 -Cleanup -CleanupResourceGroup zolab-ai-6bmycg -PreviewCleanup
+```
+
 Cleanup will:
 
 1. 🗑️ Delete the requested `zolab-ai-<suffix>` resource group (or all managed Foundry resource groups when `-CleanupResourceGroup` is omitted)
 2. 🧼 Purge soft-deleted Cognitive Services accounts (prevents redeploy conflicts)
 3. 📋 Remove the matching subscription deployment records
 4. 🔐 Keep shared LAW Reader RBAC in place while any other managed build still exists
-5. 👤 Keep the current user in `zolab-ai-dev` while they still own another active build (tracked via `requested_by` in `build_info-<suffix>.json`)
+5. 👤 Keep the current user in `zolab-ai-dev` while any other managed build still exists
 6. ✅ Preserve the `zolab-ai-dev` Entra group itself (not deleted)
+
+`-PreviewCleanup` is limited to targeted teardown. It reports which of the six managed RG role assignments would be removed, which non-managed RG assignments would be preserved, whether shared LAW RBAC would be retained or removed, and whether the current user would stay in or be removed from `zolab-ai-dev`.
 
 ---
 

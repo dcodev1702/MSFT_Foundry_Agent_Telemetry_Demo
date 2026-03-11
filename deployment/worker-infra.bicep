@@ -50,6 +50,12 @@ param managedIdentityPrincipalId string
 @description('Client ID of the existing User-Assigned Managed Identity')
 param managedIdentityClientId string
 
+@description('CPU requested for the worker container instance')
+param workerCpu int = 2
+
+@description('Memory in GiB requested for the worker container instance')
+param workerMemoryInGb int = 4
+
 // ── Resource Group ────────────────────────────────────────────
 
 resource workerRg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -71,6 +77,8 @@ module workerResources 'modules/worker-resources.bicep' = {
     managedIdentityResourceId: managedIdentityResourceId
     managedIdentityPrincipalId: managedIdentityPrincipalId
     managedIdentityClientId: managedIdentityClientId
+    workerCpu: workerCpu
+    workerMemoryInGb: workerMemoryInGb
   }
 }
 
