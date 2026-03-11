@@ -25,6 +25,7 @@ storage_module.queue = queue_module
 azure_module.storage = storage_module
 
 from command_parser import parse_command
+from models import TeardownSession
 from worker import BackgroundWorker
 
 
@@ -42,6 +43,13 @@ class TeardownCommandTests(unittest.TestCase):
         self.assertEqual(command.kind, "teardown")
         self.assertEqual(command.resource_group, "zolab-ai-abc123")
         self.assertTrue(command.requires_confirmation)
+
+    def test_teardown_session_defaults_to_selecting_state(self) -> None:
+        session = TeardownSession(builds=["zolab-ai-abc123"])
+
+        self.assertEqual(session.builds, ["zolab-ai-abc123"])
+        self.assertEqual(session.state, "selecting")
+        self.assertIsNone(session.selected_rg)
 
 
 class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):

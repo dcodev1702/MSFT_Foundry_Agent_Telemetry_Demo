@@ -31,8 +31,10 @@ class BuildSession:
 
 @dataclass(slots=True)
 class TeardownSession:
-    """Tracks resource-group selection state for a bare 'teardown' command."""
+    """Tracks multi-turn teardown selection state for a conversation."""
     builds: list[str] = field(default_factory=list)
+    state: str = "selecting"
+    selected_rg: str | None = None
     created_at: float = field(
         default_factory=lambda: datetime.now(timezone.utc).timestamp()
     )
@@ -61,17 +63,6 @@ class FoundryCommand:
     model: str | None = None
     resource_group: str | None = None
     requires_confirmation: bool = False
-
-
-@dataclass(slots=True)
-class TeardownSession:
-    """Tracks multi-turn teardown selection state for a conversation."""
-    builds: list                       # [{"number": 1, "rg": "zolab-ai-xxx", "model": "gpt-4.1-mini"}, ...]
-    state: str                         # "selecting" or "confirming"
-    selected_rg: str | None = None
-    created_at: float = field(
-        default_factory=lambda: datetime.now(timezone.utc).timestamp()
-    )
 
 
 @dataclass(slots=True)
