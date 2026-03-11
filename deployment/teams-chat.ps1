@@ -69,9 +69,17 @@ function Connect-FoundryGraphIfNeeded {
     }
 
     if (-not $ctx -or $missingScopes.Count -gt 0) {
-        $graphContextScope = Get-FoundryGraphContextScope
-        Write-Host "Connecting to Microsoft Graph using ContextScope '$graphContextScope'..."
-        Connect-MgGraph -Scopes $Scopes -ContextScope $graphContextScope -NoWelcome | Out-Null
+        $uamiClientId = $env:AZURE_CLIENT_ID
+        if ($uamiClientId) {
+            # Headless container — use managed identity (application permissions)
+            Write-Host "Connecting to Microsoft Graph via managed identity (AZURE_CLIENT_ID=$uamiClientId)..."
+            Connect-MgGraph -Identity -ClientId $uamiClientId -NoWelcome | Out-Null
+        } else {
+            # Interactive desktop — use delegated scopes
+            $graphContextScope = Get-FoundryGraphContextScope
+            Write-Host "Connecting to Microsoft Graph using ContextScope '$graphContextScope'..."
+            Connect-MgGraph -Scopes $Scopes -ContextScope $graphContextScope -NoWelcome | Out-Null
+        }
         $ctx = Get-MgContext
     }
 

@@ -23,7 +23,7 @@ from microsoft_agents.hosting.core import (
 from command_parser import parse_command
 from conversation_store import BlobConversationStore
 from job_dispatcher import AzureQueueJobDispatcher
-from models import ALLOWED_MODELS, BuildSession, QueuedJob
+from models import ALLOWED_MODELS, BuildSession, PendingConfirmation, QueuedJob
 
 
 def _utc_now() -> str:
@@ -33,6 +33,7 @@ def _utc_now() -> str:
 # ── Module-level state ────────────────────────────────────────
 _last_response_utc: str = "No Teams response has been sent yet."
 _build_sessions: dict[str, BuildSession] = {}
+_pending_confirmations: dict[str, PendingConfirmation] = {}
 SESSION_TIMEOUT = 600  # 10 minutes
 
 
@@ -100,7 +101,7 @@ def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
 # ── Build-session helpers ─────────────────────────────────────
 
 def _expire_sessions() -> None:
-    """Remove build sessions older than SESSION_TIMEOUT."""
+    """Remove build sessions and pending confirmations older than SESSION_TIMEOUT."""
     now = datetime.now(timezone.utc).timestamp()
     expired = [
         cid for cid, s in _build_sessions.items()
@@ -108,6 +109,12 @@ def _expire_sessions() -> None:
     ]
     for cid in expired:
         del _build_sessions[cid]
+    expired_conf = [
+        cid for cid, c in _pending_confirmations.items()
+        if now - c.created_at > SESSION_TIMEOUT
+    ]
+    for cid in expired_conf:
+        del _pending_confirmations[cid]
 
 
 def _model_selection_prompt() -> str:
@@ -117,6 +124,27 @@ def _model_selection_prompt() -> str:
     lines.append("<br>Reply with a **number** or the **model name**.")
     lines.append("Type `cancel` to abort.")
     return "<br>".join(lines)
+
+
+def _build_confirmation_prompt(pending: PendingConfirmation) -> str:
+    """Build the yes/no confirmation message for a destructive operation."""
+    if pending.operation == "build":
+        return "<br>".join([
+            f"⚠️ **Confirm deployment:**",
+            f"Model: `{pending.model}`",
+            f"Requested by: {pending.requester}",
+            "",
+            "Reply `yes` to proceed or `no` to cancel.",
+        ])
+    # teardown
+    return "<br>".join([
+        f"⚠️ **Confirm teardown:**",
+        f"Resource group: `{pending.resource_group}`",
+        f"Requested by: {pending.requester}",
+        "",
+        "⚠️ This will **permanently delete** all resources in the group.",
+        "Reply `yes` to proceed or `no` to cancel.",
+    ])
 
 
 # ── Save helpers ───────────────────────────────────────────────
@@ -221,26 +249,95 @@ async def _handle_build_selection(
             heartbeat_service.update_last_response(_last_response_utc)
         return
 
-    # Valid model — clear session and queue the build
+    # Valid model — clear build session, move to confirmation
     del _build_sessions[conversation_id]
 
-    job = QueuedJob(
+    pending = PendingConfirmation(
         operation="build",
-        requested_by=_get_requester(activity),
-        conversation_id=conversation_id,
-        conversation_scope=_get_conversation_scope(activity),
+        requester=_get_requester(activity),
         model=selected_model,
         source_command=f"build it {selected_model}",
+        conversation_scope=_get_conversation_scope(activity),
     )
-    dispatcher.enqueue(job)
+    _pending_confirmations[conversation_id] = pending
 
-    ack = (
-        f"✅ Queued `build it` as job `{job.job_id}`.<br>"
-        f"Model: `{selected_model}`<br>"
-        "The worker will post progress updates every 60 seconds "
-        "during deployment."
+    await context.send_activity(
+        MessageFactory.text(_build_confirmation_prompt(pending))
     )
-    await context.send_activity(MessageFactory.text(ack))
+    _last_response_utc = _utc_now()
+    if heartbeat_service:
+        heartbeat_service.update_last_response(_last_response_utc)
+
+
+# ── Confirmation handler ──────────────────────────────────────
+
+async def _handle_confirmation(
+    context: TurnContext,
+    raw_text: str,
+    conversation_id: str,
+    *,
+    dispatcher: AzureQueueJobDispatcher,
+    heartbeat_service=None,
+) -> None:
+    """Process a user's yes/no reply to a pending confirmation."""
+    global _last_response_utc
+    activity = context.activity
+    answer = raw_text.strip().lower()
+    pending = _pending_confirmations[conversation_id]
+
+    if answer in ("no", "n", "cancel", "abort", "deny"):
+        del _pending_confirmations[conversation_id]
+        op_label = "Build" if pending.operation == "build" else "Teardown"
+        await context.send_activity(
+            MessageFactory.text(f"{op_label} cancelled.")
+        )
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    if answer in ("yes", "y", "confirm", "ok", "proceed"):
+        del _pending_confirmations[conversation_id]
+
+        job = QueuedJob(
+            operation=pending.operation,
+            requested_by=pending.requester,
+            conversation_id=conversation_id,
+            conversation_scope=pending.conversation_scope or "",
+            model=pending.model,
+            resource_group=pending.resource_group,
+            source_command=pending.source_command,
+        )
+        dispatcher.enqueue(job)
+
+        if pending.operation == "build":
+            ack = (
+                f"✅ Queued `build it` as job `{job.job_id}`.<br>"
+                f"Model: `{pending.model}`<br>"
+                "The worker will post progress updates every 60 seconds "
+                "during deployment."
+            )
+        else:  # teardown
+            ack = (
+                f"⏳ Queued `teardown` for `{pending.resource_group}` "
+                f"as job `{job.job_id}`.<br>"
+                "The worker will post progress updates every 60 seconds "
+                "during cleanup."
+            )
+
+        await context.send_activity(MessageFactory.text(ack))
+        _last_response_utc = _utc_now()
+        if heartbeat_service:
+            heartbeat_service.update_last_response(_last_response_utc)
+        return
+
+    # Unrecognized reply — re-prompt
+    await context.send_activity(
+        MessageFactory.text(
+            f"Please reply `yes` or `no`.<br><br>"
+            + _build_confirmation_prompt(pending)
+        )
+    )
     _last_response_utc = _utc_now()
     if heartbeat_service:
         heartbeat_service.update_last_response(_last_response_utc)
@@ -271,8 +368,15 @@ def register_handlers(
         raw_text = strip_bot_mention(activity.text)
         conversation_id = activity.conversation.id
 
-        # ── Active build-session? Handle model selection ──────
+        # ── Active sessions? Handle pending confirmation or model selection
         _expire_sessions()
+        if conversation_id in _pending_confirmations:
+            await _handle_confirmation(
+                context, raw_text, conversation_id,
+                dispatcher=dispatcher,
+                heartbeat_service=heartbeat_service,
+            )
+            return
         if conversation_id in _build_sessions:
             await _handle_build_selection(
                 context, raw_text, conversation_id,
@@ -369,6 +473,42 @@ def register_handlers(
                     heartbeat_service.update_last_response(_last_response_utc)
                 return
 
+            # Valid model provided — require confirmation before queueing
+            pending = PendingConfirmation(
+                operation="build",
+                requester=_get_requester(activity),
+                model=command.model,
+                source_command=command.raw_text,
+                conversation_scope=_get_conversation_scope(activity),
+            )
+            _pending_confirmations[conversation_id] = pending
+            await context.send_activity(
+                MessageFactory.text(_build_confirmation_prompt(pending))
+            )
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # Teardown — require confirmation before queueing
+        if command.kind == "teardown":
+            pending = PendingConfirmation(
+                operation="teardown",
+                requester=_get_requester(activity),
+                resource_group=command.resource_group,
+                source_command=command.raw_text,
+                conversation_scope=_get_conversation_scope(activity),
+            )
+            _pending_confirmations[conversation_id] = pending
+            await context.send_activity(
+                MessageFactory.text(_build_confirmation_prompt(pending))
+            )
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        # Non-destructive commands — queue immediately
         job = QueuedJob(
             operation=command.kind,
             requested_by=_get_requester(activity),
@@ -377,25 +517,10 @@ def register_handlers(
             model=command.model,
             resource_group=command.resource_group,
             source_command=command.raw_text,
-            arguments={"requiresConfirmation": command.requires_confirmation},
         )
         dispatcher.enqueue(job)
 
-        if command.kind == "build":
-            ack = (
-                f"✅ Queued `build it` as job `{job.job_id}`.<br>"
-                f"Model: `{command.model}`<br>"
-                "The worker will post progress updates every 60 seconds "
-                "during deployment."
-            )
-        elif command.kind == "teardown":
-            ack = (
-                f"⏳ Queued `teardown` for `{command.resource_group}` "
-                f"as job `{job.job_id}`.<br>"
-                "The worker will post progress updates every 60 seconds "
-                "during cleanup."
-            )
-        elif command.kind == "build-status":
+        if command.kind == "build-status":
             ack = (
                 f"🔍 Queued `build status` for `{command.resource_group}` "
                 f"as job `{job.job_id}`."

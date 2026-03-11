@@ -30,6 +30,20 @@ class BuildSession:
 
 
 @dataclass(slots=True)
+class PendingConfirmation:
+    """Tracks a pending yes/no confirmation for a destructive operation."""
+    operation: str  # "build" or "teardown"
+    requester: str
+    model: str | None = None
+    resource_group: str | None = None
+    source_command: str | None = None
+    conversation_scope: str | None = None
+    created_at: float = field(
+        default_factory=lambda: datetime.now(timezone.utc).timestamp()
+    )
+
+
+@dataclass(slots=True)
 class FoundryCommand:
     kind: str
     raw_text: str
