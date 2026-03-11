@@ -13,7 +13,7 @@ This deployment is separate from the root Foundry environment deployment in [../
 | Azure CLI | Installed and authenticated with access to the `zolab` subscription |
 | Bot secrets file | `bot-app/deployment/.bot-secrets.json` must exist and include the bot app password |
 | Security subscription access | Needed to read the DIBSecCom Log Analytics workspace keys in `Sentinel` |
-| ACR build permissions | Required to build and push `zolab-bot:latest` into the bot ACR |
+| ACR build permissions | Required to build and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
 | Existing worker resources | The bot deployment expects the worker storage account and worker resource group to exist for RBAC wiring |
 
@@ -77,7 +77,7 @@ bash bot-app/deployment/deploy-bot-app.sh
 
 The script performs four steps:
 
-1. Builds and pushes the bot image to `zolabbotacrbotprd.azurecr.io/zolab-bot:latest`
+1. Builds and pushes the bot image to `zolabbotacrbotprd.azurecr.io/zolab-bot:<immutable-tag>` and also refreshes `:latest`
 2. Deploys the bot infrastructure Bicep template
 3. Grants Storage Queue and Blob RBAC to the bot UAMI on the worker storage account
 4. Verifies the deployed Container App FQDN and prints follow-up commands
@@ -93,6 +93,8 @@ bash bot-app/deployment/deploy-bot-app.sh
 ```
 
 That rebuilds the bot image and refreshes the Container App deployment. The worker image is separate and is built from [../../deployment/Dockerfile.worker](../../deployment/Dockerfile.worker).
+
+The deploy script now generates an immutable bot image tag from the current UTC timestamp and Git commit, then passes that tag into Bicep so Azure Container Apps creates a new revision for each rollout. This avoids stale revisions continuing to serve code from a previously cached `:latest` image.
 
 ---
 

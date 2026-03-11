@@ -56,6 +56,7 @@ if [[ ! -f "${SECRETS_FILE}" ]]; then
 fi
 
 BOT_SECRET=$(python3 -c "import json; print(json.load(open('${SECRETS_FILE}'))['password'])")
+BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 
 # Fetch DIBSecCom LAW credentials (cross-subscription)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
@@ -78,11 +79,12 @@ echo "└───────────────────────�
 
 az acr build \
   --registry "${BOT_ACR_NAME}" \
+  --image "zolab-bot:${BOT_IMAGE_TAG}" \
   --image zolab-bot:latest \
   --file bot-app/Dockerfile \
   .
 
-echo "  ✓ Bot container image pushed to ${BOT_ACR_NAME}.azurecr.io/zolab-bot:latest"
+echo "  ✓ Bot container images pushed to ${BOT_ACR_NAME}.azurecr.io/zolab-bot:${BOT_IMAGE_TAG} and :latest"
 echo ""
 
 # ── Step 2: Deploy Bicep (Container App + Bot Service) ────────────
@@ -100,6 +102,7 @@ az deployment sub create \
     botAppSecret="${BOT_SECRET}" \
     logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
     logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
+    botImageTag="${BOT_IMAGE_TAG}" \
   --output none
 
 echo "  ✓ Container App + Bot Service deployed"
@@ -150,6 +153,7 @@ echo "╔═══════════════════════�
 echo "║  Deployment complete!                                       ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║                                                             ║"
+echo "║  Bot Image Tag: ${BOT_IMAGE_TAG}"
 echo "║  Container App: https://${CA_FQDN}                          "
 echo "║  Bot Endpoint:  https://${CA_FQDN}/api/messages              "
 echo "║                                                             ║"

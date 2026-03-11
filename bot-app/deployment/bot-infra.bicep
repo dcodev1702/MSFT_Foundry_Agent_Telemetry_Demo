@@ -48,6 +48,9 @@ param logAnalyticsCustomerId string
 @description('DIBSecCom Log Analytics Workspace shared key (Security sub)')
 param logAnalyticsSharedKey string
 
+@description('Bot container image tag to deploy from ACR')
+param botImageTag string = 'latest'
+
 // ── Resource Group ────────────────────────────────────────────
 
 resource botRg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -68,6 +71,7 @@ module botResources 'modules/bot-resources.bicep' = {
     botAppSecret: botAppSecret
     logAnalyticsCustomerId: logAnalyticsCustomerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
+    botImageTag: botImageTag
   }
 }
 

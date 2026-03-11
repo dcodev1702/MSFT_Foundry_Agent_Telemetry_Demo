@@ -29,6 +29,9 @@ param logAnalyticsCustomerId string
 @description('Log Analytics Workspace shared key — DIBSecCom in Security sub')
 param logAnalyticsSharedKey string
 
+@description('Bot container image tag to deploy from ACR')
+param botImageTag string = 'latest'
+
 // ── Resource Names ────────────────────────────────────────────
 var managedIdentityName = 'zolab-bot-mi-${suffix}'
 var acrName             = 'zolabbotacr${suffix}'
@@ -128,7 +131,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       containers: [
         {
           name: 'zolab-bot'
-          image: '${acr.properties.loginServer}/zolab-bot:latest'
+          image: '${acr.properties.loginServer}/zolab-bot:${botImageTag}'
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
