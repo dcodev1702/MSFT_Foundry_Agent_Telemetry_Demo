@@ -25,6 +25,42 @@ Describe 'Get-TargetedTeardownSharedAccessPlanFromInventory' {
     }
 }
 
+Describe 'Get-TargetedTeardownSharedAccessPlan' {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot '..' 'foundry-teardown.helpers.ps1')
+    }
+
+    It 'excludes the targeted resource group and preserves shared access when another build remains' {
+        $requestedExclusion = $null
+        $plan = Get-TargetedTeardownSharedAccessPlan `
+            -TargetResourceGroupName 'zolab-ai-aaa111' `
+            -InventoryResolver {
+                param($ExcludedResourceGroupName)
+
+                $script:requestedExclusion = $ExcludedResourceGroupName
+                @(
+                    [pscustomobject]@{ ResourceGroupName = 'zolab-ai-bbb222' }
+                )
+            }
+
+        $script:requestedExclusion | Should -Be 'zolab-ai-aaa111'
+        $plan.RemainingBuildCount | Should -Be 1
+        $plan.ShouldRetainLawRbac | Should -BeTrue
+        $plan.ShouldRetainUserMembership | Should -BeTrue
+        $plan.RemainingBuildNames | Should -Be @('zolab-ai-bbb222')
+    }
+
+    It 'allows shared access cleanup when no other builds remain' {
+        $plan = Get-TargetedTeardownSharedAccessPlan `
+            -TargetResourceGroupName 'zolab-ai-aaa111' `
+            -InventoryResolver { param($ExcludedResourceGroupName) @() }
+
+        $plan.RemainingBuildCount | Should -Be 0
+        $plan.ShouldRetainLawRbac | Should -BeFalse
+        $plan.ShouldRetainUserMembership | Should -BeFalse
+    }
+}
+
 Describe 'Get-FoundryManagedResourceGroupAssignmentPlan' {
     BeforeAll {
         . (Join-Path $PSScriptRoot '..' 'foundry-teardown.helpers.ps1')

@@ -808,19 +808,6 @@ function Get-FoundryBuildInventory {
     @($inventory)
 }
 
-function Get-TargetedTeardownSharedAccessPlan {
-    param(
-        [Parameter(Mandatory)]
-        [string]$TargetResourceGroupName,
-
-        [Parameter(Mandatory)]
-        [string]$CurrentUserAccount
-    )
-
-    $remainingBuilds = @(Get-FoundryBuildInventory -ExcludeResourceGroupName $TargetResourceGroupName)
-    Get-TargetedTeardownSharedAccessPlanFromInventory -RemainingBuilds $remainingBuilds
-}
-
 function Remove-FoundryManagedResourceGroupAccess {
     param(
         [Parameter(Mandatory)]
@@ -1814,8 +1801,7 @@ if ($Cleanup) {
                 }
 
                 $sharedAccessPlan = Get-TargetedTeardownSharedAccessPlan `
-                    -TargetResourceGroupName $CleanupResourceGroup `
-                    -CurrentUserAccount $currentUser.Account
+                    -TargetResourceGroupName $CleanupResourceGroup
 
                 $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
                 if ($group) {
@@ -1882,18 +1868,27 @@ if ($Cleanup) {
                         $remainingBuildLabel = if ($sharedAccessPlan.RemainingBuildCount -eq 1) { 'build remains' } else { 'builds remain' }
                         $userPrefix = if ($PreviewCleanup) { 'Would preserve' } else { 'Preserved' }
                         $userSuffix = if ($PreviewCleanup) { 'ℹ️' } else { '✅' }
-                        $userStatus = "$userPrefix $($currentUser.Account) in $groupDisplayName because $($sharedAccessPlan.RemainingBuildCount) managed $remainingBuildLabel $userSuffix"
-                    } else {
-                        $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
-                        if ($isMember) {
-                            if ($PreviewCleanup) {
-                                $userStatus = "Would remove $($currentUser.Account) from $groupDisplayName because no other managed builds remain ℹ️"
-                            } else {
-                                Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
-                                $userStatus = "Removed $($currentUser.Account) from $groupDisplayName because no other managed builds remain ✅"
-                            }
+                        if ($requesterAccount) {
+                            $userStatus = "$userPrefix $requesterAccount in $groupDisplayName because $($sharedAccessPlan.RemainingBuildCount) managed $remainingBuildLabel $userSuffix"
                         } else {
-                            $userStatus = "$($currentUser.Account) was not a member of $groupDisplayName ℹ️"
+                            $userStatus = "$userPrefix user membership in $groupDisplayName because $($sharedAccessPlan.RemainingBuildCount) managed $remainingBuildLabel $userSuffix"
+                        }
+                    } else {
+                        if (-not $userId) {
+                            $userStatus = 'User membership cleanup skipped because the requesting user could not be resolved ℹ️'
+                        } else {
+                            $requesterLabel = if ($requesterAccount) { $requesterAccount } else { $userId }
+                            $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
+                            if ($isMember) {
+                                if ($PreviewCleanup) {
+                                    $userStatus = "Would remove $requesterLabel from $groupDisplayName because no other managed builds remain ℹ️"
+                                } else {
+                                    Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
+                                    $userStatus = "Removed $requesterLabel from $groupDisplayName because no other managed builds remain ✅"
+                                }
+                            } else {
+                                $userStatus = "$requesterLabel was not a member of $groupDisplayName ℹ️"
+                            }
                         }
                     }
                 } else {
@@ -1934,12 +1929,17 @@ if ($Cleanup) {
                         "No role assignments found for $groupDisplayName ℹ️"
                     }
 
-                    $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
-                    if ($isMember) {
-                        Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
-                        $userStatus = "Removed $($currentUser.Account) from $groupDisplayName ✅"
+                    if (-not $userId) {
+                        $userStatus = 'User membership cleanup skipped because the requesting user could not be resolved ℹ️'
                     } else {
-                        $userStatus = "$($currentUser.Account) was not a member of $groupDisplayName ℹ️"
+                        $requesterLabel = if ($requesterAccount) { $requesterAccount } else { $userId }
+                        $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
+                        if ($isMember) {
+                            Remove-MgGroupMemberByRef -GroupId $groupObjectId -DirectoryObjectId $userId
+                            $userStatus = "Removed $requesterLabel from $groupDisplayName ✅"
+                        } else {
+                            $userStatus = "$requesterLabel was not a member of $groupDisplayName ℹ️"
+                        }
                     }
                 } else {
                     $rbacStatus = "Entra group '$groupDisplayName' not found; RBAC cleanup skipped ℹ️"
@@ -2022,7 +2022,7 @@ if ($Cleanup) {
         if ($UseTeamsChatFlow -and $teamsChatId) {
             $failureDetails = @(
                 'Microsoft Foundry teardown failed.'
-                "Account: $($currentUser.Account)"
+                "Account: $(if ($requesterAccount) { $requesterAccount } else { 'unknown-requester' })"
             )
             if ($CleanupResourceGroup) {
                 $failureDetails += "Target resource group: $CleanupResourceGroup"

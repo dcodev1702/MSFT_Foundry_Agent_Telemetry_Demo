@@ -156,7 +156,14 @@ class BackgroundWorker:
                 requested_by_object_id=requested_by_object_id,
             )
         elif operation == "teardown":
-            return await self._run_teardown(job_id, resource_group, conversation_id)
+            return await self._run_teardown(
+                job_id,
+                resource_group,
+                conversation_id,
+                requested_by=requested_by,
+                requested_by_upn=requested_by_upn,
+                requested_by_object_id=requested_by_object_id,
+            )
         elif operation == "build-status":
             return await self._run_build_status(resource_group)
         elif operation == "list-builds":
@@ -244,7 +251,14 @@ class BackgroundWorker:
             logger.error("Failed to upload build_info: %s", e)
 
     async def _run_teardown(
-        self, job_id: str, resource_group: str | None, conversation_id: str
+        self,
+        job_id: str,
+        resource_group: str | None,
+        conversation_id: str,
+        *,
+        requested_by: str | None,
+        requested_by_upn: str | None,
+        requested_by_object_id: str | None,
     ) -> str:
         if not resource_group:
             return "Error: No resource group specified for teardown."
@@ -254,6 +268,12 @@ class BackgroundWorker:
             str(self._deploy_script),
             "-Cleanup", "-CleanupResourceGroup", resource_group,
         ]
+        requester_identity = requested_by_upn or requested_by
+        if requester_identity:
+            args.extend(["-RequestedBy", requester_identity])
+        if requested_by_object_id:
+            args.extend(["-RequestedByObjectId", requested_by_object_id])
+
         return await self._run_powershell(
             args,
             conversation_id,

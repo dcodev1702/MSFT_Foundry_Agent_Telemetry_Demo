@@ -18,6 +18,26 @@ function Get-TargetedTeardownSharedAccessPlanFromInventory {
     }
 }
 
+function Get-TargetedTeardownSharedAccessPlan {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TargetResourceGroupName,
+
+        [scriptblock]$InventoryResolver
+    )
+
+    if (-not $InventoryResolver) {
+        $InventoryResolver = {
+            param($ExcludedResourceGroupName)
+
+            Get-FoundryBuildInventory -ExcludeResourceGroupName $ExcludedResourceGroupName
+        }
+    }
+
+    $remainingBuilds = @(& $InventoryResolver $TargetResourceGroupName)
+    Get-TargetedTeardownSharedAccessPlanFromInventory -RemainingBuilds $remainingBuilds
+}
+
 function Get-FoundryManagedResourceGroupRoleDefinitionNames {
     @(
         'Azure AI Developer'
