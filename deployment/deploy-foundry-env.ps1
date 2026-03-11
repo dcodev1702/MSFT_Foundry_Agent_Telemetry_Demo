@@ -573,6 +573,48 @@ function Save-BuildInfoFromBlobIfAvailable {
     $null
 }
 
+function Publish-BuildInfoToBlobIfAvailable {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BuildInfoPath
+    )
+
+    $storageAccountName = $env:AZURE_STORAGE_ACCOUNT
+    $blobContainerName = $env:AZURE_BLOB_CONTAINER
+    if ([string]::IsNullOrWhiteSpace($storageAccountName) -or [string]::IsNullOrWhiteSpace($blobContainerName)) {
+        return $null
+    }
+
+    if (-not (Test-Path -LiteralPath $BuildInfoPath)) {
+        return $null
+    }
+
+    $blobName = "builds/$(Split-Path -Leaf $BuildInfoPath)"
+
+    $uploadOutput = & az storage blob upload `
+        --auth-mode login `
+        --account-name $storageAccountName `
+        --container-name $blobContainerName `
+        --name $blobName `
+        --file $BuildInfoPath `
+        --overwrite true `
+        --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        $message = (($uploadOutput -join ' ').Trim())
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = 'upload failed'
+        }
+        throw "Failed to upload $(Split-Path -Leaf $BuildInfoPath) to blob storage: $message"
+    }
+
+    [pscustomobject]@{
+        AccountName   = $storageAccountName
+        ContainerName = $blobContainerName
+        BlobName      = $blobName
+    }
+}
+
 function Get-BuildInfoPaths {
     $buildInfoPaths = @(
         Get-ChildItem -Path (Get-BuildInfoDirectory) -Filter 'build_info-*.json' -File -ErrorAction SilentlyContinue |
@@ -2045,6 +2087,11 @@ try {
             -AiProjectName $result.properties.outputs.aiProjectName.value `
             -RequestedBy $currentUser.Account
         Write-Host "📝 Build info written to $buildInfoPath"
+
+        $buildInfoBlob = Publish-BuildInfoToBlobIfAvailable -BuildInfoPath $buildInfoPath
+        if ($buildInfoBlob) {
+            Write-Host "☁️ Build info uploaded to blob: $($buildInfoBlob.ContainerName)/$($buildInfoBlob.BlobName)"
+        }
 
         $buildStatusLines = Write-BuildStatus `
             -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
