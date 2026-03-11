@@ -1194,7 +1194,11 @@ function Get-FoundryBuildStatusLines {
 
     $lawRbacStatus = "Entra group '$GroupDisplayName' not found ❌"
     $appInsightsAccessStatus = "Reader missing on resource group ❌"
-    $userStatus = if ($CurrentUserAccount) { "$CurrentUserAccount membership could not be checked ❌" } else { "User membership check skipped (managed identity)" }
+    if ($CurrentUserAccount) {
+        $userStatus = "$CurrentUserAccount membership could not be checked ❌"
+    } else {
+        $userStatus = "User membership check skipped (managed identity context)"
+    }
     $group = Get-MgGroup -Filter "displayName eq '$GroupDisplayName'" -ErrorAction SilentlyContinue
     if ($group) {
         if ($CurrentUserAccount) {
