@@ -95,7 +95,10 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual(args[1], "conversation-123")
-        self.assertEqual(kwargs["progress_msg"], "Pls hold while we teardown: zolab-ai-abc123")
+        self.assertEqual(
+            kwargs["progress_msg"],
+            "🚧 👷 The Bobs Are Still Tearing Down: zolab-ai-abc123 👷🚧",
+        )
 
     async def test_completion_messages_preserve_full_teardown_output_across_chunks(self) -> None:
         worker = BackgroundWorker(

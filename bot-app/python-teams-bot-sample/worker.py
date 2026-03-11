@@ -275,7 +275,7 @@ class BackgroundWorker:
         return await self._run_powershell(
             args,
             conversation_id,
-            progress_msg=f"Pls hold while we teardown: {resource_group}",
+            progress_msg=f"🚧 👷 The Bobs Are Still Tearing Down: {resource_group} 👷🚧",
         )
 
     async def _run_build_status(self, resource_group: str | None) -> str:

@@ -789,6 +789,21 @@ Required behavior:
    - app identity names
    - current UTC time
 
+Example listener status message:
+
+```text
+🟢 Bot status: Online ✅
+⚙️ Worker status: Running
+📦 Queue depth: <queue-depth>
+🤖 Bot Identity:
+   Name: <app-registration-name>
+   Client ID: <app-registration-client-id>
+🔑 Azure User Managed Identity:
+   Name: <managed-identity-name>
+   Client ID: <managed-identity-client-id>
+🕒 Checked at: <utc-timestamp>
+```
+
 ---
 
 ## 12. Security Requirements

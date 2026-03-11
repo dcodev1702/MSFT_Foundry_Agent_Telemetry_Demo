@@ -492,8 +492,8 @@ async def _handle_confirmation(
             )
         else:  # teardown
             ack = (
-                f"⏳ Queued `teardown` for `{pending.resource_group}` "
-                f"as job `{job.job_id}`.<br>"
+                f"🚧 👷 Queued `teardown` for `{pending.resource_group}` "
+                f"as job `{job.job_id}` 👷🚧<br>"
                 "The worker will post progress updates every 60 seconds "
                 "during cleanup."
             )
