@@ -50,6 +50,7 @@ RUN pwsh -NoProfile -Command " \
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; \
     Install-Module -Name Az.Accounts          -Scope AllUsers -Force; \
     Install-Module -Name Az.Resources         -Scope AllUsers -Force; \
+    Install-Module -Name Az.Storage           -Scope AllUsers -Force; \
     Install-Module -Name Az.CognitiveServices -Scope AllUsers -Force; \
     Install-Module -Name Microsoft.Graph.Authentication -Scope AllUsers -Force; \
     Install-Module -Name Microsoft.Graph.Groups         -Scope AllUsers -Force; \
