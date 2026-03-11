@@ -43,11 +43,18 @@ if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
         Write-Host "Authenticated via managed identity."
 
         # Also authenticate Azure CLI with managed identity
-        & az login --identity --username $miClientId --output none 2>&1 | Out-Null
+        # NOTE: newer az CLI versions require --client-id (--username is deprecated)
+        & az login --identity --client-id $miClientId --output none 2>&1 | Out-Null
         if ($LASTEXITCODE -eq 0) {
             Write-Host "Azure CLI authenticated via managed identity."
         } else {
-            Write-Host "WARNING: Azure CLI managed identity auth failed (non-fatal for list/cleanup operations)."
+            Write-Host "WARNING: Azure CLI managed identity auth failed — retrying with legacy --username flag..."
+            & az login --identity --username $miClientId --output none 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Azure CLI authenticated via managed identity (legacy flag)."
+            } else {
+                Write-Host "WARNING: Azure CLI managed identity auth failed (non-fatal for list/status operations)."
+            }
         }
     }
 }
@@ -73,7 +80,9 @@ function Ensure-AzureSession {
         [Parameter(Mandatory)]
         [string]$SubscriptionId,
 
-        [string]$ExpectedAccount
+        [string]$ExpectedAccount,
+
+        [switch]$SkipAzCliValidation
     )
 
     $targetSubscription = Get-AzSubscription -SubscriptionId $SubscriptionId -ErrorAction Stop
@@ -112,18 +121,31 @@ function Ensure-AzureSession {
         throw "Azure PowerShell is signed in as '$($azContext.Account.Id)', but Teams chat flow requires '$ExpectedAccount'. Reauthenticate that account and restart the listener."
     }
 
-    $cliContext = Get-AzureCliContext
-    if (-not $cliContext) {
-        throw "Azure CLI is not authenticated. Run 'az login --tenant $($targetSubscription.TenantId)' and restart the Teams listener."
-    }
+    $cliAccount = $null
+    if (-not $SkipAzCliValidation) {
+        $cliContext = Get-AzureCliContext
+        if (-not $cliContext) {
+            throw "Azure CLI is not authenticated. Run 'az login --tenant $($targetSubscription.TenantId)' and restart the Teams listener."
+        }
 
-    if ($ExpectedAccount -and $cliContext.account -and $cliContext.account -ine $ExpectedAccount) {
-        throw "Azure CLI is signed in as '$($cliContext.account)', but Teams chat flow requires '$ExpectedAccount'. Run 'az login --tenant $($targetSubscription.TenantId)' with that account and restart the listener."
-    }
+        if ($ExpectedAccount -and $cliContext.account -and $cliContext.account -ine $ExpectedAccount) {
+            throw "Azure CLI is signed in as '$($cliContext.account)', but Teams chat flow requires '$ExpectedAccount'. Run 'az login --tenant $($targetSubscription.TenantId)' with that account and restart the listener."
+        }
 
-    & az account set --subscription $SubscriptionId 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to set Azure CLI subscription context to '$SubscriptionId'."
+        & az account set --subscription $SubscriptionId 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to set Azure CLI subscription context to '$SubscriptionId'."
+        }
+        $cliAccount = $cliContext.account
+    } else {
+        # Best-effort az CLI setup (non-fatal for read-only operations)
+        $cliContext = Get-AzureCliContext
+        if ($cliContext) {
+            & az account set --subscription $SubscriptionId 2>&1 | Out-Null
+            $cliAccount = $cliContext.account
+        } else {
+            Write-Host "Azure CLI not authenticated (skipped — not required for this operation)."
+        }
     }
 
     [pscustomobject]@{
@@ -131,7 +153,7 @@ function Ensure-AzureSession {
         SubscriptionName  = $targetSubscription.Name
         TenantId          = $targetSubscription.TenantId
         PowerShellAccount = $azContext.Account.Id
-        CliAccount        = $cliContext.account
+        CliAccount        = $cliAccount
     }
 }
 
@@ -1151,22 +1173,19 @@ function Get-FoundryBuildStatusLines {
 
     $projectExists = $false
     $projectResourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$($buildInfo.foundry_name)/projects/$($buildInfo.foundry_project_name)"
-    az resource show --ids $projectResourceId --api-version 2025-06-01 --only-show-errors --output none 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    $projectResponse = Invoke-AzRestMethod -Path "$($projectResourceId)?api-version=2025-06-01" -Method GET -ErrorAction SilentlyContinue
+    if ($projectResponse -and $projectResponse.StatusCode -eq 200) {
         $projectExists = $true
     }
 
     $appInsightsConnectionStatus = 'App Insights connection not found ❌'
     if ($foundryExists -and $projectExists) {
         $connectionId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.CognitiveServices/accounts/$($buildInfo.foundry_name)/projects/$($buildInfo.foundry_project_name)/connections/$($buildInfo.foundry_name)-appinsights"
-        $connectionSharedToAll = az resource show `
-            --ids $connectionId `
-            --api-version 2025-06-01 `
-            --query properties.isSharedToAll `
-            --output tsv 2>&1
-
-        if ($LASTEXITCODE -eq 0) {
-            $appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLowerInvariant() -eq 'true') {
+        $connectionResponse = Invoke-AzRestMethod -Path "$($connectionId)?api-version=2025-06-01" -Method GET -ErrorAction SilentlyContinue
+        if ($connectionResponse -and $connectionResponse.StatusCode -eq 200) {
+            $connectionData = $connectionResponse.Content | ConvertFrom-Json
+            $isSharedToAll = $connectionData.properties.isSharedToAll
+            $appInsightsConnectionStatus = if ($isSharedToAll -eq $true) {
                 'Shared to all projects ✅'
             } else {
                 'This project only ✅'
@@ -1391,7 +1410,9 @@ if ($UseTeamsChatFlow) {
 }
 
 # ── 3. Set Azure subscription context (both Az PowerShell and az CLI) ──
-$azureSession = Ensure-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $currentUser.Account } else { $null })
+# ListBuilds and BuildStatus are read-only — skip az CLI hard validation for those modes
+$skipAzCli = ($ListBuilds -or $BuildStatusResourceGroup)
+$azureSession = Ensure-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $currentUser.Account } else { $null }) -SkipAzCliValidation:$skipAzCli
 Write-Host "Subscription set to $($azureSession.SubscriptionName) ($subscriptionId)"
 if ($UseTeamsChatFlow) {
     Write-Host "Azure account validated for Teams chat flow: $($azureSession.PowerShellAccount)"
