@@ -149,6 +149,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: botAppRegistrationName
             }
             {
+              name: 'AZURE_MANAGED_IDENTITY_NAME'
+              value: botManagedIdentity.name
+            }
+            {
               name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
               value: tenantId
             }

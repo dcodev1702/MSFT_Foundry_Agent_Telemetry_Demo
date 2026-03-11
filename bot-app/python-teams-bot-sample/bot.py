@@ -149,13 +149,20 @@ def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
         "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID", "<bot-app-id>"
     )
     app_name = os.getenv("BOT_APP_REGISTRATION_NAME", "unknown-app-registration")
+    managed_identity_name = os.getenv(
+        "AZURE_MANAGED_IDENTITY_NAME", "unknown-managed-identity"
+    )
+    managed_identity_client_id = os.getenv("AZURE_CLIENT_ID", "<managed-identity-client-id>")
     return "<br>".join([
         "🟢 Bot status: Online ✅",
         "⚙️ Worker status: Running",
         f"📦 Queue depth: {dispatcher.queue_depth()}",
-        "🤖 Bot identity:",
-        f"&nbsp;&nbsp;&nbsp;&nbsp;Name: {app_name}",
-        f"&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {app_id}",
+        "🤖 Bot Identity:",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name: {app_name}",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {app_id}",
+        "🔑 Azure User Managed Identity:",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name: {managed_identity_name}",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {managed_identity_client_id}",
         f"🕒 Checked at: {_utc_now()}",
     ])
 
