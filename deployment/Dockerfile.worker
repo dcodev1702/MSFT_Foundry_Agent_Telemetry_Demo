@@ -19,6 +19,10 @@ FROM python:3.13-slim-bookworm AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG WORKER_BUILD_UTC=unknown
+ARG WORKER_BUILD_COMMIT=unknown
+ARG WORKER_BUILD_SOURCE=manual
+
 # ── System dependencies ──────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
         apt-transport-https \
@@ -68,6 +72,9 @@ RUN pwsh -NoProfile -Command " \
 # ─────────────────────────────────────────────────────────────────
 
 WORKDIR /app
+
+RUN printf '{\n  "build_utc": "%s",\n  "build_commit": "%s",\n  "build_source": "%s"\n}\n' \
+    "$WORKER_BUILD_UTC" "$WORKER_BUILD_COMMIT" "$WORKER_BUILD_SOURCE" > /app/worker-build-info.json
 
 # Copy deployment scripts + Bicep templates
 COPY deployment/ /app/deployment/

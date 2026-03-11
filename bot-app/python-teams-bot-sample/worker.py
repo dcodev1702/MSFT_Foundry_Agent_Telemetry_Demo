@@ -11,6 +11,7 @@ import asyncio
 import glob
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,10 +22,28 @@ if TYPE_CHECKING:
     from proactive import ProactiveMessenger
 
 logger = logging.getLogger(__name__)
+WORKER_BUILD_INFO_PATH = Path(__file__).resolve().parents[2] / "worker-build-info.json"
 
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ")
+
+
+def _load_worker_build_info() -> dict[str, str]:
+    try:
+        payload = json.loads(WORKER_BUILD_INFO_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {
+            "build_utc": "unknown",
+            "build_commit": "unknown",
+            "build_source": "unknown",
+        }
+
+    return {
+        "build_utc": str(payload.get("build_utc") or "unknown"),
+        "build_commit": str(payload.get("build_commit") or "unknown"),
+        "build_source": str(payload.get("build_source") or "unknown"),
+    }
 
 
 class BackgroundWorker:
@@ -44,6 +63,7 @@ class BackgroundWorker:
         self._proactive = proactive
         self._deploy_script = deploy_script
         self._running = False
+        self._worker_build_info = _load_worker_build_info()
 
     def stop(self) -> None:
         self._running = False
@@ -233,7 +253,8 @@ class BackgroundWorker:
             stderr=asyncio.subprocess.STDOUT,
         )
         stdout, _ = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace")
+        output = stdout.decode("utf-8", errors="replace")
+        return self._prepend_worker_metadata(output)
 
     async def _run_list_builds(self) -> str:
         args = [
@@ -247,7 +268,8 @@ class BackgroundWorker:
             stderr=asyncio.subprocess.STDOUT,
         )
         stdout, _ = await proc.communicate()
-        return stdout.decode("utf-8", errors="replace")
+        output = stdout.decode("utf-8", errors="replace")
+        return self._prepend_worker_metadata(output)
 
     async def _run_powershell(
         self,
@@ -287,3 +309,16 @@ class BackgroundWorker:
             )
 
         return output
+
+    def _prepend_worker_metadata(self, output: str) -> str:
+        metadata_lines = [
+            "=== Worker Runtime Metadata ===",
+            f"worker_host: {os.getenv('HOSTNAME', 'unknown')}",
+            f"worker_build_utc: {self._worker_build_info['build_utc']}",
+            f"worker_build_commit: {self._worker_build_info['build_commit']}",
+            f"worker_build_source: {self._worker_build_info['build_source']}",
+            f"worker_executed_utc: {_utc_now()}",
+            f"worker_deploy_script: {self._deploy_script}",
+            "",
+        ]
+        return "\n".join(metadata_lines) + output

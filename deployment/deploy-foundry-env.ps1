@@ -535,6 +535,44 @@ function Get-BuildInfoPathForSuffix {
     Join-Path (Get-BuildInfoDirectory) "build_info-$Suffix.json"
 }
 
+function Save-BuildInfoFromBlobIfAvailable {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Suffix
+    )
+
+    $storageAccountName = $env:AZURE_STORAGE_ACCOUNT
+    $blobContainerName = $env:AZURE_BLOB_CONTAINER
+    if ([string]::IsNullOrWhiteSpace($storageAccountName) -or [string]::IsNullOrWhiteSpace($blobContainerName)) {
+        return $null
+    }
+
+    $targetPath = Get-BuildInfoPathForSuffix -Suffix $Suffix
+    $blobName = "builds/build_info-$Suffix.json"
+
+    $downloadOutput = & az storage blob download `
+        --auth-mode login `
+        --account-name $storageAccountName `
+        --container-name $blobContainerName `
+        --name $blobName `
+        --file $targetPath `
+        --overwrite true `
+        --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path -LiteralPath $targetPath) {
+            Remove-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue
+        }
+        return $null
+    }
+
+    if (Test-Path -LiteralPath $targetPath) {
+        return $targetPath
+    }
+
+    $null
+}
+
 function Get-BuildInfoPaths {
     $buildInfoPaths = @(
         Get-ChildItem -Path (Get-BuildInfoDirectory) -Filter 'build_info-*.json' -File -ErrorAction SilentlyContinue |
@@ -1099,9 +1137,15 @@ function Get-BuildInfoPathForResourceGroup {
         [string]$ResourceGroupName
     )
 
-    $suffixPath = Get-BuildInfoPathForSuffix -Suffix (Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $ResourceGroupName)
+    $suffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $ResourceGroupName
+    $suffixPath = Get-BuildInfoPathForSuffix -Suffix $suffix
     if (Test-Path -LiteralPath $suffixPath) {
         return $suffixPath
+    }
+
+    $downloadedPath = Save-BuildInfoFromBlobIfAvailable -Suffix $suffix
+    if ($downloadedPath) {
+        return $downloadedPath
     }
 
     foreach ($path in Get-BuildInfoPaths) {
@@ -1236,13 +1280,39 @@ function Get-FoundryBuildStatusLines {
         }
     }
 
+    $storageAccountStatus = if ($storageExists) {
+        "$($buildInfo.storage_account) ✅"
+    } else {
+        "$($buildInfo.storage_account) ❌"
+    }
+    $keyVaultStatus = if ($keyVaultExists) {
+        "$($buildInfo.key_vault) ✅"
+    } else {
+        "$($buildInfo.key_vault) ❌"
+    }
+    $appInsightsStatus = if ($appInsightsExists) {
+        "$($buildInfo.appinsights) ✅"
+    } else {
+        "$($buildInfo.appinsights) ❌"
+    }
+    $foundryStatus = if ($foundryExists) {
+        "$($buildInfo.foundry_name) ✅"
+    } else {
+        "$($buildInfo.foundry_name) ❌"
+    }
+    $projectStatus = if ($projectExists) {
+        "$($buildInfo.foundry_project_name) ✅"
+    } else {
+        "$($buildInfo.foundry_project_name) ❌"
+    }
+
     Write-BuildStatus `
         -ResourceGroupName $ResourceGroupName `
-        -StorageAccountName (if ($storageExists) { "$($buildInfo.storage_account) ✅" } else { "$($buildInfo.storage_account) ❌" }) `
-        -KeyVaultName (if ($keyVaultExists) { "$($buildInfo.key_vault) ✅" } else { "$($buildInfo.key_vault) ❌" }) `
-        -AppInsightsName (if ($appInsightsExists) { "$($buildInfo.appinsights) ✅" } else { "$($buildInfo.appinsights) ❌" }) `
-        -AiFoundryName (if ($foundryExists) { "$($buildInfo.foundry_name) ✅" } else { "$($buildInfo.foundry_name) ❌" }) `
-        -AiProjectName (if ($projectExists) { "$($buildInfo.foundry_project_name) ✅" } else { "$($buildInfo.foundry_project_name) ❌" }) `
+        -StorageAccountName $storageAccountStatus `
+        -KeyVaultName $keyVaultStatus `
+        -AppInsightsName $appInsightsStatus `
+        -AiFoundryName $foundryStatus `
+        -AiProjectName $projectStatus `
         -GenAiModelDisplay $buildInfo.genai_model `
         -BuildInfoStatus "$buildInfoFileName ✅" `
         -FoundryProjectEndpoint $buildInfo.foundry_project_endpoint `
