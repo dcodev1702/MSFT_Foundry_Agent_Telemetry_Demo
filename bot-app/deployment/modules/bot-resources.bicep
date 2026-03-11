@@ -206,7 +206,7 @@ resource azureBot 'Microsoft.BotService/botServices@2023-09-15-preview' = {
     name: 'F0'
   }
   properties: {
-    displayName: 'Bot the Builder'
+    displayName: 'Bot-The-Builder'
     endpoint: 'https://${containerApp.properties.configuration.ingress.fqdn}/api/messages'
     msaAppId: botAppId
     msaAppTenantId: tenantId

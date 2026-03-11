@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
   "manifestVersion": "1.17",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "id": "ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef",
   "developer": {
     "name": "DIB Security",
@@ -10,12 +10,12 @@
     "termsOfUseUrl": "https://dibsecurity.onmicrosoft.com/terms"
   },
   "name": {
-    "short": "Bot the Builder",
-    "full": "Bot the Builder - Azure Foundry Agent"
+    "short": "Bot-The-Builder",
+    "full": "Bot-The-Builder - Azure Foundry Agent"
   },
   "description": {
     "short": "Deploys and manages Azure AI Foundry environments via Teams",
-    "full": "Bot the Builder provisions Azure AI Foundry environments on demand. Send commands like 'build it', 'list builds', 'build status', and 'teardown' to manage your cloud infrastructure directly from Microsoft Teams."
+    "full": "Bot-The-Builder provisions Azure AI Foundry environments on demand. Send commands like 'build it', 'list builds', 'build status', and 'teardown' to manage your cloud infrastructure directly from Microsoft Teams."
   },
   "icons": {
     "color": "color.png",
