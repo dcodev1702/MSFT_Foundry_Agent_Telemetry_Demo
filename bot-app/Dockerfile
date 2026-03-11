@@ -33,6 +33,9 @@ COPY deployment/ /app/deployment/
 # Copy bot application code
 COPY bot-app/python-teams-bot-sample/ /app/bot-app/python-teams-bot-sample/
 
+# Copy the Teams package icon so the bot can serve it publicly for Teams avatars
+COPY bot-app/teams-app/color.png /app/bot-app/python-teams-bot-sample/assets/bot-icon.png
+
 # ── Python dependencies ──────────────────────────────────────────
 RUN pip install --no-cache-dir -r /app/bot-app/python-teams-bot-sample/requirements.txt
 

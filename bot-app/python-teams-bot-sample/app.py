@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 # ── Paths ──────────────────────────────────────────────────────
 BASE_PATH = Path(__file__).resolve().parent
+BOT_ICON_PATH = BASE_PATH / "assets" / "bot-icon.png"
 
 # Default deploy script path: two levels up → deployment/
 DEFAULT_DEPLOY_SCRIPT = str(
@@ -126,6 +127,14 @@ async def health_check(request: web.Request) -> web.Response:
     return web.json_response({"status": "healthy", "service": "foundry-teams-bot"})
 
 
+async def bot_icon(request: web.Request) -> web.StreamResponse:
+    """GET /bot-icon*.png — public icon used by Azure Bot Service."""
+    if not BOT_ICON_PATH.is_file():
+        return web.Response(status=404, text="Bot icon not found")
+
+    return web.FileResponse(BOT_ICON_PATH)
+
+
 async def download_build_info(request: web.Request) -> web.Response:
     """GET /api/download/{filename} — serve build_info files from blob storage."""
     import re
@@ -193,6 +202,8 @@ def create_app(argv=None) -> web.Application:
     # Routes
     app.router.add_post("/api/messages", agent_entry_point)
     app.router.add_get("/api/messages", health_check)
+    app.router.add_get("/bot-icon.png", bot_icon)
+    app.router.add_get(r"/bot-icon-{version}.png", bot_icon)
     app.router.add_get("/api/download/{filename}", download_build_info)
 
     # Lifecycle

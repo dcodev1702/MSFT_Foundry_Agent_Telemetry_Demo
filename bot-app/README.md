@@ -197,6 +197,8 @@ See [deployment/README.md](deployment/README.md) for the bot infrastructure depl
 
 Zip the contents of `bot-app/teams-app/` and upload that package in Teams as a custom app.
 
+If Teams keeps showing a stale custom app package after uninstalling it in the client, run `pwsh ./deployment/remove-teams-app.ps1` from the repo root to remove the current-user installation and the tenant app-catalog entry for this bot's manifest ID.
+
 ---
 
 ## 🔗 Related Docs

@@ -63,7 +63,13 @@ fi
 
 BOT_SECRET=$(python3 -c "import json; print(json.load(open('${SECRETS_FILE}'))['password'])")
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
-BOT_APP_REGISTRATION_NAME=$(az ad app show --id "${BOT_APP_ID}" --query displayName -o tsv)
+BOT_APP_REGISTRATION_NAME="Bot-The-Builder"
+
+CURRENT_BOT_APP_REGISTRATION_NAME=$(az ad app show --id "${BOT_APP_ID}" --query displayName -o tsv)
+if [[ "${CURRENT_BOT_APP_REGISTRATION_NAME}" != "${BOT_APP_REGISTRATION_NAME}" ]]; then
+  az ad app update --id "${BOT_APP_ID}" --display-name "${BOT_APP_REGISTRATION_NAME}" --output none
+  echo "  ✓ Updated bot app registration display name to ${BOT_APP_REGISTRATION_NAME}"
+fi
 
 # Fetch DIBSecCom LAW credentials (cross-subscription)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
