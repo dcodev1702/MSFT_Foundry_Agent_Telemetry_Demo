@@ -23,10 +23,10 @@ A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI
 ## 🚀 Quick Start
 
 1. Run the deployment first — it generates `build_info-<suffix>.json` at the repo root (see [`deployment/README.md`](deployment/README.md))
-2. Open `zolab-ai-agent-demo-win11.ipynb`
-4. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
-5. Switch to the **AI Agent Demo (.venv)** kernel
-6. Run sections **1 → 6** in order
+2. Open `zolab-ai-agent-demo-macbook.ipynb` or `zolab-ai-agent-demo-win11.ipynb`
+3. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
+4. Switch to the **AI Agent Demo (.venv)** kernel
+5. Run sections **1 → 5** in order
 7. Observe telemetry in the Azure Portal:
    - 📊 **Application Insights** — request/dependency traces
    - 🔍 **Microsoft Foundry** — agent execution traces
@@ -42,14 +42,14 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
 | **1** | Install Dependencies | Installs Azure AI, OpenTelemetry, and Azure Monitor packages with compatibility safeguards |
-| **1.1** | Confirm Existing Deployment | Loads the latest `build_info-<suffix>.json` and prints the current infrastructure summary before SDK imports |
 | **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `PromptAgentDefinition`, `AIProjectInstrumentor` |
 | **3** | Configure the Project Client | Reuses the deployment values loaded from `build_info-<suffix>.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
 | **3.1** | Enable Telemetry | Configures OpenTelemetry + Azure Monitor tracing pipeline and instruments the SDK |
 | **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a tool for the agent |
 | **4** | Create the Agent | Defines a versioned agent with storytelling persona and MCP tool access |
 | **5** | Query the Agent | Two passes — fiction story generation + MCP-powered Foundry guidance; results saved to `stories.json` |
-| **6** | Validate Traces in Log Analytics | Runs KQL queries against `api.loganalytics.io` to verify end-to-end telemetry |
+
+For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](deployment/run-smoke-checks.sh) and then exercise the manual Teams smoke sequence from [deployment/OPERATIONS-RUNBOOK.md](deployment/OPERATIONS-RUNBOOK.md).
 
 ---
 

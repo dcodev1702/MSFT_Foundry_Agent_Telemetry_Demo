@@ -241,10 +241,19 @@ The listener validates the request, then asks for confirmation:
 
 By default, the build, build-status, and teardown confirmation prompts stay open for 10 minutes before they expire.
 The listener also posts an automatic heartbeat to the Teams chat every 30 minutes while it remains online.
-While a build is actively running, the automation posts `🚧 👷 The Bobs Are Still Building 👷🚧 ` every 1 minute. During teardown, it posts `🚧 Pls hold while we teardown: <resource-group> 🚧` every 1 minute until the cleanup finishes.
+While a build is actively running, the automation posts `🚧 👷 The Bobs Are Still Building 👷🚧 ` every 1 minute. During teardown, it posts `🚧 👷 The Bobs Are Still Tearing Down: <resource-group> 👷🚧` every 1 minute until the cleanup finishes.
 After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
 The listener stays online until you explicitly send `stop listener` in the Teams chat.
 Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph API connectivity, chat topic, and running identity.
+
+Post-deploy smoke checks:
+
+```bash
+cd /path/to/repo
+bash deployment/run-smoke-checks.sh
+```
+
+That script verifies the live bot revision, worker runtime, and current worker build metadata, then prints the manual Teams commands to exercise after rollout.
 
 Upon completion, the script outputs all resource names and writes `build_info-<suffix>.json` at the repo root for notebook configuration.
 
