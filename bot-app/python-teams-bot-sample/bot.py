@@ -71,7 +71,7 @@ def _get_conversation_scope(activity) -> str:
 
 
 def _get_help_text() -> str:
-    return "\n".join([
+    return "<br>".join([
         "**Supported commands:**",
         "- `build it` — deploy (prompts for model selection)",
         "- `build it <model>` — deploy with specified model",
@@ -84,11 +84,11 @@ def _get_help_text() -> str:
     ])
 
 
-def _get_listener_status_text(dispatcher: FileJobDispatcher) -> str:
+def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
     app_id = os.getenv(
         "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID", "<bot-app-id>"
     )
-    return "\n".join([
+    return "<br>".join([
         "🟢 Bot status: Online ✅",
         "⚙️ Worker status: Running",
         f"📦 Queue depth: {dispatcher.queue_depth()}",
@@ -111,18 +111,18 @@ def _expire_sessions() -> None:
 
 
 def _model_selection_prompt() -> str:
-    lines = ["**Select a model for your build:**\n"]
+    lines = ["**Select a model for your build:**<br>"]
     for i, model in enumerate(ALLOWED_MODELS, 1):
         lines.append(f"{i}. `{model}`")
-    lines.append("\nReply with a **number** or the **model name**.")
+    lines.append("<br>Reply with a **number** or the **model name**.")
     lines.append("Type `cancel` to abort.")
-    return "\n".join(lines)
+    return "<br>".join(lines)
 
 
 # ── Save helpers ───────────────────────────────────────────────
 
 def _save_conversation(
-    activity, store: JsonConversationStore, context: TurnContext
+    activity, store: BlobConversationStore, context: TurnContext
 ) -> None:
     """Persist conversation metadata and reference for proactive messaging."""
     channel_data = activity.channel_data or {}
@@ -178,7 +178,7 @@ async def _handle_build_selection(
     raw_text: str,
     conversation_id: str,
     *,
-    dispatcher: FileJobDispatcher,
+    dispatcher: AzureQueueJobDispatcher,
     heartbeat_service=None,
 ) -> None:
     """Process a user's model-selection reply during an active BuildSession."""
@@ -213,7 +213,7 @@ async def _handle_build_selection(
     if selected_model is None:
         await context.send_activity(
             MessageFactory.text(
-                f"Invalid selection: `{choice}`\n\n" + _model_selection_prompt()
+                f"Invalid selection: `{choice}`<br><br>" + _model_selection_prompt()
             )
         )
         _last_response_utc = _utc_now()
@@ -235,8 +235,8 @@ async def _handle_build_selection(
     dispatcher.enqueue(job)
 
     ack = (
-        f"✅ Queued `build it` as job `{job.job_id}`.\n"
-        f"Model: `{selected_model}`\n"
+        f"✅ Queued `build it` as job `{job.job_id}`.<br>"
+        f"Model: `{selected_model}`<br>"
         "The worker will post progress updates every 60 seconds "
         "during deployment."
     )
@@ -293,7 +293,7 @@ def register_handlers(
             return
 
         if command.kind == "unknown":
-            msg = "I did not recognize that command.\n\n" + _get_help_text()
+            msg = "I did not recognize that command.<br><br>" + _get_help_text()
             await context.send_activity(MessageFactory.text(msg))
             _last_response_utc = _utc_now()
             if heartbeat_service:
@@ -313,13 +313,17 @@ def register_handlers(
                     channel_id=listening_in,
                 )
             else:
-                text = "\n".join([
+                scope_parts = []
+                tid = team.get('id')
+                if tid:
+                    scope_parts.append(f"team={tid}")
+                scope_parts.append(f"channel={listening_in}")
+                text = "<br>".join([
                     "🟢 Status: Online ✅",
-                    "📜 Script: foundry-teams-bot (M365 Agents SDK)",
+                    "📜 Script: Bot-the-Builder (M365 Agents SDK)",
                     f"🆔 PID: {os.getpid()}",
                     f"💬 Last response: {_last_response_utc}",
-                    f"📢 Listening in: team={team.get('id', 'unknown')} "
-                    f"channel={listening_in}",
+                    f"📢 Listening in: {' '.join(scope_parts)}",
                     f"👤 Identity: {_get_requester(activity)}",
                     f"🕒 Checked at: {_utc_now()}",
                 ])
@@ -356,7 +360,7 @@ def register_handlers(
                 _build_sessions[conversation_id] = BuildSession()
                 await context.send_activity(
                     MessageFactory.text(
-                        f"Unknown model `{command.model}`.\n\n"
+                        f"Unknown model `{command.model}`.<br><br>"
                         + _model_selection_prompt()
                     )
                 )
@@ -379,25 +383,25 @@ def register_handlers(
 
         if command.kind == "build":
             ack = (
-                f"Queued `build it` as job `{job.job_id}`.\n"
-                f"Model: `{command.model}`\n"
+                f"✅ Queued `build it` as job `{job.job_id}`.<br>"
+                f"Model: `{command.model}`<br>"
                 "The worker will post progress updates every 60 seconds "
                 "during deployment."
             )
         elif command.kind == "teardown":
             ack = (
-                f"Queued `teardown` for `{command.resource_group}` "
-                f"as job `{job.job_id}`.\n"
+                f"⏳ Queued `teardown` for `{command.resource_group}` "
+                f"as job `{job.job_id}`.<br>"
                 "The worker will post progress updates every 60 seconds "
                 "during cleanup."
             )
         elif command.kind == "build-status":
             ack = (
-                f"Queued `build status` for `{command.resource_group}` "
+                f"🔍 Queued `build status` for `{command.resource_group}` "
                 f"as job `{job.job_id}`."
             )
         else:  # list-builds
-            ack = f"Queued `list builds` as job `{job.job_id}`."
+            ack = f"📋 Queued `list builds` as job `{job.job_id}`."
 
         await context.send_activity(MessageFactory.text(ack))
         _last_response_utc = _utc_now()
@@ -415,8 +419,8 @@ def register_handlers(
                 continue
 
             welcome = (
-                "👋 **Hello! I'm the Foundry Bot.**\n\n"
+                "👋 **Hello! I'm Bot-the-Builder.**<br><br>"
                 "I manage Azure AI Foundry deployments from this "
-                "Teams channel.\n\n" + _get_help_text()
+                "Teams channel.<br><br>" + _get_help_text()
             )
             await context.send_activity(MessageFactory.text(welcome))

@@ -1,8 +1,9 @@
 // ════════════════════════════════════════════════════════════════
-// bot-resources.bicep — App Service + ACR + Managed Identity
+// bot-resources.bicep — Container App + ACR + Managed Identity
 //
 // Deployed at resource-group scope by bot-infra.bicep.
-// Uses container deployment (Docker) instead of code deployment.
+// Uses Azure Container Apps (Microsoft.App) instead of App Service
+// due to Microsoft.Web quota restrictions on Internal subscriptions.
 // ════════════════════════════════════════════════════════════════
 
 @description('Azure region for all resources')
@@ -17,19 +18,23 @@ param botAppId string
 @description('Entra Tenant ID')
 param tenantId string
 
-@description('App Service Plan SKU')
-param appServicePlanSku string
+@secure()
+@description('Bot App Registration Client Secret (set empty string initially, update post-deploy)')
+param botAppSecret string = ''
 
-@description('Deploy App Service Plan + App Service (set false when B1 quota not yet approved)')
-param deployAppService bool = true
+@description('Log Analytics Workspace customer (workspace) ID — DIBSecCom in Security sub')
+param logAnalyticsCustomerId string
+
+@secure()
+@description('Log Analytics Workspace shared key — DIBSecCom in Security sub')
+param logAnalyticsSharedKey string
 
 // ── Resource Names ────────────────────────────────────────────
-var appServicePlanName  = 'zolab-bot-plan-${suffix}'
-var appServiceName      = 'zolab-bot-app-${suffix}'
 var managedIdentityName = 'zolab-bot-mi-${suffix}'
-var acrName             = 'zolabbotacr${suffix}'  // ACR names must be alphanumeric
+var acrName             = 'zolabbotacr${suffix}'
 var botServiceName      = 'zolab-bot-${suffix}'
-var messagingEndpoint   = 'https://${appServiceName}.azurewebsites.net/api/messages'
+var containerEnvName    = 'zolab-bot-env-${suffix}'
+var containerAppName    = 'zolab-bot-ca-${suffix}'
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
 var roles = {
@@ -42,8 +47,6 @@ var roles = {
 // ════════════════════════════════════════════════════════════════
 
 // ── User-Assigned Managed Identity ──────────────────────────────
-// Created ahead of time with Graph permissions pre-granted.
-// Bicep ensures it exists; Graph role assignments are out-of-band.
 resource botManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: managedIdentityName
   location: location
@@ -72,22 +75,25 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// ── App Service Plan (Linux) ──────────────────────────────────
-resource appServicePlan 'Microsoft.Web/serverfarms@2024-04-01' = if (deployAppService) {
-  name: appServicePlanName
+// ── Container Apps Environment ──────────────────────────────────
+// Logs go to DIBSecCom LAW in the Security subscription (cross-sub)
+resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
+  name: containerEnvName
   location: location
-  kind: 'linux'
-  sku: {
-    name: appServicePlanSku
-  }
   properties: {
-    reserved: true  // Required for Linux
+    appLogsConfiguration: {
+      destination: 'log-analytics'
+      logAnalyticsConfiguration: {
+        customerId: logAnalyticsCustomerId
+        sharedKey: logAnalyticsSharedKey
+      }
+    }
   }
 }
 
-// ── App Service (Container + User-Assigned Managed Identity) ──
-resource appService 'Microsoft.Web/sites@2024-04-01' = if (deployAppService) {
-  name: appServiceName
+// ── Container App (Bot Web Server) ──────────────────────────────
+resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
+  name: containerAppName
   location: location
   identity: {
     type: 'UserAssigned'
@@ -96,58 +102,87 @@ resource appService 'Microsoft.Web/sites@2024-04-01' = if (deployAppService) {
     }
   }
   properties: {
-    serverFarmId: appServicePlan.id
-    httpsOnly: true
-    siteConfig: {
-      linuxFxVersion: 'DOCKER|${acr.properties.loginServer}/zolab-bot:latest'
-      minTlsVersion: '1.2'
-      ftpsState: 'Disabled'
-      alwaysOn: true
-      acrUseManagedIdentityCreds: true
-      acrUserManagedIdentityID: botManagedIdentity.properties.clientId
-      appSettings: [
+    managedEnvironmentId: containerEnv.id
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: {
+        external: true
+        targetPort: 8000
+        transport: 'http'
+        allowInsecure: false
+      }
+      registries: [
         {
-          name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
-          value: botAppId
-        }
-        {
-          name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
-          value: tenantId
-        }
-        {
-          name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
-          value: ''  // Set post-deployment via az webapp config appsettings
-        }
-        {
-          name: 'WEBSITES_PORT'
-          value: '8000'
-        }
-        {
-          // UAMI client ID — used by PowerShell: Connect-MgGraph -Identity -ClientId <value>
-          name: 'AZURE_CLIENT_ID'
-          value: botManagedIdentity.properties.clientId
-        }
-        {
-          name: 'DOCKER_REGISTRY_SERVER_URL'
-          value: 'https://${acr.properties.loginServer}'
-        }
-        {
-          name: 'AZURE_STORAGE_ACCOUNT'
-          value: 'zolabworkerstbotprd'
-        }
-        {
-          name: 'AZURE_QUEUE_NAME'
-          value: 'botjobs'
-        }
-        {
-          name: 'AZURE_BLOB_CONTAINER'
-          value: 'botstate'
-        }
-        {
-          name: 'WORKER_ENABLED'
-          value: 'false'  // ACI handles worker execution
+          server: acr.properties.loginServer
+          identity: botManagedIdentity.id
         }
       ]
+      secrets: [
+        {
+          name: 'bot-app-secret'
+          value: botAppSecret
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'zolab-bot'
+          image: '${acr.properties.loginServer}/zolab-bot:latest'
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
+              value: botAppId
+            }
+            {
+              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
+              value: tenantId
+            }
+            {
+              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
+              secretRef: 'bot-app-secret'
+            }
+            {
+              name: 'AZURE_CLIENT_ID'
+              value: botManagedIdentity.properties.clientId
+            }
+            {
+              name: 'AZURE_STORAGE_ACCOUNT'
+              value: 'zolabworkerstbotprd'
+            }
+            {
+              name: 'AZURE_QUEUE_NAME'
+              value: 'botjobs'
+            }
+            {
+              name: 'AZURE_BLOB_CONTAINER'
+              value: 'botstate'
+            }
+            {
+              name: 'WORKER_ENABLED'
+              value: 'false'
+            }
+          ]
+        }
+      ]
+      scale: {
+        minReplicas: 1
+        maxReplicas: 3
+        rules: [
+          {
+            name: 'http-scaling'
+            http: {
+              metadata: {
+                concurrentRequests: '50'
+              }
+            }
+          }
+        ]
+      }
     }
   }
 }
@@ -172,7 +207,7 @@ resource azureBot 'Microsoft.BotService/botServices@2023-09-15-preview' = {
   }
   properties: {
     displayName: 'Bot the Builder'
-    endpoint: messagingEndpoint
+    endpoint: 'https://${containerApp.properties.configuration.ingress.fqdn}/api/messages'
     msaAppId: botAppId
     msaAppTenantId: tenantId
     msaAppType: 'SingleTenant'
@@ -196,12 +231,13 @@ resource teamsChannel 'Microsoft.BotService/botServices/channels@2023-09-15-prev
 //  OUTPUTS
 // ════════════════════════════════════════════════════════════════
 
-output appServiceName string = appServiceName
-output appServiceUrl string = 'https://${appServiceName}.azurewebsites.net'
+output containerAppName string = containerApp.name
+output containerAppFqdn string = containerApp.properties.configuration.ingress.fqdn
+output containerAppUrl string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
 output managedIdentityPrincipalId string = botManagedIdentity.properties.principalId
 output managedIdentityClientId string = botManagedIdentity.properties.clientId
 output managedIdentityResourceId string = botManagedIdentity.id
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
 output botServiceName string = azureBot.name
-output messagingEndpoint string = messagingEndpoint
+output messagingEndpoint string = 'https://${containerApp.properties.configuration.ingress.fqdn}/api/messages'

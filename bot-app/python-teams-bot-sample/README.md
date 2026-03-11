@@ -1,72 +1,151 @@
-# Python Teams Bot Sample
+# Bot the Builder — Teams Bot for Azure AI Foundry
 
-This is a lean study sample that shows what a Python Teams bot can look like for the Foundry command model.
+A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry deployments via chat commands. Runs as an **Azure Container App** with a separate **ACI-hosted worker** for long-running PowerShell operations.
 
-It demonstrates:
+## Architecture
 
-- Bot Framework-style Teams message handling in Python
-- command parsing for:
-  - `build it`
-  - `build it <model>`
-  - `list builds`
-  - `build status <resource-group>`
-  - `teardown <resource-group>`
-  - `heartbeat`
-  - `listener status`
-  - `help`
-- local conversation reference persistence
-- queue handoff using JSON job files
-- a sample PowerShell worker handoff script
+```
+                   Teams
+                     |
+                     v
+            ┌────────────────┐
+            │   Azure Bot    │
+            │   Service (F0) │
+            └───────┬────────┘
+                    |
+                    v
+  ┌──────────────────────────────────┐
+  │  Azure Container App             │
+  │  (zolab-bot-ca-botprd)           │
+  │                                  │
+  │  - aiohttp web server (:8000)    │
+  │  - M365 Agents SDK handlers      │
+  │  - JWT auth middleware            │
+  │  - Proactive messaging           │
+  │  - Heartbeat service (15 min)    │
+  │                                  │
+  │  Identity: UAMI (zolab-bot-mi)   │
+  └──────────┬───────────────────────┘
+             |
+     ┌───────┴────────┐
+     v                v
+┌─────────┐    ┌──────────────┐
+│  Azure  │    │    Azure     │
+│  Queue  │    │    Blob      │
+│ Storage │    │   Storage    │
+│(botjobs)│    │  (botstate)  │
+└────┬────┘    └──────────────┘
+     |
+     v
+┌──────────────────────────────────┐
+│  ACI Worker Container            │
+│  (zolab-worker-aci-botprd)       │
+│                                  │
+│  - Polls queue every 5s          │
+│  - Executes PowerShell/Bicep     │
+│  - Sends results via proactive   │
+│    messaging back to Teams       │
+│                                  │
+│  Identity: UAMI (zolab-bot-mi)   │
+└──────────────────────────────────┘
+```
 
-This sample is intentionally small and study-focused:
+### Key Design Decisions
 
-- it uses a local file-backed queue instead of Azure Storage Queue
-- it uses a local JSON file instead of durable table storage
-- the PowerShell worker script shows the intended handoff contract and does not execute production deployment commands by default
+- **Azure Container Apps** instead of App Service (subscription has zero `Microsoft.Web` quota on `Internal_2014-09-01` offer)
+- **Azure Queue Storage** for job dispatch (RBAC-only, `allowSharedKeyAccess: false`)
+- **Azure Blob Storage** for conversation state (`conversations.json`, `references.json`, `identities.json`)
+- **User-Assigned Managed Identity** for all Azure access (ACR pull, Storage, Az PowerShell)
+- **Cross-subscription logging** to `DIBSecCom` LAW in the Security subscription
+- **DefaultAzureCredential** everywhere — no connection strings or storage keys
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `build it` | Deploy a new Foundry environment (prompts for model selection) |
+| `build it <model>` | Deploy with a specific model |
+| `list builds` | List all active Foundry deployments |
+| `build status <rg>` | Check a specific deployment |
+| `teardown <rg>` | Remove a Foundry deployment |
+| `heartbeat` | Bot health, uptime, memory, queue depth |
+| `listener status` | Worker and queue status |
+| `help` | Show command list |
 
 ## Files
 
-- `app.py` - aiohttp host and Bot Framework adapter wiring
-- `bot.py` - Teams bot command handling
-- `command_parser.py` - exact command model parser
-- `conversation_store.py` - local JSON conversation reference store
-- `job_dispatcher.py` - file-backed queue writer
-- `models.py` - command and job models
-- `sample-worker.ps1` - PowerShell handoff example
-- `requirements.txt` - Python dependencies
-- `teams-bot-automation-implementation-guide.md` - detailed LLM-oriented implementation guide
-- `teams-bot-automation-architecture-overview.docx` - human-readable architecture overview
+| File | Purpose |
+|------|---------|
+| `app.py` | aiohttp host, M365 Agents SDK adapter, JWT middleware |
+| `bot.py` | Teams message/event handlers, command routing |
+| `command_parser.py` | Regex command parser |
+| `conversation_store.py` | Azure Blob-backed conversation reference store |
+| `job_dispatcher.py` | Azure Queue Storage job dispatcher |
+| `models.py` | Command, job, and session models |
+| `worker.py` | Background queue worker (used in ACI container) |
+| `worker_standalone.py` | Standalone entry point for the worker container |
+| `proactive.py` | Proactive messaging via stored conversation references |
+| `heartbeat.py` | Periodic heartbeat broadcast service |
+| `storage_config.py` | Shared Azure credential and client configuration |
+| `requirements.txt` | Python dependencies |
 
-## Run locally
+## Azure Resources
 
-```powershell
-cd bot-app\python-teams-bot-sample
+| Resource | Type | Purpose |
+|----------|------|---------|
+| `zolab-bot-ca-botprd` | Container App | Bot web server |
+| `zolab-bot-env-botprd` | Container Apps Environment | Hosting environment (logs to DIBSecCom LAW) |
+| `zolabbotacrbotprd` | Container Registry | Bot container images |
+| `zolab-bot-mi-botprd` | Managed Identity (UAMI) | All Azure auth |
+| `zolab-bot-botprd` | Bot Service (F0) | Teams channel registration |
+| `zolab-worker-aci-botprd` | Container Instance | Worker for PowerShell jobs |
+| `zolabworkeracrbotprd` | Container Registry | Worker container images |
+| `zolabworkerstbotprd` | Storage Account | Queue (`botjobs`) + Blob (`botstate`) |
+
+### RBAC Roles (UAMI)
+
+| Role | Scope |
+|------|-------|
+| AcrPull | Bot ACR |
+| Contributor | Bot resource group |
+| Storage Queue Data Contributor | Worker storage account |
+| Storage Blob Data Contributor | Worker storage account |
+| Contributor | Subscription (for PowerShell Az operations) |
+
+## Run Locally
+
+```bash
+cd bot-app/python-teams-bot-sample
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+source .venv/bin/activate
 pip install -r requirements.txt
-$env:MicrosoftAppId = "<bot-app-id>"
-$env:MicrosoftAppPassword = "<bot-secret>"
+
+# Set environment variables
+export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID="<bot-app-id>"
+export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID="<tenant-id>"
+export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET="<bot-secret>"
+export AZURE_STORAGE_ACCOUNT="zolabworkerstbotprd"
+export AZURE_QUEUE_NAME="botjobs"
+export AZURE_BLOB_CONTAINER="botstate"
+
 python app.py
 ```
 
-The sample host listens on `http://localhost:3978/api/messages`.
+The bot listens on `http://localhost:8000/api/messages`. `DefaultAzureCredential` falls through to `az login` locally.
 
-## Queue handoff
+## Deploy
 
-When the bot receives `build it`, `teardown`, `list builds`, or `build status`, it writes a JSON job file into:
-
-```text
-bot-app\python-teams-bot-sample\.queue\pending
+```bash
+# From repo root
+bash bot-app/deployment/deploy-bot-app.sh
 ```
 
-You can inspect the file or pass it to the sample PowerShell worker:
+This builds both container images, deploys the Bicep infrastructure, grants RBAC, and verifies the deployment. See `bot-app/deployment/deploy-bot-app.sh` for details.
 
-```powershell
-pwsh .\sample-worker.ps1 -JobPath .\.queue\pending\<job-file>.json
-```
+## Teams App
 
-## Notes
+The Teams app manifest is in `bot-app/teams-app/`. To sideload:
 
-- The heartbeat message format mirrors the current Teams listener style.
-- The build/teardown queued acknowledgements are shaped for the same operational workflow you already use.
-- For production, replace the file queue with Azure Storage Queue and replace the local conversation store with Table Storage or Cosmos DB.
+1. Zip the contents of `bot-app/teams-app/` (manifest.json + icons)
+2. In Teams: Apps > Manage your apps > Upload a custom app
+3. Select the zip file

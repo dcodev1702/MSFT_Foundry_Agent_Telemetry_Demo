@@ -5,17 +5,18 @@
 //   - A resource group for bot resources
 //   - Azure Container Registry (Basic)
 //   - User-Assigned Managed Identity (with Graph permissions)
-//   - App Service Plan (Linux, B1)
-//   - App Service (container deployment from ACR)
+//   - Container Apps Environment (logs → DIBSecCom LAW in Security sub)
+//   - Container App (bot web server, pulls from ACR via UAMI)
+//   - Azure Bot Service (F0, SingleTenant) + Teams Channel
 //
 // Usage:
 //   az deployment sub create \
 //     --location eastus2 \
 //     --template-file bot-infra.bicep \
-//     --parameters bot-infra.bicepparam
+//     --parameters suffix=botprd botAppId=<guid> tenantId=<guid>
 //
-// NOTE: This is a STANDALONE deployment, separate from the
-//       Foundry resources in deployment/main.bicep.
+// NOTE: Uses Azure Container Apps (Microsoft.App) instead of
+//       App Service due to Microsoft.Web quota restrictions.
 // ════════════════════════════════════════════════════════════════
 targetScope = 'subscription'
 
@@ -36,11 +37,16 @@ param tenantId string
 @description('Resource group name for bot infrastructure')
 param botResourceGroupName string = 'zolab-bot-${suffix}'
 
-@description('App Service Plan SKU (B1 for dev/pilot, S1+ for production)')
-param appServicePlanSku string = 'B1'
+@secure()
+@description('Bot App Registration Client Secret')
+param botAppSecret string = ''
 
-@description('Deploy App Service Plan + App Service (set false when B1 quota not yet approved)')
-param deployAppService bool = true
+@description('DIBSecCom Log Analytics Workspace customer ID (Security sub)')
+param logAnalyticsCustomerId string
+
+@secure()
+@description('DIBSecCom Log Analytics Workspace shared key (Security sub)')
+param logAnalyticsSharedKey string
 
 // ── Resource Group ────────────────────────────────────────────
 
@@ -59,16 +65,18 @@ module botResources 'modules/bot-resources.bicep' = {
     suffix: suffix
     botAppId: botAppId
     tenantId: tenantId
-    appServicePlanSku: appServicePlanSku
-    deployAppService: deployAppService
+    botAppSecret: botAppSecret
+    logAnalyticsCustomerId: logAnalyticsCustomerId
+    logAnalyticsSharedKey: logAnalyticsSharedKey
   }
 }
 
 // ── Outputs ───────────────────────────────────────────────────
 
 output resourceGroupName string = botRg.name
-output appServiceName string = botResources.outputs.appServiceName
-output appServiceUrl string = botResources.outputs.appServiceUrl
+output containerAppName string = botResources.outputs.containerAppName
+output containerAppFqdn string = botResources.outputs.containerAppFqdn
+output containerAppUrl string = botResources.outputs.containerAppUrl
 output managedIdentityPrincipalId string = botResources.outputs.managedIdentityPrincipalId
 output managedIdentityClientId string = botResources.outputs.managedIdentityClientId
 output managedIdentityResourceId string = botResources.outputs.managedIdentityResourceId

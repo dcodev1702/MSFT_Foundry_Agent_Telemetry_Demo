@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.17/MicrosoftTeams.schema.json",
   "manifestVersion": "1.17",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "id": "ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef",
   "developer": {
     "name": "DIB Security",
@@ -70,6 +70,6 @@
     "messageTeamMembers"
   ],
   "validDomains": [
-    "zolab-bot-app-botprd.azurewebsites.net"
+    "zolab-bot-ca-botprd.wonderfulisland-c279134c.eastus2.azurecontainerapps.io"
   ]
 }

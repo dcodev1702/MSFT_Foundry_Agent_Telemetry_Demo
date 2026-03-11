@@ -82,7 +82,7 @@ class HeartbeatService:
 
         lines = [
             "🟢 Status: Online ✅",
-            "📜 Script: foundry-teams-bot (M365 Agents SDK)",
+            "📜 Script: Bot-the-Builder (M365 Agents SDK)",
             f"🆔 PID: {os.getpid()}",
             f"🐍 Python: {sys.version.split()[0]}",
             f"⏱️ Uptime: {uptime_str}",
@@ -91,12 +91,15 @@ class HeartbeatService:
             f"💬 Last response: {self._last_response_utc}",
         ]
 
-        if team_id and channel_id:
-            lines.append(f"📢 Listening in: team={team_id} channel={channel_id}")
+        if channel_id:
+            if team_id and team_id != "unknown":
+                lines.append(f"📢 Listening in: team={team_id} channel={channel_id}")
+            else:
+                lines.append(f"📢 Listening in: channel={channel_id}")
 
         if requester:
             lines.append(f"👤 Identity: {requester}")
 
         lines.append(f"🕒 Checked at: {now.strftime('%Y-%m-%d %H:%M:%SZ')}")
 
-        return "\n".join(lines)
+        return "<br>".join(lines)

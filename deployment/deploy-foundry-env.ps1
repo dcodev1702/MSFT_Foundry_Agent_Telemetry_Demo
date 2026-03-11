@@ -34,6 +34,16 @@ if ($ListBuilds -and ($Cleanup -or $BuildStatusResourceGroup)) {
     throw "List builds mode cannot be combined with cleanup or build status mode."
 }
 
+# ── Auto-authenticate with Managed Identity when running in ACI/Container Apps ──
+if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
+    $miClientId = $env:AZURE_CLIENT_ID
+    if ($miClientId) {
+        Write-Host "No Az session — connecting via managed identity (AZURE_CLIENT_ID=$miClientId)..."
+        Connect-AzAccount -Identity -AccountId $miClientId -ErrorAction Stop | Out-Null
+        Write-Host "Authenticated via managed identity."
+    }
+}
+
 # ── Configuration ──
 $subscriptionId         = (Get-AzSubscription -SubscriptionName "zolab").Id
 $securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id

@@ -101,7 +101,7 @@ class BackgroundWorker:
                 truncated = result[:3000]
                 await self._proactive.send_to_conversation(
                     conversation_id,
-                    f"Job `{job_id}` (`{operation}`) completed:\n\n```\n{truncated}\n```",
+                    f"Job `{job_id}` (`{operation}`) completed:<br><pre>{truncated}</pre>",
                 )
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)

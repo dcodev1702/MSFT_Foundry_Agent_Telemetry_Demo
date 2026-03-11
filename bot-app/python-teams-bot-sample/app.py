@@ -153,7 +153,7 @@ async def on_shutdown(app: web.Application) -> None:
 
 
 # ── Application Factory ───────────────────────────────────────
-def create_app() -> web.Application:
+def create_app(argv=None) -> web.Application:
     app = web.Application(middlewares=[jwt_authorization_middleware])
 
     # Store SDK objects on the app for middleware access
