@@ -163,6 +163,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'botstate'
             }
             {
+              name: 'AZURE_SUBSCRIPTION_ID'
+              value: subscription().subscriptionId
+            }
+            {
               name: 'WORKER_ENABLED'
               value: 'false'
             }

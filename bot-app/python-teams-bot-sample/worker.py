@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import json
 import logging
 from datetime import datetime, timezone
@@ -143,11 +144,62 @@ class BackgroundWorker:
         if model:
             args.extend(["-SelectedAiModel", model])
 
-        return await self._run_powershell(
+        output = await self._run_powershell(
             args,
             conversation_id,
             progress_msg="One moment ..the Bob's are still building!",
         )
+
+        # Upload build_info file to blob storage and notify the channel
+        await self._upload_build_info(conversation_id)
+
+        return output
+
+    async def _upload_build_info(self, conversation_id: str) -> None:
+        """Find build_info-*.json, upload to blob storage, send download link."""
+        try:
+            from storage_config import get_blob_service_client, BLOB_CONTAINER_NAME
+
+            # build_info is written to /app/ (parent of deployment/)
+            build_info_dir = self._deploy_script.parent.parent
+            files = sorted(
+                glob.glob(str(build_info_dir / "build_info-*.json")),
+                key=lambda f: Path(f).stat().st_mtime,
+                reverse=True,
+            )
+            if not files:
+                logger.warning("No build_info-*.json found after build")
+                return
+
+            latest = Path(files[0])
+            blob_name = f"builds/{latest.name}"
+
+            loop = asyncio.get_event_loop()
+            blob_client = get_blob_service_client().get_blob_client(
+                container=BLOB_CONTAINER_NAME, blob=blob_name,
+            )
+
+            data = latest.read_bytes()
+            await loop.run_in_executor(
+                None,
+                lambda: blob_client.upload_blob(data, overwrite=True),
+            )
+            logger.info("Uploaded %s to blob %s", latest.name, blob_name)
+
+            # Build download URL via the bot's own endpoint
+            import os
+            fqdn = os.getenv(
+                "BOT_FQDN",
+                "zolab-bot-ca-botprd.wonderfulisland-c279134c.eastus2.azurecontainerapps.io",
+            )
+            download_url = f"https://{fqdn}/api/download/{latest.name}"
+
+            await self._proactive.send_to_conversation(
+                conversation_id,
+                f"📄 Build info: [`{latest.name}`]({download_url})",
+            )
+        except Exception as e:
+            logger.error("Failed to upload build_info: %s", e)
 
     async def _run_teardown(
         self, job_id: str, resource_group: str | None, conversation_id: str

@@ -25,3 +25,6 @@ azure-identity>=1.15.0
 # Azure Storage (Queue + Blob) — Entra ID / RBAC auth
 azure-storage-queue>=12.9.0
 azure-storage-blob>=12.19.0
+
+# Azure Resource Management (list resource groups for teardown selection)
+azure-mgmt-resource>=23.0.0
