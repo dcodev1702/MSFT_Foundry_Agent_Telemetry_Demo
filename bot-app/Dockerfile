@@ -1,8 +1,9 @@
 # ════════════════════════════════════════════════════════════════
 # Dockerfile — Bot-the-Builder container image
 #
-# Bundles: Python 3.14 + PowerShell 7.4 + Azure CLI + Bicep +
-#          Azure Developer CLI (azd) + Az/Graph PowerShell modules
+# Overlays the latest bot code onto a known-good bot runtime image
+# stored in the bot ACR. This avoids transient Docker Hub pull-rate
+# failures during ACR tasks while preserving the existing runtime toolchain.
 #
 # Build:
 #   docker build -t zolab-bot:latest -f bot-app/Dockerfile .
@@ -11,48 +12,8 @@
 #   docker run -p 8000:8000 --env-file bot-app/python-teams-bot-sample/.env zolab-bot:latest
 # ════════════════════════════════════════════════════════════════
 
-FROM python:3.13-slim-bookworm AS base
-
-# Avoid interactive prompts during package installation
-ENV DEBIAN_FRONTEND=noninteractive
-
-# ── System dependencies ──────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        apt-transport-https \
-        ca-certificates \
-        curl \
-        gnupg \
-        lsb-release \
-        unzip \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── PowerShell 7.4 ──────────────────────────────────────────────
-RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
-    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/microsoft-debian-bookworm-prod bookworm main" \
-        > /etc/apt/sources.list.d/microsoft.list \
-    && apt-get update && apt-get install -y --no-install-recommends powershell \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── Azure CLI ────────────────────────────────────────────────────
-RUN pip install --no-cache-dir azure-cli
-
-# ── Bicep CLI (extension of Azure CLI) ───────────────────────────
-RUN az bicep install
-
-# ── Azure Developer CLI (azd) ───────────────────────────────────
-RUN curl -fsSL https://aka.ms/install-azd.sh | bash
-
-# ── PowerShell modules (Az + Microsoft.Graph) ───────────────────
-RUN pwsh -NoProfile -Command " \
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; \
-    Install-Module -Name Az.Accounts       -Scope AllUsers -Force; \
-    Install-Module -Name Az.Resources      -Scope AllUsers -Force; \
-    Install-Module -Name Az.Storage        -Scope AllUsers -Force; \
-    Install-Module -Name Az.CognitiveServices -Scope AllUsers -Force; \
-    Install-Module -Name Microsoft.Graph.Authentication -Scope AllUsers -Force; \
-    Install-Module -Name Microsoft.Graph.Groups         -Scope AllUsers -Force; \
-    Install-Module -Name Microsoft.Graph.Users          -Scope AllUsers -Force; \
-    "
+ARG BASE_IMAGE=zolabbotacrbotprd.azurecr.io/zolab-bot:botfix-20260311173803-756bbc6
+FROM ${BASE_IMAGE} AS base
 
 # ── Application layout ──────────────────────────────────────────
 #

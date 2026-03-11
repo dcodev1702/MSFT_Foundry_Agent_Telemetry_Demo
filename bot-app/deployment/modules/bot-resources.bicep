@@ -29,6 +29,9 @@ param logAnalyticsCustomerId string
 @description('Log Analytics Workspace shared key — DIBSecCom in Security sub')
 param logAnalyticsSharedKey string
 
+@description('Bot app registration display name')
+param botAppRegistrationName string = 'unknown-app-registration'
+
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
 
@@ -140,6 +143,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
               value: botAppId
+            }
+            {
+              name: 'BOT_APP_REGISTRATION_NAME'
+              value: botAppRegistrationName
             }
             {
               name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'

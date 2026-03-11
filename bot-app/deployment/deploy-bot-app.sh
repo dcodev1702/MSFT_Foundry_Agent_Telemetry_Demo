@@ -57,6 +57,7 @@ fi
 
 BOT_SECRET=$(python3 -c "import json; print(json.load(open('${SECRETS_FILE}'))['password'])")
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+BOT_APP_REGISTRATION_NAME=$(az ad app show --id "${BOT_APP_ID}" --query displayName -o tsv)
 
 # Fetch DIBSecCom LAW credentials (cross-subscription)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
@@ -102,6 +103,7 @@ az deployment sub create \
     botAppSecret="${BOT_SECRET}" \
     logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
     logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
+    botAppRegistrationName="${BOT_APP_REGISTRATION_NAME}" \
     botImageTag="${BOT_IMAGE_TAG}" \
   --output none
 

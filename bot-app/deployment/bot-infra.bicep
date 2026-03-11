@@ -48,6 +48,9 @@ param logAnalyticsCustomerId string
 @description('DIBSecCom Log Analytics Workspace shared key (Security sub)')
 param logAnalyticsSharedKey string
 
+@description('Bot app registration display name')
+param botAppRegistrationName string = 'unknown-app-registration'
+
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
 
@@ -71,6 +74,7 @@ module botResources 'modules/bot-resources.bicep' = {
     botAppSecret: botAppSecret
     logAnalyticsCustomerId: logAnalyticsCustomerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
+    botAppRegistrationName: botAppRegistrationName
     botImageTag: botImageTag
   }
 }

@@ -148,11 +148,14 @@ def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
     app_id = os.getenv(
         "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID", "<bot-app-id>"
     )
+    app_name = os.getenv("BOT_APP_REGISTRATION_NAME", "unknown-app-registration")
     return "<br>".join([
         "🟢 Bot status: Online ✅",
         "⚙️ Worker status: Running",
         f"📦 Queue depth: {dispatcher.queue_depth()}",
-        f"🤖 Bot identity: {app_id}",
+        "🤖 Bot identity:",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;Name: {app_name}",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {app_id}",
         f"🕒 Checked at: {_utc_now()}",
     ])
 
