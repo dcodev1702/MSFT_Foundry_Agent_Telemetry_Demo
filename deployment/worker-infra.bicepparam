@@ -25,3 +25,4 @@ param managedIdentityClientId    = '59bffc04-c429-4580-9833-8ce88c088877'
 param location = 'eastus2'
 param workerCpu = 2
 param workerMemoryInGb = 4
+param workerImageTag = 'latest'

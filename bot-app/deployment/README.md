@@ -127,6 +127,39 @@ az containerapp logs show -n zolab-bot-ca-botprd -g zolab-bot-botprd
 az containerapp revision list -n zolab-bot-ca-botprd -g zolab-bot-botprd -o table
 ```
 
+### View Logs In Log Analytics
+
+The bot Container App logs are sent to the `DIBSecCom` Log Analytics workspace in the Security subscription, resource group `Sentinel`.
+
+Portal path:
+
+1. Open Azure Portal.
+2. Switch to the Security subscription.
+3. Open resource group `Sentinel`.
+4. Open Log Analytics workspace `DIBSecCom`.
+5. Open `Logs`.
+
+Useful starting tables for the bot Container App are:
+
+- `ContainerAppConsoleLogs_CL`
+- `ContainerAppSystemLogs_CL`
+
+Example filters:
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where ContainerAppName_s == "zolab-bot-ca-botprd"
+| order by TimeGenerated desc
+```
+
+```kusto
+ContainerAppSystemLogs_CL
+| where ContainerAppName_s == "zolab-bot-ca-botprd"
+| order by TimeGenerated desc
+```
+
+If you are looking for the bot rollout or crash history, start with the system logs table and then filter down to revision `zolab-bot-ca-botprd--0000003` or any older revision you want to inspect.
+
 ---
 
 ## 🔗 Related Docs

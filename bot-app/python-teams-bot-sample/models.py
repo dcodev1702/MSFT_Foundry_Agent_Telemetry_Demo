@@ -43,6 +43,8 @@ class PendingConfirmation:
     """Tracks a pending yes/no confirmation for a destructive operation."""
     operation: str  # "build" or "teardown"
     requester: str
+    requester_upn: str | None = None
+    requester_object_id: str | None = None
     model: str | None = None
     resource_group: str | None = None
     source_command: str | None = None
@@ -78,6 +80,8 @@ class QueuedJob:
     requested_by: str
     conversation_id: str
     conversation_scope: str
+    requested_by_upn: str | None = None
+    requested_by_object_id: str | None = None
     model: str | None = None
     resource_group: str | None = None
     source_command: str | None = None

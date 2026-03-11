@@ -19,6 +19,7 @@ from microsoft_agents.hosting.core import (
     TurnContext,
     TurnState,
 )
+from microsoft_agents.hosting.teams import TeamsInfo
 
 from command_parser import parse_command
 from conversation_store import BlobConversationStore
@@ -65,6 +66,56 @@ def _get_requester(activity) -> str:
         or getattr(from_property, "id", None)
         or "unknown-user"
     )
+
+
+async def _get_requester_identity(context: TurnContext) -> dict[str, str | None]:
+    """Resolve the strongest available Teams identity for queue handoff."""
+    activity = context.activity
+    from_property = activity.from_property
+    if not from_property:
+        return {
+            "requested_by": "unknown-user",
+            "requested_by_upn": None,
+            "requested_by_object_id": None,
+        }
+
+    requested_by = (
+        getattr(from_property, "name", None)
+        or getattr(from_property, "id", None)
+        or "unknown-user"
+    )
+    requested_by_upn = (
+        getattr(from_property, "user_principal_name", None)
+        or getattr(from_property, "email", None)
+    )
+    requested_by_object_id = getattr(from_property, "aad_object_id", None)
+
+    member_id = getattr(from_property, "id", None)
+    if member_id and (not requested_by_upn or not requested_by_object_id):
+        try:
+            member = await TeamsInfo.get_member(context, member_id)
+        except Exception:
+            member = None
+
+        if member:
+            requested_by = requested_by or getattr(member, "name", None) or requested_by
+            requested_by_upn = (
+                requested_by_upn
+                or getattr(member, "user_principal_name", None)
+                or getattr(member, "email", None)
+            )
+            requested_by_object_id = (
+                requested_by_object_id
+                or getattr(member, "aad_object_id", None)
+            )
+
+    requested_by = requested_by_upn or requested_by or requested_by_object_id or "unknown-user"
+
+    return {
+        "requested_by": requested_by,
+        "requested_by_upn": requested_by_upn,
+        "requested_by_object_id": requested_by_object_id,
+    }
 
 
 def _get_conversation_scope(activity) -> str:
@@ -285,9 +336,13 @@ async def _handle_build_selection(
     # Valid model — clear build session, move to confirmation
     del _build_sessions[conversation_id]
 
+    requester_identity = await _get_requester_identity(context)
+
     pending = PendingConfirmation(
         operation="build",
-        requester=_get_requester(activity),
+        requester=requester_identity["requested_by"],
+        requester_upn=requester_identity["requested_by_upn"],
+        requester_object_id=requester_identity["requested_by_object_id"],
         model=selected_model,
         source_command=f"build it {selected_model}",
         conversation_scope=_get_conversation_scope(activity),
@@ -354,9 +409,13 @@ async def _handle_teardown_selection(
     # Valid selection — clear session, move to confirmation
     del _teardown_sessions[conversation_id]
 
+    requester_identity = await _get_requester_identity(context)
+
     pending = PendingConfirmation(
         operation="teardown",
-        requester=_get_requester(activity),
+        requester=requester_identity["requested_by"],
+        requester_upn=requester_identity["requested_by_upn"],
+        requester_object_id=requester_identity["requested_by_object_id"],
         resource_group=selected_rg,
         source_command=f"teardown {selected_rg}",
         conversation_scope=_get_conversation_scope(activity),
@@ -404,6 +463,8 @@ async def _handle_confirmation(
         job = QueuedJob(
             operation=pending.operation,
             requested_by=pending.requester,
+            requested_by_upn=pending.requester_upn,
+            requested_by_object_id=pending.requester_object_id,
             conversation_id=conversation_id,
             conversation_scope=pending.conversation_scope or "",
             model=pending.model,
@@ -582,9 +643,12 @@ def register_handlers(
                 return
 
             # Valid model provided — require confirmation before queueing
+            requester_identity = await _get_requester_identity(context)
             pending = PendingConfirmation(
                 operation="build",
-                requester=_get_requester(activity),
+                requester=requester_identity["requested_by"],
+                requester_upn=requester_identity["requested_by_upn"],
+                requester_object_id=requester_identity["requested_by_object_id"],
                 model=command.model,
                 source_command=command.raw_text,
                 conversation_scope=_get_conversation_scope(activity),
@@ -621,9 +685,12 @@ def register_handlers(
                 return
 
             # Resource group provided — go straight to confirmation
+            requester_identity = await _get_requester_identity(context)
             pending = PendingConfirmation(
                 operation="teardown",
-                requester=_get_requester(activity),
+                requester=requester_identity["requested_by"],
+                requester_upn=requester_identity["requested_by_upn"],
+                requester_object_id=requester_identity["requested_by_object_id"],
                 resource_group=command.resource_group,
                 source_command=command.raw_text,
                 conversation_scope=_get_conversation_scope(activity),
@@ -638,9 +705,12 @@ def register_handlers(
             return
 
         # Non-destructive commands — queue immediately
+        requester_identity = await _get_requester_identity(context)
         job = QueuedJob(
             operation=command.kind,
-            requested_by=_get_requester(activity),
+            requested_by=requester_identity["requested_by"],
+            requested_by_upn=requester_identity["requested_by_upn"],
+            requested_by_object_id=requester_identity["requested_by_object_id"],
             conversation_id=conversation_id,
             conversation_scope=_get_conversation_scope(activity),
             model=command.model,

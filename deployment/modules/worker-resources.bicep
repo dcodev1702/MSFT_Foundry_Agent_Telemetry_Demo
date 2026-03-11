@@ -38,6 +38,9 @@ param workerCpu int
 @description('Memory in GiB requested for the worker container instance')
 param workerMemoryInGb int
 
+@description('Worker container image tag to deploy from the worker ACR')
+param workerImageTag string = 'latest'
+
 // ── Resource Names ────────────────────────────────────────────
 var acrName            = 'zolabworkeracr${suffix}'
 var storageAccountName = 'zolabworkerst${suffix}'
@@ -168,7 +171,7 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
       {
         name: 'worker'
         properties: {
-          image: '${acr.properties.loginServer}/zolab-worker:latest'
+          image: '${acr.properties.loginServer}/zolab-worker:${workerImageTag}'
           resources: {
             requests: {
               cpu: workerCpu

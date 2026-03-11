@@ -17,12 +17,15 @@ param(
     [switch]$UseTeamsChatFlow,
     [int]$TeamsChatSelectionTimeoutMinutes = 10,
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
-    [string]$SelectedAiModel   # Non-interactive model selection (bypasses PromptForChoice)
+    [string]$SelectedAiModel,   # Non-interactive model selection (bypasses PromptForChoice)
+    [string]$RequestedBy,
+    [string]$RequestedByObjectId
 )
 
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot 'teams-chat.ps1')
+. (Join-Path $PSScriptRoot 'foundry-identity.helpers.ps1')
 . (Join-Path $PSScriptRoot 'foundry-teardown.helpers.ps1')
 
 if ($CleanupResourceGroup) {
@@ -50,7 +53,7 @@ if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
     $miClientId = $env:AZURE_CLIENT_ID
     if ($miClientId) {
         Write-Host "No Az session — connecting via managed identity (AZURE_CLIENT_ID=$miClientId)..."
-        Connect-AzAccount -Identity -AccountId $miClientId -ErrorAction Stop | Out-Null
+        Connect-AzAccount -Identity -AccountId $miClientId -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
         Write-Host "Authenticated via managed identity."
 
         # Also authenticate Azure CLI with managed identity
@@ -165,6 +168,110 @@ function Set-AzureSession {
         TenantId          = $targetSubscription.TenantId
         PowerShellAccount = $azContext.Account.Id
         CliAccount        = $cliAccount
+    }
+}
+
+function Get-CurrentAzureRoleCheckAssignee {
+    $miClientId = $env:AZURE_CLIENT_ID
+    if (-not [string]::IsNullOrWhiteSpace($miClientId)) {
+        return $miClientId
+    }
+
+    $azContext = Get-AzContext -ErrorAction SilentlyContinue
+    if ($azContext -and $azContext.Account -and -not [string]::IsNullOrWhiteSpace($azContext.Account.Id)) {
+        return $azContext.Account.Id
+    }
+
+    $null
+}
+
+function Get-AzureRoleNamesForAssignee {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Assignee,
+
+        [Parameter(Mandatory)]
+        [string]$Scope
+    )
+
+    $roleNamesJson = & az role assignment list `
+        --assignee $Assignee `
+        --scope $Scope `
+        --query '[].roleDefinitionName' `
+        --output json 2>$null
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($roleNamesJson)) {
+        return @()
+    }
+
+    try {
+        @($roleNamesJson | ConvertFrom-Json)
+    } catch {
+        @()
+    }
+}
+
+function Test-AzureRoleAssignmentWriteAccess {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Assignee,
+
+        [Parameter(Mandatory)]
+        [string[]]$Scopes
+    )
+
+    foreach ($scope in $Scopes) {
+        if ([string]::IsNullOrWhiteSpace($scope)) {
+            continue
+        }
+
+        $roleNames = @(Get-AzureRoleNamesForAssignee -Assignee $Assignee -Scope $scope)
+        if ($roleNames -contains 'Owner' -or $roleNames -contains 'User Access Administrator') {
+            return $true
+        }
+    }
+
+    $false
+}
+
+function Assert-FoundryDeploymentAuthorization {
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkloadSubscriptionId,
+
+        [Parameter(Mandatory)]
+        [string]$SecuritySubscriptionId,
+
+        [string]$LawResourceGroup = 'Sentinel',
+
+        [string]$LawWorkspaceName = 'DIBSecCom'
+    )
+
+    $assignee = Get-CurrentAzureRoleCheckAssignee
+    if (-not $assignee) {
+        Write-Host 'Skipping deployment authorization preflight because the current Azure principal could not be resolved.'
+        return
+    }
+
+    $workloadSubscriptionScope = "/subscriptions/$WorkloadSubscriptionId"
+    $securitySubscriptionScope = "/subscriptions/$SecuritySubscriptionId"
+    $lawWorkspaceScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
+
+    if (-not (Test-AzureRoleAssignmentWriteAccess -Assignee $assignee -Scopes @($workloadSubscriptionScope))) {
+        throw (@(
+            "Azure principal '$assignee' does not have permission to create RBAC role assignments in the workload subscription."
+            "This deployment creates Microsoft.Authorization/roleAssignments resources for the zolab-ai-dev group and the Foundry managed identity."
+            "Contributor is not sufficient because it excludes Microsoft.Authorization/*/Write."
+            "Grant 'User Access Administrator' or 'Owner' at $workloadSubscriptionScope and retry."
+        ) -join ' ')
+    }
+
+    if (-not (Test-AzureRoleAssignmentWriteAccess -Assignee $assignee -Scopes @($lawWorkspaceScope, $securitySubscriptionScope))) {
+        throw (@(
+            "Azure principal '$assignee' does not have permission to manage RBAC on the DIBSecCom Log Analytics workspace in the Security subscription."
+            "The deployment later assigns 'Log Analytics Reader' to the zolab-ai-dev group on $lawWorkspaceScope."
+            "Grant 'User Access Administrator' or 'Owner' on the workspace scope or Security subscription and retry."
+        ) -join ' ')
     }
 }
 
@@ -512,7 +619,9 @@ function Write-BuildInfoJson {
         [string]$AiProjectName,
 
         [Parameter(Mandatory)]
-        [string]$RequestedBy
+        [string]$RequestedBy,
+
+        [string]$RequestedByObjectId
     )
 
     $buildInfo = [ordered]@{
@@ -526,6 +635,10 @@ function Write-BuildInfoJson {
         foundry_name            = $AiFoundryName
         foundry_project_name    = $AiProjectName
         requested_by            = $RequestedBy
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedByObjectId)) {
+        $buildInfo.requested_by_object_id = $RequestedByObjectId
     }
 
     $buildInfo | ConvertTo-Json | Set-Content -Path $OutputPath -Encoding utf8
@@ -1617,16 +1730,25 @@ $ctx = Connect-FoundryGraphIfNeeded -Scopes $requiredGraphScopes
 
 $teamsChatId = $null
 $currentUser = $ctx
-$userId = Get-GraphUserObjectId -Account $currentUser.Account
+$requesterContext = Resolve-FoundryRequesterContext `
+    -RequestedBy $RequestedBy `
+    -RequestedByObjectId $RequestedByObjectId `
+    -GraphContextAccount $currentUser.Account
+$userId = $requesterContext.RequestedByObjectId
+$requesterAccount = if ($requesterContext.RequestedBy) {
+    $requesterContext.RequestedBy
+} else {
+    $requesterContext.RequestedByObjectId
+}
 $azureSession = $null
 
 if ($UseTeamsChatFlow) {
-    if ($currentUser.Account -notmatch '@dibsecurity\.onmicrosoft\.com$') {
+    if ($requesterContext.RequestedBy -notmatch '@dibsecurity\.onmicrosoft\.com$') {
         throw "UseTeamsChatFlow requires a Microsoft Graph connection in the dibsecurity.onmicrosoft.com tenant."
     }
 
     if (-not $userId) {
-        throw "Unable to resolve the Microsoft Graph user object for '$($currentUser.Account)'."
+        throw "Unable to resolve the Microsoft Graph user object for '$($requesterContext.RequestedBy)'."
     }
 
     $teamsChat = Get-OrCreate-FoundryTeamsChat -UserId $userId -Topic $TeamsChatTopic
@@ -1636,10 +1758,14 @@ if ($UseTeamsChatFlow) {
 # ── 3. Set Azure subscription context (both Az PowerShell and az CLI) ──
 # ListBuilds and BuildStatus are read-only — skip az CLI hard validation for those modes
 $skipAzCli = ($ListBuilds -or $BuildStatusResourceGroup)
-$azureSession = Set-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $currentUser.Account } else { $null }) -SkipAzCliValidation:$skipAzCli
+$azureSession = Set-AzureSession -SubscriptionId $subscriptionId -ExpectedAccount $(if ($UseTeamsChatFlow) { $requesterContext.RequestedBy } else { $null }) -SkipAzCliValidation:$skipAzCli
 Write-Host "Subscription set to $($azureSession.SubscriptionName) ($subscriptionId)"
 if ($UseTeamsChatFlow) {
     Write-Host "Azure account validated for Teams chat flow: $($azureSession.PowerShellAccount)"
+}
+
+if (-not $ListBuilds -and -not $BuildStatusResourceGroup) {
+    Assert-FoundryDeploymentAuthorization -WorkloadSubscriptionId $subscriptionId -SecuritySubscriptionId $securitySubscriptionId
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -2004,21 +2130,35 @@ try {
 
     # ── Add the deploying user to the zolab-ai-dev group ──
     $currentUser = Get-MgContext
-    if ($UseTeamsChatFlow -and $currentUser.Account -notmatch '@dibsecurity\.onmicrosoft\.com$') {
+    $requesterContext = Resolve-FoundryRequesterContext `
+        -RequestedBy $RequestedBy `
+        -RequestedByObjectId $RequestedByObjectId `
+        -GraphContextAccount $currentUser.Account
+    $requesterAccount = if ($requesterContext.RequestedBy) {
+        $requesterContext.RequestedBy
+    } else {
+        $requesterContext.RequestedByObjectId
+    }
+
+    if ($UseTeamsChatFlow -and $requesterContext.RequestedBy -notmatch '@dibsecurity\.onmicrosoft\.com$') {
         throw "UseTeamsChatFlow requires a Microsoft Graph connection in the dibsecurity.onmicrosoft.com tenant."
     }
 
-    $userId = Get-GraphUserObjectId -Account $currentUser.Account
+    $userId = $requesterContext.RequestedByObjectId
     if (-not $userId) {
-        throw "Unable to resolve the Microsoft Graph user object for '$($currentUser.Account)'."
+        if ($requesterContext.RequestedBy) {
+            throw "Unable to resolve the Microsoft Graph user object for '$($requesterContext.RequestedBy)'."
+        }
+
+        throw "Unable to determine the requesting user for this deployment. Pass -RequestedBy or -RequestedByObjectId when running under managed identity."
     }
 
     $isMember = Test-GraphGroupMembership -GroupId $groupObjectId -DirectoryObjectId $userId
     if ($isMember) {
-        Write-Host "Current user ($($currentUser.Account)) is already a member of '$groupDisplayName'"
+        Write-Host "Current user ($requesterAccount) is already a member of '$groupDisplayName'"
     } else {
         New-MgGroupMember -GroupId $groupObjectId -DirectoryObjectId $userId
-        Write-Host "Added current user ($($currentUser.Account)) to '$groupDisplayName'"
+        Write-Host "Added current user ($requesterAccount) to '$groupDisplayName'"
     }
 
     if ($UseTeamsChatFlow) {
@@ -2028,7 +2168,7 @@ try {
         [void](Send-FoundryTeamsChatMessage -ChatId $teamsChatId -Message (
             @(
                 "Microsoft Foundry deployment started."
-                "Account: $($currentUser.Account)"
+                "Account: $requesterAccount"
                 "Location: $location"
                 "I'll wait here for your model choice and post the build result in this chat."
             ) -join "`n"
@@ -2149,30 +2289,50 @@ try {
 
         # ── Deploy LAW RBAC to Security subscription (Log Analytics Reader on DIBSecCom) ──
         $securitySubId = $securitySubscriptionId
+        $lawScope = "/subscriptions/$securitySubId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
         Write-Host ""
         Write-Host "Deploying Log Analytics Reader RBAC to Security subscription..."
         az account set --subscription $securitySubId 2>&1 | Out-Null
 
-        $lawOutput = az deployment sub create `
-            --location $location `
-            --template-file (Join-Path $PSScriptRoot 'law-rbac.bicep') `
-            --name "law-rbac-zolab-ai-dev" `
-            --parameters aiDevGroupObjectId=$groupObjectId `
-            --output json 2>&1
+        $existingLawAssignmentCount = az role assignment list `
+            --assignee-object-id $groupObjectId `
+            --scope $lawScope `
+            --query "[?roleDefinitionName=='Log Analytics Reader'] | length(@)" `
+            --output tsv 2>&1
 
-        $lawExitCode = $LASTEXITCODE
-        $lawWarnings = $lawOutput | Where-Object { $_ -match '^WARNING:|^BCP\d|\.bicep\(' }
-        if ($lawWarnings) {
-            $lawWarnings | ForEach-Object { Write-Host $_ }
+        $existingLawAssignmentExitCode = $LASTEXITCODE
+        if ($existingLawAssignmentExitCode -ne 0) {
+            az account set --subscription $subscriptionId 2>&1 | Out-Null
+            throw "Failed to verify existing Log Analytics Reader RBAC on DIBSecCom.`n$($existingLawAssignmentCount -join "`n")"
         }
 
-        az account set --subscription $subscriptionId 2>&1 | Out-Null
+        if ((($existingLawAssignmentCount -join '').Trim()) -eq '1') {
+            az account set --subscription $subscriptionId 2>&1 | Out-Null
+            Write-Host "  Log Analytics Reader is already assigned to '$groupDisplayName' on DIBSecCom workspace."
+        } else {
 
-        if ($lawExitCode -ne 0) {
-            throw "LAW RBAC deployment failed.`n$($lawOutput -join "`n")"
+            $lawOutput = az role assignment create `
+                --assignee-object-id $groupObjectId `
+                --assignee-principal-type Group `
+                --role "Log Analytics Reader" `
+                --scope $lawScope `
+                --subscription $securitySubId `
+                --output json 2>&1
+
+            $lawExitCode = $LASTEXITCODE
+            $lawWarnings = $lawOutput | Where-Object { $_ -match '^WARNING:|^BCP\d|\.bicep\(' }
+            if ($lawWarnings) {
+                $lawWarnings | ForEach-Object { Write-Host $_ }
+            }
+
+            az account set --subscription $subscriptionId 2>&1 | Out-Null
+
+            if ($lawExitCode -ne 0) {
+                throw "LAW RBAC deployment failed.`n$($lawOutput -join "`n")"
+            }
+
+            Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on DIBSecCom workspace."
         }
-
-        Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on DIBSecCom workspace."
 
         $connectionId = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/providers/Microsoft.CognitiveServices/accounts/$($result.properties.outputs.aiFoundryName.value)/projects/$($result.properties.outputs.aiProjectName.value)/connections/$($result.properties.outputs.aiFoundryName.value)-appinsights"
         $connectionSharedToAll = az resource show `
@@ -2210,7 +2370,8 @@ try {
             -GenAiModel $selectedAiModelSpec.DeploymentName `
             -AiFoundryName $result.properties.outputs.aiFoundryName.value `
             -AiProjectName $result.properties.outputs.aiProjectName.value `
-            -RequestedBy $currentUser.Account
+            -RequestedBy $requesterAccount `
+            -RequestedByObjectId $requesterContext.RequestedByObjectId
         Write-Host "📝 Build info written to $buildInfoPath"
 
         $buildInfoBlob = Sync-BuildInfoToBlobIfAvailable -BuildInfoPath $buildInfoPath
@@ -2232,7 +2393,7 @@ try {
             -AppInsightsConnectionStatus $appInsightsConnectionStatus `
             -AppInsightsAccessStatus $appInsightsAccessStatus `
             -LawRbacStatus 'Log Analytics Reader on DIBSecCom ✅' `
-            -UserStatus "$($currentUser.Account) added to $groupDisplayName ✅"
+            -UserStatus "$requesterAccount added to $groupDisplayName ✅"
         $buildStatusLines | ForEach-Object { Write-Host $_ }
 
         if ($UseTeamsChatFlow -and $teamsChatId) {
@@ -2250,7 +2411,7 @@ try {
         try {
             $failureDetails = @(
                 "Microsoft Foundry deployment failed."
-                "Account: $($currentUser.Account)"
+                "Account: $requesterAccount"
             )
             if ($selectedAiModelSpec) {
                 $failureDetails += "Model: $($selectedAiModelSpec.RequestedChoice)"

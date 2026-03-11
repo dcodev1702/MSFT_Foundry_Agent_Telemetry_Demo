@@ -142,9 +142,19 @@ class BackgroundWorker:
         model = job_data.get("model")
         resource_group = job_data.get("resource_group")
         job_id = job_data.get("job_id", "unknown")
+        requested_by = job_data.get("requested_by")
+        requested_by_upn = job_data.get("requested_by_upn")
+        requested_by_object_id = job_data.get("requested_by_object_id")
 
         if operation == "build":
-            return await self._run_build(job_id, model, conversation_id)
+            return await self._run_build(
+                job_id,
+                model,
+                conversation_id,
+                requested_by=requested_by,
+                requested_by_upn=requested_by_upn,
+                requested_by_object_id=requested_by_object_id,
+            )
         elif operation == "teardown":
             return await self._run_teardown(job_id, resource_group, conversation_id)
         elif operation == "build-status":
@@ -155,12 +165,24 @@ class BackgroundWorker:
             return f"Unknown operation: {operation}"
 
     async def _run_build(
-        self, job_id: str, model: str | None, conversation_id: str
+        self,
+        job_id: str,
+        model: str | None,
+        conversation_id: str,
+        *,
+        requested_by: str | None,
+        requested_by_upn: str | None,
+        requested_by_object_id: str | None,
     ) -> str:
         args = [
             "pwsh", "-NoProfile", "-NonInteractive", "-File",
             str(self._deploy_script),
         ]
+        requester_identity = requested_by_upn or requested_by
+        if requester_identity:
+            args.extend(["-RequestedBy", requester_identity])
+        if requested_by_object_id:
+            args.extend(["-RequestedByObjectId", requested_by_object_id])
         if model:
             args.extend(["-SelectedAiModel", model])
 

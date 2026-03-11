@@ -11,7 +11,7 @@ Before running the deployment, ensure the following are in place:
 | Requirement | Details |
 |---|---|
 | **Azure Subscriptions** | Access to both the `zolab` (workload) and `Security` (monitoring) subscriptions |
-| **Azure RBAC Permissions** | `Owner` or `Contributor` + `User Access Administrator` on the `zolab` subscription; `Contributor` on the `Security` subscription's `Sentinel` resource group |
+| **Azure RBAC Permissions** | `Owner` or `Contributor` + `User Access Administrator` on the `zolab` subscription; `Owner` or `User Access Administrator` on the `Security` subscription or the `DIBSecCom` workspace scope because the deployment writes RBAC assignments in both places |
 | **Microsoft Entra ID Permissions** | Ability to create security groups and manage members (`Group.ReadWrite.All`, `GroupMember.ReadWrite.All` in Microsoft Graph) |
 | **Teams Chat Flow (optional)** | Same-tenant Graph access in `dibsecurity.onmicrosoft.com` with delegated `User.Read`, `Chat.Create`, `Chat.ReadWrite`, and `ChatMessage.Send` |
 | **Azure CLI** | Installed and authenticated — [Install Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) |
@@ -157,6 +157,15 @@ The script will:
 8. 🔒 Assign RBAC roles to the `zolab-ai-dev` group and the Foundry managed identity
 9. 📊 Configure diagnostic settings on Key Vault and Blob Storage
 10. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
+
+When this deployment runs under the worker managed identity, that identity must have enough RBAC to do two distinct things:
+
+1. Create resources in the `zolab` subscription.
+2. Create and remove `Microsoft.Authorization/roleAssignments` resources in both the `zolab` subscription and on the `DIBSecCom` workspace scope in the `Security` subscription.
+
+`Contributor` alone is not enough for the RBAC portion because it explicitly excludes `Microsoft.Authorization/*/Write`.
+
+For worker rollouts, avoid relying on a retagged `latest` image if you need deterministic pickup in Azure Container Instances. `worker-infra.bicep` now accepts `workerImageTag`, so you can deploy a unique image tag and know the recreated ACI pulled the intended build.
 
 When `-UseTeamsChatFlow` is enabled, the script creates or reuses a self-owned Teams group chat named `Microsoft Foundry Deployments`, prompts for the model selection in that chat, waits for a valid reply, and posts the final build success/failure notification there. Reply with either the menu number or the model name.
 The same Teams chat also receives a complete teardown status report after cleanup operations when `-UseTeamsChatFlow` is used.

@@ -47,6 +47,40 @@ Azure Container App (bot web server)
 | Blob state store | Persists conversation references and identities for proactive replies |
 | Shared UAMI | Handles Azure auth for ACR pulls, Storage access, and automation operations |
 
+### A365 Agents SDK vs Bot Framework Imports
+
+This bot is built on the Microsoft 365 Agents SDK, not the older Bot Framework SDK. The practical difference in Python is that imports move from the `botbuilder.*` namespace to the `microsoft_agents.*` namespace, and the app model becomes more host-oriented and decorator-based.
+
+Typical Bot Framework style imports looked like:
+
+```python
+from botbuilder.core import BotFrameworkAdapter, TurnContext, MemoryStorage, MessageFactory
+from botbuilder.schema import Activity
+```
+
+In this repo, the A365 Agents SDK imports look like:
+
+```python
+from microsoft_agents.activity import load_configuration_from_env, Activity, ConversationReference
+from microsoft_agents.authentication.msal import MsalConnectionManager
+from microsoft_agents.hosting.aiohttp import CloudAdapter, start_agent_process
+from microsoft_agents.hosting.core import AgentApplication, Authorization, MemoryStorage, TurnContext, MessageFactory
+```
+
+What changed conceptually:
+
+- Bot Framework centered on `BotFrameworkAdapter` plus `ActivityHandler`-style classes and the `botbuilder.core` / `botbuilder.schema` packages.
+- A365 Agents SDK centers on `CloudAdapter`, `AgentApplication`, and the `microsoft_agents.hosting.*` packages.
+- Authentication wiring is more explicit with `MsalConnectionManager` plus `Authorization`, instead of just adapter settings and app credentials.
+- The aiohttp host integration is first-class: `start_agent_process(...)` handles inbound activity processing for the local and deployed web app.
+- Proactive messaging also moved namespaces; in this repo it uses `ConversationReference`, `TurnContext`, and `ClaimsIdentity` from the `microsoft_agents` packages.
+
+Concrete examples in this repo:
+
+- Host setup and core imports: [python-teams-bot-sample/app.py](python-teams-bot-sample/app.py)
+- Decorator-based message registration on `AgentApplication`: [python-teams-bot-sample/bot.py](python-teams-bot-sample/bot.py)
+- Proactive continuation pattern with A365 imports: [python-teams-bot-sample/proactive.py](python-teams-bot-sample/proactive.py)
+
 ---
 
 ## 💬 Supported Bot Commands

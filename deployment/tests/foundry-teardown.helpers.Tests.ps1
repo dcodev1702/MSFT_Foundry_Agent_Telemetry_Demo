@@ -1,8 +1,10 @@
 Set-StrictMode -Version Latest
 
-. (Join-Path $PSScriptRoot '..' 'foundry-teardown.helpers.ps1')
-
 Describe 'Get-TargetedTeardownSharedAccessPlanFromInventory' {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot '..' 'foundry-teardown.helpers.ps1')
+    }
+
     It 'retains shared LAW RBAC and user membership when another build exists' {
         $plan = Get-TargetedTeardownSharedAccessPlanFromInventory -RemainingBuilds @(
             [pscustomobject]@{ ResourceGroupName = 'zolab-ai-bbb222' }
@@ -24,6 +26,10 @@ Describe 'Get-TargetedTeardownSharedAccessPlanFromInventory' {
 }
 
 Describe 'Get-FoundryManagedResourceGroupAssignmentPlan' {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot '..' 'foundry-teardown.helpers.ps1')
+    }
+
     It 'selects only the six managed resource-group roles for removal' {
         $scope = '/subscriptions/sub-123/resourceGroups/zolab-ai-abc123'
         $plan = Get-FoundryManagedResourceGroupAssignmentPlan -Assignments @(

@@ -56,6 +56,9 @@ param workerCpu int = 2
 @description('Memory in GiB requested for the worker container instance')
 param workerMemoryInGb int = 4
 
+@description('Worker container image tag to deploy from the worker ACR')
+param workerImageTag string = 'latest'
+
 // ── Resource Group ────────────────────────────────────────────
 
 resource workerRg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -79,6 +82,7 @@ module workerResources 'modules/worker-resources.bicep' = {
     managedIdentityClientId: managedIdentityClientId
     workerCpu: workerCpu
     workerMemoryInGb: workerMemoryInGb
+    workerImageTag: workerImageTag
   }
 }
 
