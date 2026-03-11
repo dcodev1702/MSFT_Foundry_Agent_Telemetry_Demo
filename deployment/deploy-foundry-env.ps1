@@ -1149,7 +1149,6 @@ function Get-FoundryBuildStatusLines {
         [Parameter(Mandatory)]
         [string]$SecuritySubscriptionId,
 
-        [Parameter(Mandatory)]
         [string]$CurrentUserAccount
     )
 
@@ -1195,16 +1194,18 @@ function Get-FoundryBuildStatusLines {
 
     $lawRbacStatus = "Entra group '$GroupDisplayName' not found ❌"
     $appInsightsAccessStatus = "Reader missing on resource group ❌"
-    $userStatus = "$CurrentUserAccount membership could not be checked ❌"
+    $userStatus = if ($CurrentUserAccount) { "$CurrentUserAccount membership could not be checked ❌" } else { "User membership check skipped (managed identity)" }
     $group = Get-MgGroup -Filter "displayName eq '$GroupDisplayName'" -ErrorAction SilentlyContinue
     if ($group) {
-        $statusUserId = Get-GraphUserObjectId -Account $CurrentUserAccount
-        if ($statusUserId) {
-            $isMember = Test-GraphGroupMembership -GroupId $group.Id -DirectoryObjectId $statusUserId
-            $userStatus = if ($isMember) {
-                "$CurrentUserAccount added to $GroupDisplayName ✅"
-            } else {
-                "$CurrentUserAccount is not a member of $GroupDisplayName ❌"
+        if ($CurrentUserAccount) {
+            $statusUserId = Get-GraphUserObjectId -Account $CurrentUserAccount
+            if ($statusUserId) {
+                $isMember = Test-GraphGroupMembership -GroupId $group.Id -DirectoryObjectId $statusUserId
+                $userStatus = if ($isMember) {
+                    "$CurrentUserAccount added to $GroupDisplayName ✅"
+                } else {
+                    "$CurrentUserAccount is not a member of $GroupDisplayName ❌"
+                }
             }
         }
 
@@ -1702,12 +1703,16 @@ if ($ListBuilds) {
 # ════════════════════════════════════════════════════════════════
 if ($BuildStatusResourceGroup) {
     try {
-        $buildStatusLines = Get-FoundryBuildStatusLines `
-            -ResourceGroupName $BuildStatusResourceGroup `
-            -GroupDisplayName $groupDisplayName `
-            -SubscriptionId $subscriptionId `
-            -SecuritySubscriptionId $securitySubscriptionId `
-            -CurrentUserAccount $currentUser.Account
+        $buildStatusParams = @{
+            ResourceGroupName      = $BuildStatusResourceGroup
+            GroupDisplayName       = $groupDisplayName
+            SubscriptionId         = $subscriptionId
+            SecuritySubscriptionId = $securitySubscriptionId
+        }
+        if ($currentUser.Account) {
+            $buildStatusParams.CurrentUserAccount = $currentUser.Account
+        }
+        $buildStatusLines = Get-FoundryBuildStatusLines @buildStatusParams
 
         $buildStatusLines | ForEach-Object { Write-Host $_ }
 
