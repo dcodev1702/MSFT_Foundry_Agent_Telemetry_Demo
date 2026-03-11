@@ -97,6 +97,36 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[1], "conversation-123")
         self.assertEqual(kwargs["progress_msg"], "Pls hold while we teardown: zolab-ai-abc123")
 
+    async def test_completion_messages_preserve_full_teardown_output_across_chunks(self) -> None:
+        worker = BackgroundWorker(
+            queue_client=object(),
+            proactive=object(),
+            deploy_script=Path("/tmp/deploy-foundry-env.ps1"),
+        )
+
+        result = "\n".join([
+            "Resolved subscriptions:",
+            "Managed role matched: Reader @ /subscriptions/example/resourceGroups/zolab-ai-abc123",
+            "Removing managed role: Reader @ /subscriptions/example/resourceGroups/zolab-ai-abc123",
+            "Removing deployment record 'foundry-ai-env-abc123'...",
+            "Removed build info file '/app/build_info-abc123.json' for 'zolab-ai-abc123'.",
+            "=== Cleanup complete ===",
+            "● 🧹🗑️ Teardown complete!",
+        ])
+
+        messages = worker._build_job_completion_messages(
+            "job-123",
+            "teardown",
+            result * 40,
+        )
+
+        self.assertGreater(len(messages), 1)
+        combined = "\n".join(messages)
+        self.assertIn("Removing managed role: Reader", combined)
+        self.assertIn("Removing deployment record 'foundry-ai-env-abc123'...", combined)
+        self.assertIn("Removed build info file '/app/build_info-abc123.json'", combined)
+        self.assertIn("● 🧹🗑️ Teardown complete!", combined)
+
 
 if __name__ == "__main__":
     unittest.main()

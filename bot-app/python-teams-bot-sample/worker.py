@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 WORKER_BUILD_INFO_PATH = Path(__file__).resolve().parents[2] / "worker-build-info.json"
+RESULT_MESSAGE_CHUNK_SIZE = 12000
 
 
 def _utc_now() -> str:
@@ -119,11 +120,8 @@ class BackgroundWorker:
             )
 
             if result:
-                truncated = result[:3000]
-                await self._proactive.send_to_conversation(
-                    conversation_id,
-                    f"Job `{job_id}` (`{operation}`) completed:<br><pre>{truncated}</pre>",
-                )
+                for message in self._build_job_completion_messages(job_id, operation, result):
+                    await self._proactive.send_to_conversation(conversation_id, message)
         except Exception as e:
             logger.error("Job %s failed: %s", job_id, e)
 
@@ -364,3 +362,46 @@ class BackgroundWorker:
             "",
         ]
         return "\n".join(metadata_lines) + output
+
+    def _build_job_completion_messages(
+        self,
+        job_id: str,
+        operation: str,
+        result: str,
+    ) -> list[str]:
+        chunks = self._split_output_chunks(result, RESULT_MESSAGE_CHUNK_SIZE)
+        if len(chunks) == 1:
+            return [f"Job `{job_id}` (`{operation}`) completed:<br><pre>{chunks[0]}</pre>"]
+
+        messages: list[str] = []
+        total = len(chunks)
+        for index, chunk in enumerate(chunks, start=1):
+            suffix = "" if index == 1 else f" (continued {index}/{total})"
+            messages.append(
+                f"Job `{job_id}` (`{operation}`) completed{suffix}:<br><pre>{chunk}</pre>"
+            )
+        return messages
+
+    @staticmethod
+    def _split_output_chunks(output: str, max_chars: int) -> list[str]:
+        if len(output) <= max_chars:
+            return [output]
+
+        chunks: list[str] = []
+        remaining = output
+        while len(remaining) > max_chars:
+            split_at = remaining.rfind("\n", 0, max_chars)
+            if split_at <= 0:
+                split_at = max_chars
+            chunk = remaining[:split_at].rstrip("\n")
+            if not chunk:
+                chunk = remaining[:max_chars]
+                split_at = max_chars
+            chunks.append(chunk)
+            remaining = remaining[split_at:]
+            remaining = remaining.lstrip("\n")
+
+        if remaining:
+            chunks.append(remaining)
+
+        return chunks
