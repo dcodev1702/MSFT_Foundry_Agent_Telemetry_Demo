@@ -45,7 +45,7 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | Key Vault auditing | Diagnostic settings on the bot Key Vault stream to DIBSecCom LAW |
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
 | Bot Azure access | UAMI attached to the Container App and granted `Key Vault Secrets User` on the bot Key Vault |
-| Shared operator access | `zolab-ai-dev` is granted `Key Vault Secrets User` on the bot Key Vault so additional operators can run deploy scripts |
+| Shared operator access | The static `zolab-ai-dev` group is granted `Key Vault Secrets User`; the Foundry build lifecycle adds and removes requesting users from that group as builds start and finish |
 | Worker storage access | Additional RBAC assigned by `deploy-bot-app.sh` |
 
 ---
@@ -109,7 +109,7 @@ The deploy script resolves these values at runtime:
 - Bot app ID
 - Tenant ID
 - Bot app secret from `zolabbotkv<suffix>` secret `bot-app-client-secret`
-- Shared Entra operator group (`zolab-ai-dev`) so new Key Vaults preserve multi-operator secret access
+- Shared Entra operator group (`zolab-ai-dev`), which the Foundry build lifecycle uses to grant and revoke per-user bot/worker secret access while builds are active
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription
 - Worker storage scope for RBAC assignment
 

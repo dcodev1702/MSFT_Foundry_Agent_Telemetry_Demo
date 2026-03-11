@@ -71,13 +71,9 @@ BOT_SECRET="$(resolve_bot_secret)"
 BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 BOT_APP_REGISTRATION_NAME="Bot-The-Builder"
-CURRENT_USER_OBJECT_ID="$(az ad signed-in-user show --query id -o tsv 2>/dev/null || true)"
 OPERATOR_GROUP_OBJECT_ID="$(az ad group list --filter "displayName eq '${BOT_OPERATOR_GROUP_DISPLAY_NAME}'" --query '[0].id' -o tsv 2>/dev/null || true)"
 
 echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
-if [[ -n "${CURRENT_USER_OBJECT_ID}" ]]; then
-  echo "  ✓ Current operator object ID: ${CURRENT_USER_OBJECT_ID}"
-fi
 if [[ -n "${OPERATOR_GROUP_OBJECT_ID}" ]]; then
   echo "  ✓ Shared operator group ${BOT_OPERATOR_GROUP_DISPLAY_NAME}: ${OPERATOR_GROUP_OBJECT_ID}"
 else
@@ -142,7 +138,6 @@ az deployment sub create \
     logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
     logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
     logAnalyticsWorkspaceResourceId="${LAW_WORKSPACE_RESOURCE_ID}" \
-    operatorPrincipalId="${CURRENT_USER_OBJECT_ID}" \
     operatorGroupPrincipalId="${OPERATOR_GROUP_OBJECT_ID}" \
     botAppRegistrationName="${BOT_APP_REGISTRATION_NAME}" \
     botImageTag="${BOT_IMAGE_TAG}" \

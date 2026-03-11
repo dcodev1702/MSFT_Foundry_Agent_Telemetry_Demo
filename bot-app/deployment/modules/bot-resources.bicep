@@ -32,9 +32,6 @@ param logAnalyticsSharedKey string
 @description('Log Analytics Workspace resource ID — DIBSecCom in Security sub')
 param logAnalyticsWorkspaceResourceId string
 
-@description('Object ID of the current deployment operator to grant Key Vault secret access')
-param operatorPrincipalId string = ''
-
 @description('Object ID of the shared operator group to grant Key Vault secret access')
 param operatorGroupPrincipalId string = ''
 
@@ -59,7 +56,6 @@ var roles = {
   contributor: 'b24988ac-6180-42a0-ab88-20f7382dd24c'
   acrPull:     '7f951dda-4ed3-4680-a7ca-43fe172d538d'
   keyVaultSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6'
-  keyVaultSecretsOfficer: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -164,16 +160,6 @@ resource botManagedIdentityKeyVaultSecretsUser 'Microsoft.Authorization/roleAssi
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsUser)
     principalId: botManagedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
-  }
-}
-
-resource operatorKeyVaultSecretsOfficer 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(operatorPrincipalId)) {
-  scope: keyVault
-  name: guid(keyVault.id, operatorPrincipalId, roles.keyVaultSecretsOfficer)
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsOfficer)
-    principalId: operatorPrincipalId
-    principalType: 'User'
   }
 }
 

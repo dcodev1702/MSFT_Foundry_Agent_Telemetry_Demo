@@ -51,9 +51,6 @@ param logAnalyticsSharedKey string
 @description('DIBSecCom Log Analytics Workspace resource ID (Security sub)')
 param logAnalyticsWorkspaceResourceId string
 
-@description('Object ID of the current deployment operator to grant Key Vault secret access')
-param operatorPrincipalId string = ''
-
 @description('Object ID of the shared operator group to grant Key Vault secret access')
 param operatorGroupPrincipalId string = ''
 
@@ -84,7 +81,6 @@ module botResources 'modules/bot-resources.bicep' = {
     logAnalyticsCustomerId: logAnalyticsCustomerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
     logAnalyticsWorkspaceResourceId: logAnalyticsWorkspaceResourceId
-    operatorPrincipalId: operatorPrincipalId
     operatorGroupPrincipalId: operatorGroupPrincipalId
     botAppRegistrationName: botAppRegistrationName
     botImageTag: botImageTag
