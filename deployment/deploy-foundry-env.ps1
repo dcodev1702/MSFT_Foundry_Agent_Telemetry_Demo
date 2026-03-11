@@ -535,7 +535,7 @@ function Get-BuildInfoPathForSuffix {
     Join-Path (Get-BuildInfoDirectory) "build_info-$Suffix.json"
 }
 
-function Save-BuildInfoFromBlobIfAvailable {
+function Sync-BuildInfoFromBlobIfAvailable {
     param(
         [Parameter(Mandatory)]
         [string]$Suffix
@@ -573,7 +573,7 @@ function Save-BuildInfoFromBlobIfAvailable {
     $null
 }
 
-function Publish-BuildInfoToBlobIfAvailable {
+function Sync-BuildInfoToBlobIfAvailable {
     param(
         [Parameter(Mandatory)]
         [string]$BuildInfoPath
@@ -639,7 +639,7 @@ function Get-LatestBuildInfoPath {
     $null
 }
 
-function Read-BuildInfoFile {
+function Import-BuildInfoFile {
     param(
         [Parameter(Mandatory)]
         [string]$Path
@@ -757,7 +757,7 @@ function Get-FoundryBuildListLines {
         $lines += 'Orphaned build info files:'
         foreach ($path in $orphanedBuildInfoPaths) {
             try {
-                $buildInfo = Read-BuildInfoFile -Path $path
+                $buildInfo = Import-BuildInfoFile -Path $path
                 $lines += "- $(Split-Path -Leaf $path) — resource group: $($buildInfo.rg) ⚠️"
             } catch {
                 $lines += "- $(Split-Path -Leaf $path) — unreadable ⚠️"
@@ -777,7 +777,7 @@ function Get-AllowedAiModelChoices {
     )
 }
 
-function Read-AiModelSelection {
+function Select-AiModelSelection {
     param(
         [Parameter(Mandatory)]
         [string[]]$Choices
@@ -1058,7 +1058,7 @@ function Select-DeployableAiModel {
 
     while ($remainingChoices.Count -gt 0) {
         if (-not $currentChoice) {
-            $currentChoice = Read-AiModelSelection -Choices $remainingChoices.ToArray()
+            $currentChoice = Select-AiModelSelection -Choices $remainingChoices.ToArray()
         }
 
         Write-Host "Checking AI model availability for '$currentChoice' in $Location..."
@@ -1185,14 +1185,14 @@ function Get-BuildInfoPathForResourceGroup {
         return $suffixPath
     }
 
-    $downloadedPath = Save-BuildInfoFromBlobIfAvailable -Suffix $suffix
+    $downloadedPath = Sync-BuildInfoFromBlobIfAvailable -Suffix $suffix
     if ($downloadedPath) {
         return $downloadedPath
     }
 
     foreach ($path in Get-BuildInfoPaths) {
         try {
-            $buildInfo = Read-BuildInfoFile -Path $path
+            $buildInfo = Import-BuildInfoFile -Path $path
             if ($buildInfo.rg -eq $ResourceGroupName) {
                 return $path
             }
@@ -1217,7 +1217,7 @@ function Get-BuildInfoRecordForResourceGroup {
 
     [pscustomobject]@{
         Path = $path
-        Data = Read-BuildInfoFile -Path $path
+        Data = Import-BuildInfoFile -Path $path
     }
 }
 
@@ -2088,7 +2088,7 @@ try {
             -RequestedBy $currentUser.Account
         Write-Host "📝 Build info written to $buildInfoPath"
 
-        $buildInfoBlob = Publish-BuildInfoToBlobIfAvailable -BuildInfoPath $buildInfoPath
+        $buildInfoBlob = Sync-BuildInfoToBlobIfAvailable -BuildInfoPath $buildInfoPath
         if ($buildInfoBlob) {
             Write-Host "☁️ Build info uploaded to blob: $($buildInfoBlob.ContainerName)/$($buildInfoBlob.BlobName)"
         }
