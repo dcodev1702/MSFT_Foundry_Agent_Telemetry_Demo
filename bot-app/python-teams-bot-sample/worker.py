@@ -12,6 +12,7 @@ import glob
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +25,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 WORKER_BUILD_INFO_PATH = Path(__file__).resolve().parents[2] / "worker-build-info.json"
 RESULT_MESSAGE_CHUNK_SIZE = 12000
+FOUNDRY_RESOURCE_GROUP_PATTERN = re.compile(r"^zolab-ai-.{4,}$")
+FOUNDRY_RESOURCE_GROUP_SUFFIX_PATTERN = re.compile(r"^zolab-ai-(.+)$")
 
 
 def _utc_now() -> str:
@@ -297,19 +300,57 @@ class BackgroundWorker:
         return self._prepend_worker_metadata(output)
 
     async def _run_list_builds(self) -> str:
-        args = [
-            "pwsh", "-NoProfile", "-NonInteractive", "-File",
-            str(self._deploy_script),
-            "-ListBuilds",
+        resource_groups = self._get_foundry_resource_group_names()
+        build_info_paths = self._get_build_info_paths()
+        matched_build_info_paths: set[Path] = set()
+
+        lines = [
+            "",
+            "● 📚 Foundry builds",
+            "",
         ]
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode("utf-8", errors="replace")
-        return self._prepend_worker_metadata(output)
+
+        if not resource_groups:
+            lines.append("No active managed resource groups found ℹ️")
+        else:
+            lines.append("Active resource groups:")
+            for index, resource_group_name in enumerate(resource_groups, start=1):
+                build_info_record = await self._get_build_info_record_for_resource_group(
+                    resource_group_name
+                )
+                if build_info_record is None:
+                    lines.append(
+                        f"{index}. {resource_group_name} — build info file missing ❌"
+                    )
+                    continue
+
+                build_info_path, build_info = build_info_record
+                matched_build_info_paths.add(build_info_path)
+                model_name = str(build_info.get("genai_model") or "unknown")
+                lines.append(
+                    f"{index}. {resource_group_name} — model: {model_name} — "
+                    f"build info: {build_info_path.name} ✅"
+                )
+
+        orphaned_build_info_paths = [
+            path for path in build_info_paths if path not in matched_build_info_paths
+        ]
+        if orphaned_build_info_paths:
+            lines.extend([
+                "",
+                "Orphaned build info files:",
+            ])
+            for path in orphaned_build_info_paths:
+                try:
+                    build_info = self._load_build_info_file(path)
+                    resource_group_name = str(build_info.get("rg") or "unknown")
+                    lines.append(
+                        f"- {path.name} — resource group: {resource_group_name} ⚠️"
+                    )
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                    lines.append(f"- {path.name} — unreadable ⚠️")
+
+        return "\n".join(lines)
 
     async def _run_powershell(
         self,
@@ -405,3 +446,101 @@ class BackgroundWorker:
             chunks.append(remaining)
 
         return chunks
+
+    def _get_build_info_directory(self) -> Path:
+        return self._deploy_script.parent.parent
+
+    def _get_build_info_paths(self) -> list[Path]:
+        build_info_dir = self._get_build_info_directory()
+        paths = sorted(
+            build_info_dir.glob("build_info-*.json"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+
+        legacy_path = build_info_dir / "build_info.json"
+        if legacy_path.exists():
+            paths.append(legacy_path)
+
+        return paths
+
+    @staticmethod
+    def _load_build_info_file(path: Path) -> dict:
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _get_foundry_deployment_suffix(resource_group_name: str) -> str:
+        match = FOUNDRY_RESOURCE_GROUP_SUFFIX_PATTERN.match(resource_group_name)
+        if match is None:
+            raise ValueError(
+                f"Resource group '{resource_group_name}' does not match the expected "
+                "zolab-ai-<suffix> naming pattern."
+            )
+        return match.group(1)
+
+    def _get_foundry_resource_group_names(self) -> list[str]:
+        from azure.identity import DefaultAzureCredential
+        from azure.mgmt.resource import ResourceManagementClient
+
+        client_id = os.getenv("AZURE_CLIENT_ID")
+        credential = DefaultAzureCredential(managed_identity_client_id=client_id)
+        subscription_id = os.getenv(
+            "AZURE_SUBSCRIPTION_ID",
+            "08fdc492-f5aa-4601-84ae-03a37449c2ba",
+        )
+        client = ResourceManagementClient(credential, subscription_id)
+
+        return sorted(
+            resource_group.name
+            for resource_group in client.resource_groups.list()
+            if resource_group.name and FOUNDRY_RESOURCE_GROUP_PATTERN.match(resource_group.name)
+        )
+
+    async def _sync_build_info_from_blob_if_available(self, suffix: str) -> Path | None:
+        storage_account_name = os.getenv("AZURE_STORAGE_ACCOUNT")
+        blob_container_name = os.getenv("AZURE_BLOB_CONTAINER")
+        if not storage_account_name or not blob_container_name:
+            return None
+
+        target_path = self._get_build_info_directory() / f"build_info-{suffix}.json"
+
+        try:
+            from storage_config import BLOB_CONTAINER_NAME, get_blob_service_client
+
+            blob_client = get_blob_service_client().get_blob_client(
+                container=BLOB_CONTAINER_NAME,
+                blob=f"builds/build_info-{suffix}.json",
+            )
+            loop = asyncio.get_event_loop()
+            download = await loop.run_in_executor(None, blob_client.download_blob)
+            data = await loop.run_in_executor(None, download.readall)
+        except Exception:
+            if target_path.exists():
+                target_path.unlink(missing_ok=True)
+            return None
+
+        await asyncio.get_event_loop().run_in_executor(None, target_path.write_bytes, data)
+        return target_path if target_path.exists() else None
+
+    async def _get_build_info_record_for_resource_group(
+        self,
+        resource_group_name: str,
+    ) -> tuple[Path, dict] | None:
+        suffix = self._get_foundry_deployment_suffix(resource_group_name)
+        suffix_path = self._get_build_info_directory() / f"build_info-{suffix}.json"
+        if suffix_path.exists():
+            return suffix_path, self._load_build_info_file(suffix_path)
+
+        downloaded_path = await self._sync_build_info_from_blob_if_available(suffix)
+        if downloaded_path is not None:
+            return downloaded_path, self._load_build_info_file(downloaded_path)
+
+        for path in self._get_build_info_paths():
+            try:
+                build_info = self._load_build_info_file(path)
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                continue
+            if build_info.get("rg") == resource_group_name:
+                return path, build_info
+
+        return None

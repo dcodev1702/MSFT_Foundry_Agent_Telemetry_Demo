@@ -130,6 +130,50 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Removed build info file '/app/build_info-abc123.json'", combined)
         self.assertIn("● 🧹🗑️ Teardown complete!", combined)
 
+    async def test_run_list_builds_reports_no_active_builds(self) -> None:
+        worker = BackgroundWorker(
+            queue_client=object(),
+            proactive=object(),
+            deploy_script=Path("/tmp/deploy-foundry-env.ps1"),
+        )
+        worker._get_foundry_resource_group_names = lambda: []
+        worker._get_build_info_paths = lambda: []
+
+        result = await worker._run_list_builds()
+
+        self.assertIn("● 📚 Foundry builds", result)
+        self.assertIn("No active managed resource groups found ℹ️", result)
+
+    async def test_run_list_builds_includes_active_and_orphaned_build_info(self) -> None:
+        worker = BackgroundWorker(
+            queue_client=object(),
+            proactive=object(),
+            deploy_script=Path("/tmp/deploy-foundry-env.ps1"),
+        )
+        active_path = Path("/tmp/build_info-abc123.json")
+        orphan_path = Path("/tmp/build_info-orphan.json")
+
+        worker._get_foundry_resource_group_names = lambda: ["zolab-ai-abc123"]
+        worker._get_build_info_paths = lambda: [active_path, orphan_path]
+        worker._get_build_info_record_for_resource_group = AsyncMock(
+            return_value=(active_path, {"genai_model": "gpt-5.4", "rg": "zolab-ai-abc123"})
+        )
+        worker._load_build_info_file = lambda path: {
+            "rg": "zolab-ai-orphan1" if path == orphan_path else "zolab-ai-abc123"
+        }
+
+        result = await worker._run_list_builds()
+
+        self.assertIn(
+            "1. zolab-ai-abc123 — model: gpt-5.4 — build info: build_info-abc123.json ✅",
+            result,
+        )
+        self.assertIn("Orphaned build info files:", result)
+        self.assertIn(
+            "- build_info-orphan.json — resource group: zolab-ai-orphan1 ⚠️",
+            result,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
