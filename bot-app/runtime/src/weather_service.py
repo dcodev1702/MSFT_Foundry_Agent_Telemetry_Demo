@@ -234,6 +234,7 @@ class WeatherService:
                         "wind_speed_10m",
                         "is_day",
                     ]),
+                    "temperature_unit": "fahrenheit",
                     "timezone": "auto",
                     "forecast_days": 1,
                 },

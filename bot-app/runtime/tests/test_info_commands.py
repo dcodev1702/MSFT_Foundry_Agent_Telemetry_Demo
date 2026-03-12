@@ -59,6 +59,8 @@ class InfoCommandParsingTests(unittest.TestCase):
 
 class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_weather_service_formats_current_conditions(self) -> None:
+        captured_forecast_params: dict[str, object] = {}
+
         async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
             if "geocoding-api" in url:
                 return {
@@ -73,10 +75,12 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 }
 
+            captured_forecast_params.update(params)
+
             return {
                 "current": {
-                    "temperature_2m": 11.2,
-                    "apparent_temperature": 10.5,
+                    "temperature_2m": 52.2,
+                    "apparent_temperature": 50.9,
                     "relative_humidity_2m": 63,
                     "precipitation": 0.0,
                     "weather_code": 2,
@@ -84,8 +88,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -98,7 +102,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Weather for `Redmond, Washington, United States`", result)
         self.assertIn("Condition: Partly cloudy", result)
-        self.assertIn("Temperature: 11.2C", result)
+        self.assertIn("Temperature: 52.2°F", result)
+        self.assertEqual(captured_forecast_params["temperature_unit"], "fahrenheit")
 
     async def test_weather_service_uses_grounded_narrator_when_available(self) -> None:
         async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
@@ -126,8 +131,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -174,8 +179,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -231,8 +236,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -279,8 +284,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -333,8 +338,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -390,8 +395,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
@@ -437,8 +442,8 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
                     "time": "2026-03-12T19:00",
                 },
                 "current_units": {
-                    "temperature_2m": "C",
-                    "apparent_temperature": "C",
+                    "temperature_2m": "°F",
+                    "apparent_temperature": "°F",
                     "relative_humidity_2m": "%",
                     "precipitation": "mm",
                     "wind_speed_10m": "km/h",
