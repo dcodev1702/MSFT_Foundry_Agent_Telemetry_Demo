@@ -73,7 +73,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 |---------|-------------|
 | `build it` | Deploy a new Foundry environment (prompts for model selection) |
 | `build it <model>` | Deploy with a specific model |
-| `weather <city>` | Get current weather for a city |
+| `weather <city>` | Get current weather for a city, phrased by an LLM but grounded in live weather data |
 | `msft_docs <question>` | Search Microsoft Learn docs through a configured MCP server |
 | `list builds` | List all active Foundry deployments |
 | `build status <rg>` | Check a specific deployment |
@@ -92,7 +92,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `conversation_store.py` | Azure Blob-backed conversation reference store |
 | `job_dispatcher.py` | Azure Queue Storage job dispatcher |
 | `models.py` | Command, job, and session models |
-| `weather_service.py` | Deterministic weather lookup service |
+| `weather_service.py` | Live weather lookup plus grounded LLM narration fallback |
 | `msft_docs_service.py` | Microsoft Learn MCP-backed docs lookup service |
 | `worker.py` | Background queue worker (used in ACI container) |
 | `worker_standalone.py` | Standalone entry point for the worker container |
@@ -144,11 +144,16 @@ export AZURE_QUEUE_NAME="botjobs"
 export AZURE_BLOB_CONTAINER="botstate"
 export MSFT_LEARN_MCP_URL="https://learn.microsoft.com/api/mcp"
 export MSFT_LEARN_MCP_TIMEOUT_SECONDS="20"
+export WEATHER_LLM_AZURE_OPENAI_ENDPOINT="https://<bot-owned-stable-endpoint>.cognitiveservices.azure.com/"
+export WEATHER_LLM_MODEL="gpt-5.3-chat"
+export WEATHER_LLM_API_VERSION="2024-10-21"
 
 python app.py
 ```
 
 The bot listens on `http://localhost:8000/api/messages`. `DefaultAzureCredential` falls through to `az login` locally.
+
+When `WEATHER_LLM_AZURE_OPENAI_ENDPOINT` is set, the bot fetches live current conditions first and then asks the stable bot-owned `gpt-5.3-chat` deployment, or whatever `WEATHER_LLM_MODEL` overrides it with, to summarize only those supplied facts. This endpoint should belong to long-lived bot infrastructure, not to an ephemeral `build it` environment. If the model path is unavailable, the command falls back to the deterministic weather formatter.
 
 ## Deploy
 

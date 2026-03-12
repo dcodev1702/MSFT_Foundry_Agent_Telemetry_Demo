@@ -99,6 +99,98 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Condition: Partly cloudy", result)
         self.assertIn("Temperature: 11.2C", result)
 
+    async def test_weather_service_uses_grounded_narrator_when_available(self) -> None:
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            if "geocoding-api" in url:
+                return {
+                    "results": [
+                        {
+                            "name": "Denver",
+                            "admin1": "Colorado",
+                            "country": "United States",
+                            "latitude": 39.7392,
+                            "longitude": -104.9903,
+                        }
+                    ]
+                }
+
+            return {
+                "current": {
+                    "temperature_2m": 18.0,
+                    "apparent_temperature": 17.0,
+                    "relative_humidity_2m": 40,
+                    "precipitation": 0.0,
+                    "weather_code": 0,
+                    "wind_speed_10m": 14.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        captured_payload: dict[str, object] = {}
+
+        async def fake_narrator(payload: dict[str, object]) -> str:
+            captured_payload.update(payload)
+            return "Weather summary for Denver\nClear and dry right now"
+
+        service = WeatherService(fetch_json=fake_fetch, narrator=fake_narrator)
+
+        result = await service.get_weather_text("Denver")
+
+        self.assertEqual(result, "Weather summary for Denver<br>Clear and dry right now")
+        self.assertEqual(captured_payload["display_name"], "Denver, Colorado, United States")
+        self.assertEqual(captured_payload["condition"], "Clear sky")
+
+    async def test_weather_service_falls_back_when_narrator_fails(self) -> None:
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            if "geocoding-api" in url:
+                return {
+                    "results": [
+                        {
+                            "name": "Detroit",
+                            "admin1": "Michigan",
+                            "country": "United States",
+                            "latitude": 42.3314,
+                            "longitude": -83.0458,
+                        }
+                    ]
+                }
+
+            return {
+                "current": {
+                    "temperature_2m": 9.0,
+                    "apparent_temperature": 7.0,
+                    "relative_humidity_2m": 72,
+                    "precipitation": 0.2,
+                    "weather_code": 61,
+                    "wind_speed_10m": 10.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        async def failing_narrator(_payload: dict[str, object]) -> str:
+            raise RuntimeError("model unavailable")
+
+        service = WeatherService(fetch_json=fake_fetch, narrator=failing_narrator)
+
+        result = await service.get_weather_text("Detroit")
+
+        self.assertIn("Weather for `Detroit, Michigan, United States`", result)
+        self.assertIn("Condition: Slight rain", result)
+
     async def test_weather_service_falls_back_for_city_and_state_abbreviation(self) -> None:
         async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
             if "geocoding-api" in url:

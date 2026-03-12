@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import json
+import logging
+import os
 import re
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 JsonFetcher = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+WeatherNarrator = Callable[[dict[str, Any]], Awaitable[str]]
+
+
+logger = logging.getLogger(__name__)
 
 
 WEATHER_CODE_DESCRIPTIONS = {
@@ -92,14 +100,66 @@ US_STATE_ABBREVIATIONS = {
 }
 
 
+@dataclass(slots=True)
+class WeatherSnapshot:
+    query: str
+    display_name: str
+    place: dict[str, Any]
+    current: dict[str, Any]
+    units: dict[str, Any]
+    condition: str
+
+    def to_llm_payload(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "display_name": self.display_name,
+            "source": "Open-Meteo current conditions",
+            "place": {
+                "name": self.place.get("name"),
+                "admin1": self.place.get("admin1"),
+                "country": self.place.get("country"),
+                "latitude": self.place.get("latitude"),
+                "longitude": self.place.get("longitude"),
+            },
+            "condition": self.condition,
+            "observed_at": self.current.get("time"),
+            "temperature": {
+                "value": self.current.get("temperature_2m"),
+                "unit": self.units.get("temperature_2m"),
+            },
+            "apparent_temperature": {
+                "value": self.current.get("apparent_temperature"),
+                "unit": self.units.get("apparent_temperature"),
+            },
+            "humidity": {
+                "value": self.current.get("relative_humidity_2m"),
+                "unit": self.units.get("relative_humidity_2m"),
+            },
+            "wind_speed": {
+                "value": self.current.get("wind_speed_10m"),
+                "unit": self.units.get("wind_speed_10m"),
+            },
+            "precipitation": {
+                "value": self.current.get("precipitation"),
+                "unit": self.units.get("precipitation"),
+            },
+            "is_day": self.current.get("is_day"),
+        }
+
+
 class WeatherService:
     """Retrieve current weather for a city using the Open-Meteo APIs."""
 
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
     FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+    DEFAULT_OPENAI_API_VERSION = "2024-10-21"
+    DEFAULT_OPENAI_MODEL = "gpt-5.3-chat"
+    OPENAI_SCOPE = "https://cognitiveservices.azure.com/.default"
 
-    def __init__(self, fetch_json: JsonFetcher | None = None):
+    def __init__(self, fetch_json: JsonFetcher | None = None, narrator: WeatherNarrator | None = None):
         self._fetch_json = fetch_json or self._default_fetch_json
+        self._narrator = narrator
+        self._openai_client = None
 
     async def get_weather_text(self, city: str | None) -> str:
         city_name = (city or "").strip()
@@ -107,12 +167,34 @@ class WeatherService:
             return "Usage: `weather <city>`"
 
         try:
+            snapshot = await self._get_weather_snapshot(city_name)
+        except RuntimeError as exc:
+            return str(exc)
+
+        narrator = self._narrator
+        if narrator is None and self._llm_is_configured():
+            narrator = self._narrate_with_llm
+
+        if narrator is not None:
+            try:
+                narrated = (await narrator(snapshot.to_llm_payload())).strip()
+                if narrated:
+                    return narrated.replace("\n", "<br>")
+            except Exception as exc:
+                logger.warning("Falling back to deterministic weather formatting for %s: %s", city_name, exc)
+
+        return self._format_snapshot(snapshot)
+
+    async def _get_weather_snapshot(self, city_name: str) -> WeatherSnapshot:
+        """Resolve a location and fetch current conditions for it."""
+
+        try:
             place = await self._resolve_place(city_name)
         except Exception as exc:
-            return f"Weather lookup failed while geocoding `{city_name}`: {exc}"
+            raise RuntimeError(f"Weather lookup failed while geocoding `{city_name}`: {exc}") from exc
 
         if not place:
-            return f"No weather location match found for `{city_name}`."
+            raise RuntimeError(f"No weather location match found for `{city_name}`.")
 
         display_name = self._format_place(place)
 
@@ -136,16 +218,31 @@ class WeatherService:
                 },
             )
         except Exception as exc:
-            return f"Weather lookup failed while fetching current conditions for `{display_name}`: {exc}"
+            raise RuntimeError(
+                f"Weather lookup failed while fetching current conditions for `{display_name}`: {exc}"
+            ) from exc
 
         current = forecast_payload.get("current") or {}
         units = forecast_payload.get("current_units") or {}
         weather_code = current.get("weather_code")
         condition = WEATHER_CODE_DESCRIPTIONS.get(weather_code, "Unknown conditions")
 
+        return WeatherSnapshot(
+            query=city_name,
+            display_name=display_name,
+            place=place,
+            current=current,
+            units=units,
+            condition=condition,
+        )
+
+    def _format_snapshot(self, snapshot: WeatherSnapshot) -> str:
+        current = snapshot.current
+        units = snapshot.units
+
         lines = [
-            f"🌦️ Weather for `{display_name}`",
-            f"Condition: {condition}",
+            f"🌦️ Weather for `{snapshot.display_name}`",
+            f"Condition: {snapshot.condition}",
             (
                 "Temperature: "
                 f"{current.get('temperature_2m', 'n/a')}{units.get('temperature_2m', '')}"
@@ -170,6 +267,56 @@ class WeatherService:
             lines.append(f"Observed at: {observed_at}")
 
         return "<br>".join(lines)
+
+    def _llm_is_configured(self) -> bool:
+        enabled = os.getenv("WEATHER_LLM_ENABLED", "true").strip().lower()
+        if enabled not in {"1", "true", "yes", "on"}:
+            return False
+        return bool(os.getenv("WEATHER_LLM_AZURE_OPENAI_ENDPOINT", "").strip())
+
+    async def _narrate_with_llm(self, payload: dict[str, Any]) -> str:
+        client = self._get_openai_client()
+        response = await client.responses.create(
+            model=os.getenv("WEATHER_LLM_MODEL", self.DEFAULT_OPENAI_MODEL).strip() or self.DEFAULT_OPENAI_MODEL,
+            instructions=(
+                "You are a weather assistant for a Microsoft Teams bot. "
+                "Use only the supplied weather JSON. Do not infer, estimate, or invent facts, alerts, or forecasts. "
+                "Respond in 4 to 6 concise lines separated by newline characters. "
+                "Include the location, current conditions, temperature with feels-like, humidity, wind, precipitation, and a short practical note. "
+                "Keep a professional tone and do not use bullet points or markdown tables."
+            ),
+            input=(
+                "Summarize this live weather lookup for the user.\n"
+                f"Weather JSON:\n{json.dumps(payload, ensure_ascii=True, indent=2, sort_keys=True)}"
+            ),
+            max_output_tokens=220,
+        )
+        output_text = (getattr(response, "output_text", "") or "").strip()
+        if not output_text:
+            raise RuntimeError("The weather narration model returned no text.")
+        return output_text
+
+    def _get_openai_client(self):
+        if self._openai_client is not None:
+            return self._openai_client
+
+        try:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            from openai import AsyncAzureOpenAI
+        except Exception as exc:
+            raise RuntimeError(
+                "The `openai` Python package is required for grounded weather narration. Install the updated requirements."
+            ) from exc
+
+        managed_identity_client_id = os.getenv("AZURE_CLIENT_ID") or None
+        credential = DefaultAzureCredential(managed_identity_client_id=managed_identity_client_id)
+        token_provider = get_bearer_token_provider(credential, self.OPENAI_SCOPE)
+        self._openai_client = AsyncAzureOpenAI(
+            api_version=os.getenv("WEATHER_LLM_API_VERSION", self.DEFAULT_OPENAI_API_VERSION).strip(),
+            azure_endpoint=os.environ["WEATHER_LLM_AZURE_OPENAI_ENDPOINT"].strip(),
+            azure_ad_token_provider=token_provider,
+        )
+        return self._openai_client
 
     async def _default_fetch_json(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
         import aiohttp

@@ -44,6 +44,27 @@ param logAnalyticsSharedKey string
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
 
+@description('Deployment name exposed to the bot runtime for its long-lived LLM deployment')
+param weatherLlmModel string = 'gpt-5.3-chat'
+
+@description('Azure OpenAI API version for grounded weather narration')
+param weatherLlmApiVersion string = '2024-10-21'
+
+@description('Stable Azure OpenAI model name for the bot-owned weather deployment')
+param weatherLlmModelName string = 'gpt-5.3-chat'
+
+@description('Stable Azure OpenAI model version for the bot-owned weather deployment')
+param weatherLlmModelVersion string = '2026-03-03'
+
+@description('Model format for the bot-owned weather deployment')
+param weatherLlmModelFormat string = 'OpenAI'
+
+@description('SKU name for the bot-owned weather deployment')
+param weatherLlmSkuName string = 'GlobalStandard'
+
+@description('SKU capacity for the bot-owned weather deployment')
+param weatherLlmSkuCapacity int = 50
+
 // ── Resource Group ────────────────────────────────────────────
 
 resource botRg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -63,6 +84,13 @@ module botResources 'modules/bot-resources.bicep' = {
     logAnalyticsCustomerId: logAnalyticsCustomerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
     botImageTag: botImageTag
+    weatherLlmModel: weatherLlmModel
+    weatherLlmApiVersion: weatherLlmApiVersion
+    weatherLlmModelName: weatherLlmModelName
+    weatherLlmModelVersion: weatherLlmModelVersion
+    weatherLlmModelFormat: weatherLlmModelFormat
+    weatherLlmSkuName: weatherLlmSkuName
+    weatherLlmSkuCapacity: weatherLlmSkuCapacity
   }
 }
 
@@ -79,3 +107,6 @@ output acrLoginServer string = botResources.outputs.acrLoginServer
 output acrName string = botResources.outputs.acrName
 output botServiceName string = botResources.outputs.botServiceName
 output messagingEndpoint string = botResources.outputs.messagingEndpoint
+output botLlmAccountName string = botResources.outputs.botLlmAccountName
+output botLlmEndpoint string = botResources.outputs.botLlmEndpoint
+output botLlmDeploymentName string = botResources.outputs.botLlmDeploymentName

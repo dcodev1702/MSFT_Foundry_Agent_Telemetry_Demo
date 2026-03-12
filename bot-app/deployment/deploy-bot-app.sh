@@ -50,6 +50,14 @@ TEAMS_MANIFEST_TEMPLATE="${TEAMS_APP_DIR}/manifest.template.json"
 TEAMS_MANIFEST_PATH="${TEAMS_APP_DIR}/manifest.json"
 TEAMS_ZIP_PATH="${TEAMS_APP_DIR}/Bot-The-Builder.zip"
 
+WEATHER_LLM_MODEL="${WEATHER_LLM_MODEL:-gpt-5.3-chat}"
+WEATHER_LLM_API_VERSION="${WEATHER_LLM_API_VERSION:-2024-10-21}"
+WEATHER_LLM_MODEL_NAME="${WEATHER_LLM_MODEL_NAME:-gpt-5.3-chat}"
+WEATHER_LLM_MODEL_VERSION="${WEATHER_LLM_MODEL_VERSION:-2026-03-03}"
+WEATHER_LLM_MODEL_FORMAT="${WEATHER_LLM_MODEL_FORMAT:-OpenAI}"
+WEATHER_LLM_SKU_NAME="${WEATHER_LLM_SKU_NAME:-GlobalStandard}"
+WEATHER_LLM_SKU_CAPACITY="${WEATHER_LLM_SKU_CAPACITY:-50}"
+
 # ── Validate prerequisites ──────────────────────────────────────
 if ! az account show &>/dev/null; then
     echo "ERROR: Not logged in. Run 'az login' first." >&2
@@ -75,6 +83,10 @@ echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID}
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Bot Container App Deployment                               ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+echo "  ✓ Stable bot LLM deployment: ${WEATHER_LLM_MODEL}"
+echo "  ✓ Backing model: ${WEATHER_LLM_MODEL_NAME} ${WEATHER_LLM_MODEL_VERSION}"
+echo "  ✓ Deployment SKU: ${WEATHER_LLM_SKU_NAME} (${WEATHER_LLM_SKU_CAPACITY})"
 echo ""
 
 # ── Step 1: Build & push bot container to ACR ────────────────────
@@ -113,6 +125,13 @@ az deployment sub create \
     logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
     logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
     botImageTag="${BOT_IMAGE_TAG}" \
+    weatherLlmModel="${WEATHER_LLM_MODEL}" \
+    weatherLlmApiVersion="${WEATHER_LLM_API_VERSION}" \
+    weatherLlmModelName="${WEATHER_LLM_MODEL_NAME}" \
+    weatherLlmModelVersion="${WEATHER_LLM_MODEL_VERSION}" \
+    weatherLlmModelFormat="${WEATHER_LLM_MODEL_FORMAT}" \
+    weatherLlmSkuName="${WEATHER_LLM_SKU_NAME}" \
+    weatherLlmSkuCapacity="${WEATHER_LLM_SKU_CAPACITY}" \
   --output none
 
 echo "  ✓ Container App + Bot Service deployed"
@@ -142,6 +161,7 @@ az role assignment create \
   --output none 2>/dev/null || echo "  (Blob role already assigned)"
 
 echo "  ✓ Storage Queue + Blob RBAC granted on ${WORKER_STORAGE_ACCOUNT}"
+echo "  ✓ Bot LLM RBAC is handled inside bot infrastructure Bicep"
 echo ""
 
 # ── Step 4: Verify deployment ─────────────────────────────────────
@@ -160,6 +180,11 @@ BOT_CLIENT_ID=$(az bot show \
   --resource-group "${RG_BOT}" \
   --query "properties.msaAppId" \
   -o tsv)
+
+BOT_LLM_ENDPOINT=$(az deployment sub show \
+  --name "bot-resources-${SUFFIX}" \
+  --query "properties.outputs.botLlmEndpoint.value" \
+  -o tsv 2>/dev/null || true)
 
 if [[ ! -f "${TEAMS_MANIFEST_TEMPLATE}" ]]; then
   echo "ERROR: Teams manifest template not found at ${TEAMS_MANIFEST_TEMPLATE}" >&2
@@ -181,6 +206,9 @@ PY
 
 echo "  ✓ Container App FQDN: ${CA_FQDN}"
 echo "  ✓ Bot client ID: ${BOT_CLIENT_ID}"
+if [[ -n "${BOT_LLM_ENDPOINT}" ]]; then
+  echo "  ✓ Bot LLM endpoint: ${BOT_LLM_ENDPOINT}"
+fi
 echo "  ✓ Teams manifest updated: ${TEAMS_MANIFEST_PATH}"
 
 if [[ ! -f "${TEAMS_APP_DIR}/color.png" || ! -f "${TEAMS_APP_DIR}/outline.png" ]]; then

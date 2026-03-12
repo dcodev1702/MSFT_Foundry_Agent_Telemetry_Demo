@@ -25,17 +25,40 @@ param logAnalyticsSharedKey string
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
 
+@description('Deployment name exposed to the bot runtime for its long-lived LLM deployment')
+param weatherLlmModel string = 'gpt-5.3-chat'
+
+@description('Azure OpenAI API version for grounded weather narration')
+param weatherLlmApiVersion string = '2024-10-21'
+
+@description('Stable Azure OpenAI model name for the bot-owned weather deployment')
+param weatherLlmModelName string = 'gpt-5.3-chat'
+
+@description('Stable Azure OpenAI model version for the bot-owned weather deployment')
+param weatherLlmModelVersion string = '2026-03-03'
+
+@description('Model format for the bot-owned weather deployment')
+param weatherLlmModelFormat string = 'OpenAI'
+
+@description('SKU name for the bot-owned weather deployment')
+param weatherLlmSkuName string = 'GlobalStandard'
+
+@description('SKU capacity for the bot-owned weather deployment')
+param weatherLlmSkuCapacity int = 50
+
 // ── Resource Names ────────────────────────────────────────────
 var managedIdentityName = 'zolab-bot-mi-${suffix}'
 var acrName             = 'zolabbotacr${suffix}'
 var botServiceName      = 'zolab-bot-${suffix}'
 var containerEnvName    = 'zolab-bot-env-${suffix}'
 var containerAppName    = 'zolab-bot-ca-${suffix}'
+var botLlmAccountName   = 'zolab-bot-llm-${suffix}'
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
 var roles = {
   contributor: 'b24988ac-6180-42a0-ab88-20f7382dd24c'
   acrPull:     '7f951dda-4ed3-4680-a7ca-43fe172d538d'
+  azureAIUser: '53ca6127-db72-4b80-b1b0-d745d6d5456d'
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -84,6 +107,46 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
         sharedKey: logAnalyticsSharedKey
       }
     }
+  }
+}
+
+// ── Stable AI Services account for bot-owned LLM features ─────
+resource botLlmAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
+  name: botLlmAccountName
+  location: location
+  kind: 'AIServices'
+  sku: {
+    name: 'S0'
+  }
+  properties: {
+    customSubDomainName: botLlmAccountName
+    publicNetworkAccess: 'Enabled'
+  }
+}
+
+resource botLlmDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: botLlmAccount
+  name: weatherLlmModel
+  sku: {
+    name: weatherLlmSkuName
+    capacity: weatherLlmSkuCapacity
+  }
+  properties: {
+    model: {
+      format: weatherLlmModelFormat
+      name: weatherLlmModelName
+      version: weatherLlmModelVersion
+    }
+  }
+}
+
+resource botMIAzureAIUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: botLlmAccount
+  name: guid(botLlmAccount.id, botManagedIdentity.name, roles.azureAIUser)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.azureAIUser)
+    principalId: botManagedIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
@@ -179,6 +242,22 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
                 name: 'MSFT_LEARN_MCP_TIMEOUT_SECONDS'
                 value: '20'
               }
+              {
+                name: 'WEATHER_LLM_ENABLED'
+                value: 'true'
+              }
+              {
+                name: 'WEATHER_LLM_AZURE_OPENAI_ENDPOINT'
+                value: botLlmAccount.properties.endpoint
+              }
+              {
+                name: 'WEATHER_LLM_MODEL'
+                value: weatherLlmModel
+              }
+              {
+                name: 'WEATHER_LLM_API_VERSION'
+                value: weatherLlmApiVersion
+              }
             ]
           )
         }
@@ -257,3 +336,6 @@ output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
 output botServiceName string = azureBot.name
 output messagingEndpoint string = 'https://${containerApp.properties.configuration.ingress.fqdn}/api/messages'
+output botLlmAccountName string = botLlmAccount.name
+output botLlmEndpoint string = botLlmAccount.properties.endpoint
+output botLlmDeploymentName string = botLlmDeployment.name

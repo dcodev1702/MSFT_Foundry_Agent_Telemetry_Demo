@@ -109,6 +109,14 @@ The deploy script resolves these values at runtime:
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription
 - Worker storage scope for RBAC assignment
 
+Grounded weather narration is intentionally separate from the ephemeral Foundry environments created by `build it`.
+
+- The bot deployment now provisions its own long-lived Azure AI Services account inside the bot resource group.
+- That account hosts a dedicated `gpt-5.3-chat` deployment for bot-side LLM features.
+- `weather` uses that stable endpoint for narration; it no longer depends on `build_info-*.json` or any user-triggered Foundry build.
+- `msft_docs` is already decoupled from Foundry builds because it queries the Microsoft Learn MCP endpoint directly.
+- The bot managed identity gets `Azure AI User` on the bot-owned AI Services account from Bicep during deployment.
+
 The deploy script does not use an app registration or Key Vault secret. The bot runtime and Azure Bot Service both use the bot UAMI.
 
 The script currently assumes the production-style suffix `botprd` and the matching resource names used across the repo.
