@@ -7,7 +7,8 @@ param(
     [int]$CommandTimeoutMinutes = 60,
     [int]$ConfirmationTimeoutMinutes = 10,
     [int]$HeartbeatIntervalMinutes = 30,
-    [int]$PollIntervalSeconds = 10
+    [int]$PollIntervalSeconds = 10,
+    [switch]$AllowMutatingCommands
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +47,10 @@ Set-AzContext -SubscriptionId $subscriptionId | Out-Null
 $user = Get-MgUser -UserId $ctx.Account
 $chat = Get-OrCreate-FoundryTeamsChat -UserId $user.Id -Topic $TeamsChatTopic
 
+if (-not $AllowMutatingCommands) {
+    Write-Warning "teams-command-dispatch.ps1 is running in diagnostics-only mode. Local build and teardown commands are blocked unless you start the listener with -AllowMutatingCommands."
+}
+
 function Get-ListenerAzureContextSummary {
     $azContext = Get-AzContext -ErrorAction SilentlyContinue
     $cliContextJson = & az account show --query "{account:user.name,subscriptionId:id}" --output json 2>$null
@@ -79,6 +84,11 @@ function Get-ListenerAzureContextSummary {
 function Get-ListenerHelpLines {
     @(
         'Foundry Teams command listener is online.'
+        $(if ($AllowMutatingCommands) {
+            'Mode: legacy local execution enabled (non-prod only).'
+        } else {
+            'Mode: diagnostics only. Local build and teardown are blocked.'
+        })
         'Available commands:'
         '- build it'
         '- heartbeat'
@@ -118,13 +128,17 @@ function Get-ListenerStatusLines {
         [int]$ConfirmationTimeoutMinutes,
 
         [Parameter(Mandatory)]
-        [int]$PollIntervalSeconds
+        [int]$PollIntervalSeconds,
+
+        [Parameter(Mandatory)]
+        [bool]$AllowMutatingCommands
     )
 
     @(
         '● 🛰️ Listener status'
         ''
         "Status: Online ✅"
+        "Mode: $(if ($AllowMutatingCommands) { 'Legacy local execution enabled' } else { 'Diagnostics only' })"
         "Account: $Account"
         "Azure PowerShell account: $AzurePowerShellAccount"
         "Azure CLI account: $AzureCliAccount"
@@ -216,6 +230,27 @@ function Get-ListenerHeartbeatLines {
         "👤 Identity: $Account"
         "🕒 Checked at: $((Get-Date).ToUniversalTime().ToString('u'))"
     )
+}
+
+function Deny-ListenerMutatingCommand {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ChatId,
+
+        [Parameter(Mandatory)]
+        [string]$CommandName
+    )
+
+    $message = @(
+        "The local Teams listener blocked '$CommandName'."
+        ''
+        'This script runs with the desktop identity, so it is diagnostics-only by default.'
+        'Use the bot and queue-backed worker path for production build and teardown operations.'
+        'If you intentionally need the legacy local listener for non-prod testing, restart it with -AllowMutatingCommands.'
+    ) -join "`n"
+
+    [void](Send-FoundryTeamsChatMessage -ChatId $ChatId -Message $message)
+    Write-Warning "Blocked local listener command '$CommandName' in diagnostics-only mode."
 }
 
 function Get-ListenerManagedTeardownTargets {
@@ -360,7 +395,8 @@ try {
                     -ChatTopic $TeamsChatTopic `
                     -CommandTimeoutMinutes $CommandTimeoutMinutes `
                     -ConfirmationTimeoutMinutes $ConfirmationTimeoutMinutes `
-                    -PollIntervalSeconds $PollIntervalSeconds
+                    -PollIntervalSeconds $PollIntervalSeconds `
+                    -AllowMutatingCommands $AllowMutatingCommands.IsPresent
                 [void](Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message ($statusLines -join "`n"))
                 Write-Host "Listener status command received."
                 continue
@@ -403,6 +439,11 @@ try {
             }
 
             'build' {
+                if (-not $AllowMutatingCommands) {
+                    Deny-ListenerMutatingCommand -ChatId $chat.Id -CommandName 'build it'
+                    continue
+                }
+
                 $confirmationPrompt = Send-FoundryTeamsChatMessage -ChatId $chat.Id -Message (
                     @(
                         "Build request received."
@@ -515,6 +556,11 @@ try {
             }
 
             'teardown' {
+                if (-not $AllowMutatingCommands) {
+                    Deny-ListenerMutatingCommand -ChatId $chat.Id -CommandName 'teardown'
+                    continue
+                }
+
                 $selectedResourceGroupName = $command.ResourceGroupName
                 if ([string]::IsNullOrWhiteSpace($selectedResourceGroupName)) {
                     $selectionResult = Request-ListenerTeardownTargetSelection `

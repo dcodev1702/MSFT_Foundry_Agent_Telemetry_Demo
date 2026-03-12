@@ -212,13 +212,22 @@ Helpful notes:
 - The automation intentionally uses a self-owned **group chat** named `Microsoft Foundry Deployments`; that is the supported pattern for this workflow.
 - `zolab-ai-dev` now receives `Reader` on each deployment resource group so the App Insights resource and Foundry App Insights connection remain visible after Teams-triggered builds.
 - If you change listener command handling, restart the detached listener so the running process picks up the new code.
-- Use `listener status` after startup to confirm the listener is online with the expected Graph account, Azure PowerShell account, Azure CLI account, subscription, chat topic, PID, and current UTC time.
+- Use `listener status` after startup to confirm the listener is online with the expected Graph account, Azure PowerShell account, Azure CLI account, subscription, chat topic, PID, current UTC time, and whether mutating commands are enabled.
 
-### Teams Command Listener
+### Legacy Teams Command Listener
+
+This listener is no longer the preferred operational path. The production path is the Teams bot plus queue-backed worker. `teams-command-dispatch.ps1` runs under the desktop identity, so it now starts in diagnostics-only mode by default.
 
 ```powershell
 cd deployment
 pwsh ./teams-command-dispatch.ps1
+```
+
+That starts the listener in diagnostics-only mode. `build it` and `teardown` will be blocked unless you explicitly opt into the legacy local-execution path for non-production testing:
+
+```powershell
+cd deployment
+pwsh ./teams-command-dispatch.ps1 -AllowMutatingCommands
 ```
 
 Once the listener is running, send one of these commands in the Teams chat:
@@ -235,17 +244,17 @@ Once the listener is running, send one of these commands in the Teams chat:
 
 The listener validates the request, then asks for confirmation:
 
-- Build: reply `1` to build or `2` to abort
+- Build: blocked by default; only available when the listener is started with `-AllowMutatingCommands`
 - Heartbeat: no confirmation required
 - List builds: no confirmation required
 - Build status: reply `1` to confirm or `2` to abort
-- Teardown: send `teardown` to get a numbered menu of available managed builds plus `none`, or send `teardown '<resource-group>'` directly; after a build is selected, reply `1` to generate a non-destructive teardown preview or `2` to abort; once the preview is posted back to Teams, reply `1` again to proceed with teardown or `2` to abort
+- Teardown: blocked by default; only available when the listener is started with `-AllowMutatingCommands`
 - Listener status / `?`: no confirmation required
 
-By default, the build, build-status, and teardown confirmation prompts stay open for 10 minutes before they expire.
+By default, the build-status confirmation prompts stay open for 10 minutes before they expire.
 The listener also posts an automatic heartbeat to the Teams chat every 30 minutes while it remains online.
-While a build is actively running, the automation posts `🚧 👷 The Bobs Are Still Building 👷🚧 ` every 1 minute. During teardown, it posts `🚧 👷 The Bobs Are Still Tearing Down: <resource-group> 👷🚧` every 1 minute until the cleanup finishes.
-After each confirmed build or teardown, the listener sends the full status report back to the Teams chat.
+When mutating commands are explicitly enabled, the listener posts `🚧 👷 The Bobs Are Still Building 👷🚧 ` every 1 minute during builds and `🚧 👷 The Bobs Are Still Tearing Down: <resource-group> 👷🚧` every 1 minute during teardown until completion.
+After each confirmed build, build-status, or teardown command, the listener sends the full status report back to the Teams chat.
 The listener stays online until you explicitly send `stop listener` in the Teams chat.
 Use `?` any time to get the current command list, use `listener status` for a quick health snapshot, and use `heartbeat` for a detailed per-line readout that includes the pwsh version, uptime, memory usage, script name, PID, last Teams response, Graph API connectivity, chat topic, and running identity.
 

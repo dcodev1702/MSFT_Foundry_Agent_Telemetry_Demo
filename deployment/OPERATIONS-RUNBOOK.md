@@ -2,7 +2,7 @@
 
 This runbook captures the shortest path for build, deploy, rollback, verification, and smoke checking across the bot and worker runtimes.
 
-For Foundry environment operations, prefer Teams-triggered or queue-driven builds over direct local `pwsh ./deploy-foundry-env.ps1` runs. Those operational flows use the Azure-hosted managed identity; local runs use your desktop identity and can fail after PIM changes until both Azure CLI and Az PowerShell tokens are refreshed.
+For Foundry environment operations, prefer Teams-triggered or queue-driven builds over direct local `pwsh ./deploy-foundry-env.ps1` runs. Those operational flows use the Azure-hosted managed identity; local runs use your desktop identity and can fail after PIM changes until both Azure CLI and Az PowerShell tokens are refreshed. The legacy local Teams listener in `deployment/teams-command-dispatch.ps1` now starts in diagnostics-only mode by default and blocks local build and teardown unless explicitly started with `-AllowMutatingCommands` for non-production testing.
 
 ## Bot
 
