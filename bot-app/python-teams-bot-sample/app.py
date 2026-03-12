@@ -41,6 +41,8 @@ from worker import BackgroundWorker
 from heartbeat import HeartbeatService
 from public_routes import is_anonymous_route
 from service_lifecycle import start_background_services, stop_background_services
+from msft_docs_service import MicrosoftLearnMcpService
+from weather_service import WeatherService
 
 # ── Logging ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -99,6 +101,8 @@ heartbeat_service = HeartbeatService(
     store=store,
     dispatcher=dispatcher,
 )
+weather_service = WeatherService()
+msft_docs_service = MicrosoftLearnMcpService()
 
 # ── Register Bot Handlers (Phase 1) ───────────────────────────
 from bot import register_handlers  # noqa: E402
@@ -107,6 +111,8 @@ register_handlers(
     agent_app,
     dispatcher=dispatcher,
     store=store,
+    weather_service=weather_service,
+    msft_docs_service=msft_docs_service,
     heartbeat_service=heartbeat_service,
 )
 

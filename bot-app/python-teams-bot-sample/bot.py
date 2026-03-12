@@ -24,6 +24,7 @@ from microsoft_agents.hosting.teams import TeamsInfo
 from command_parser import parse_command
 from conversation_store import BlobConversationStore
 from job_dispatcher import AzureQueueJobDispatcher
+from msft_docs_service import MicrosoftLearnMcpService
 from models import (
     ALLOWED_MODELS,
     BuildSession,
@@ -31,6 +32,7 @@ from models import (
     QueuedJob,
     TeardownSession,
 )
+from weather_service import WeatherService
 
 
 def _utc_now() -> str:
@@ -134,6 +136,8 @@ def _get_help_text() -> str:
         "**Supported commands:**",
         "- `build it` — deploy (prompts for model selection)",
         "- `build it <model>` — deploy with specified model",
+        "- `weather <city>` — current weather for a city",
+        "- `msft_docs <question>` — search Microsoft Learn docs via MCP",
         "- `list builds` — list all active Foundry deployments",
         "- `build status <resource-group>` — check a specific deployment",
         "- `teardown` — remove a Foundry deployment (prompts for build selection)",
@@ -524,6 +528,8 @@ def register_handlers(
     *,
     dispatcher: AzureQueueJobDispatcher,
     store: BlobConversationStore,
+    weather_service: WeatherService,
+    msft_docs_service: MicrosoftLearnMcpService,
     heartbeat_service=None,
 ) -> None:
     """Register all bot message and event handlers on the AgentApplication."""
@@ -618,6 +624,22 @@ def register_handlers(
 
         if command.kind == "listener-status":
             text = _get_listener_status_text(dispatcher)
+            await context.send_activity(MessageFactory.text(text))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        if command.kind == "weather":
+            text = await weather_service.get_weather_text(command.location)
+            await context.send_activity(MessageFactory.text(text))
+            _last_response_utc = _utc_now()
+            if heartbeat_service:
+                heartbeat_service.update_last_response(_last_response_utc)
+            return
+
+        if command.kind == "msft-docs":
+            text = await msft_docs_service.get_docs_text(command.query)
             await context.send_activity(MessageFactory.text(text))
             _last_response_utc = _utc_now()
             if heartbeat_service:

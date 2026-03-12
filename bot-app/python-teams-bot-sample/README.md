@@ -73,6 +73,8 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 |---------|-------------|
 | `build it` | Deploy a new Foundry environment (prompts for model selection) |
 | `build it <model>` | Deploy with a specific model |
+| `weather <city>` | Get current weather for a city |
+| `msft_docs <question>` | Search Microsoft Learn docs through a configured MCP server |
 | `list builds` | List all active Foundry deployments |
 | `build status <rg>` | Check a specific deployment |
 | `teardown <rg>` | Remove a Foundry deployment |
@@ -90,6 +92,8 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `conversation_store.py` | Azure Blob-backed conversation reference store |
 | `job_dispatcher.py` | Azure Queue Storage job dispatcher |
 | `models.py` | Command, job, and session models |
+| `weather_service.py` | Deterministic weather lookup service |
+| `msft_docs_service.py` | Microsoft Learn MCP-backed docs lookup service |
 | `worker.py` | Background queue worker (used in ACI container) |
 | `worker_standalone.py` | Standalone entry point for the worker container |
 | `proactive.py` | Proactive messaging via stored conversation references |
@@ -138,6 +142,8 @@ export TEAMS_APP_ID="<teams-app-manifest-id>"
 export AZURE_STORAGE_ACCOUNT="zolabworkerstbotprd"
 export AZURE_QUEUE_NAME="botjobs"
 export AZURE_BLOB_CONTAINER="botstate"
+export MSFT_LEARN_MCP_URL="https://learn.microsoft.com/api/mcp"
+export MSFT_LEARN_MCP_TIMEOUT_SECONDS="20"
 
 python app.py
 ```

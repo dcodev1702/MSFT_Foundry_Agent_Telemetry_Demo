@@ -171,6 +171,14 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
                 name: 'HEARTBEAT_ENABLED'
                 value: 'true'
               }
+              {
+                name: 'MSFT_LEARN_MCP_URL'
+                value: 'https://learn.microsoft.com/api/mcp'
+              }
+              {
+                name: 'MSFT_LEARN_MCP_TIMEOUT_SECONDS'
+                value: '20'
+              }
             ]
           )
         }

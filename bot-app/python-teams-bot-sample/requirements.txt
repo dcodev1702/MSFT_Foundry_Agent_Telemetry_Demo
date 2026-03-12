@@ -28,3 +28,7 @@ azure-storage-blob>=12.19.0
 
 # Azure Resource Management (list resource groups for teardown selection)
 azure-mgmt-resource>=23.0.0
+
+# Model Context Protocol client for Microsoft Learn MCP queries
+mcp>=1.12.4
+httpx>=0.27.0

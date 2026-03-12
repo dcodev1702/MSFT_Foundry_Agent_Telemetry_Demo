@@ -30,6 +30,28 @@ def parse_command(text: str | None) -> FoundryCommand:
     if normalized == "list builds":
         return FoundryCommand(kind="list-builds", raw_text=raw_text)
 
+    if normalized == "weather":
+        return FoundryCommand(kind="weather", raw_text=raw_text)
+
+    if normalized.startswith("weather "):
+        location = _strip_quotes(raw_text[len("weather "):])
+        return FoundryCommand(
+            kind="weather",
+            raw_text=raw_text,
+            location=location or None,
+        )
+
+    if normalized == "msft_docs":
+        return FoundryCommand(kind="msft-docs", raw_text=raw_text)
+
+    if normalized.startswith("msft_docs "):
+        query = _strip_quotes(raw_text[len("msft_docs "):])
+        return FoundryCommand(
+            kind="msft-docs",
+            raw_text=raw_text,
+            query=query or None,
+        )
+
     if normalized.startswith("build it"):
         parts = raw_text.split(maxsplit=2)
         model = parts[2].strip() if len(parts) == 3 else None

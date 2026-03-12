@@ -62,6 +62,8 @@ class FoundryCommand:
     raw_text: str
     model: str | None = None
     resource_group: str | None = None
+    location: str | None = None
+    query: str | None = None
     requires_confirmation: bool = False
 
 
