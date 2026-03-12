@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -12,6 +13,11 @@ WeatherNarrator = Callable[[dict[str, Any]], Awaitable[str]]
 
 
 logger = logging.getLogger(__name__)
+
+
+TRANSIENT_WEATHER_STATUS_CODES = {408, 429, 500, 502, 503, 504}
+WEATHER_API_RETRY_ATTEMPTS = 3
+WEATHER_API_RETRY_BACKOFF_SECONDS = 0.5
 
 
 WEATHER_CODE_DESCRIPTIONS = {
@@ -214,7 +220,7 @@ class WeatherService:
         display_name = self._format_place(place)
 
         try:
-            forecast_payload = await self._fetch_json(
+            forecast_payload = await self._fetch_json_with_retry(
                 self.FORECAST_URL,
                 {
                     "latitude": place["latitude"],
@@ -369,7 +375,7 @@ class WeatherService:
         return ranked_results[0]
 
     async def _geocode(self, query: str, *, count: int) -> list[dict[str, Any]]:
-        geocoding_payload = await self._fetch_json(
+        geocoding_payload = await self._fetch_json_with_retry(
             self.GEOCODING_URL,
             {
                 "name": query,
@@ -382,6 +388,39 @@ class WeatherService:
             result for result in (geocoding_payload.get("results") or [])
             if isinstance(result, dict)
         ]
+
+    async def _fetch_json_with_retry(self, url: str, params: dict[str, Any]) -> dict[str, Any]:
+        last_error: Exception | None = None
+        for attempt in range(1, WEATHER_API_RETRY_ATTEMPTS + 1):
+            try:
+                return await self._fetch_json(url, params)
+            except Exception as exc:
+                last_error = exc
+                if attempt >= WEATHER_API_RETRY_ATTEMPTS or not self._is_retryable_weather_error(exc):
+                    raise
+                logger.warning(
+                    "Retrying weather API request to %s after attempt %s/%s failed: %s",
+                    url,
+                    attempt,
+                    WEATHER_API_RETRY_ATTEMPTS,
+                    exc,
+                )
+                await asyncio.sleep(WEATHER_API_RETRY_BACKOFF_SECONDS * attempt)
+
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Weather API request failed without an exception.")
+
+    @staticmethod
+    def _is_retryable_weather_error(exc: Exception) -> bool:
+        if isinstance(exc, (TimeoutError, OSError)):
+            return True
+
+        status = getattr(exc, "status", None)
+        if isinstance(status, int) and status in TRANSIENT_WEATHER_STATUS_CODES:
+            return True
+
+        return False
 
     @staticmethod
     def _split_location_hints(city_name: str) -> tuple[str, list[str]]:

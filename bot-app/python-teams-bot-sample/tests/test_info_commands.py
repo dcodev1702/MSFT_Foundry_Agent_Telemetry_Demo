@@ -245,6 +245,55 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Weather for `San Diego, California, United States`", result)
 
+    async def test_weather_service_retries_transient_forecast_failure(self) -> None:
+        forecast_attempts = 0
+
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            nonlocal forecast_attempts
+            if "geocoding-api" in url:
+                return {
+                    "results": [
+                        {
+                            "name": "San Diego",
+                            "admin1": "California",
+                            "country": "United States",
+                            "country_code": "US",
+                            "latitude": 32.7157,
+                            "longitude": -117.1611,
+                        }
+                    ]
+                }
+
+            forecast_attempts += 1
+            if forecast_attempts == 1:
+                raise TimeoutError("upstream timeout")
+
+            return {
+                "current": {
+                    "temperature_2m": 20.0,
+                    "apparent_temperature": 20.0,
+                    "relative_humidity_2m": 60,
+                    "precipitation": 0.0,
+                    "weather_code": 1,
+                    "wind_speed_10m": 8.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        service = WeatherService(fetch_json=fake_fetch)
+
+        result = await service.get_weather_text("San Diego, California, United States")
+
+        self.assertEqual(forecast_attempts, 2)
+        self.assertIn("Weather for `San Diego, California, United States`", result)
+
     async def test_weather_service_matches_full_state_name_after_fallback(self) -> None:
         async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
             if "geocoding-api" in url:
