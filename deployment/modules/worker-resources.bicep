@@ -93,6 +93,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
+    publicNetworkAccess: 'Enabled'
     allowSharedKeyAccess: false  // Entra ID / RBAC only
   }
 }
