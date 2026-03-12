@@ -37,11 +37,11 @@ logger = logging.getLogger(__name__)
 BASE_PATH = Path(__file__).resolve().parent
 
 DEFAULT_DEPLOY_SCRIPT = str(
-    BASE_PATH.parent.parent / "deployment" / "deploy-foundry-env.ps1"
+    BASE_PATH.parent.parent.parent / "deployment" / "deploy-foundry-env.ps1"
 )
 
 # ── Environment ────────────────────────────────────────────────
-load_dotenv(BASE_PATH / ".env")
+load_dotenv(BASE_PATH.parent / ".env")
 DEPLOY_SCRIPT = Path(os.getenv("DEPLOY_SCRIPT_PATH", DEFAULT_DEPLOY_SCRIPT))
 
 # ── SDK Bootstrap (outbound messaging only — no web server) ───

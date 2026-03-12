@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 
 
-SAMPLE_DIR = Path(__file__).resolve().parents[1]
-if str(SAMPLE_DIR) not in sys.path:
-    sys.path.insert(0, str(SAMPLE_DIR))
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from public_routes import is_anonymous_route
 

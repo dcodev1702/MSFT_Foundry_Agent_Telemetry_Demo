@@ -115,15 +115,16 @@ bot-app/
 │   ├── bot-infra.bicep              # Subscription-scoped bot infrastructure
 │   └── modules/
 │       └── bot-resources.bicep      # Container App + ACR + Bot Service + UAMI
-└── python-teams-bot-sample/
-    ├── app.py                       # aiohttp host + M365 Agents SDK adapter
-    ├── bot.py                       # Teams message/event handlers
-    ├── worker.py                    # Background queue worker
-    ├── worker_standalone.py         # Standalone worker entry point
-    ├── proactive.py                 # Proactive messaging service
-    ├── heartbeat.py                 # Periodic heartbeat broadcaster
-    ├── command_parser.py            # Command parser
-    ├── conversation_store.py        # Azure Blob conversation store
+└── runtime/
+  ├── src/
+  │   ├── app.py                   # aiohttp host + M365 Agents SDK adapter
+  │   ├── bot.py                   # Teams message/event handlers
+  │   ├── worker.py                # Background queue worker
+  │   ├── worker_standalone.py     # Standalone worker entry point
+  │   ├── proactive.py             # Proactive messaging service
+  │   ├── heartbeat.py             # Periodic heartbeat broadcaster
+  │   ├── command_parser.py        # Command parser
+  │   └── conversation_store.py    # Azure Blob conversation store
     ├── job_dispatcher.py            # Azure Queue job dispatcher
     ├── storage_config.py            # Shared Azure credential config
     ├── models.py                    # Data models
@@ -384,7 +385,7 @@ Teams ──► Azure Bot Service (F0, UserAssignedMSI)
 bash bot-app/deployment/deploy-bot-app.sh
 ```
 
-See [`bot-app/python-teams-bot-sample/README.md`](../bot-app/python-teams-bot-sample/README.md) for full bot documentation.
+See [`bot-app/runtime/README.md`](../bot-app/runtime/README.md) for full bot documentation.
 
 ---
 

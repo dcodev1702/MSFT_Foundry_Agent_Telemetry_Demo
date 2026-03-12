@@ -183,7 +183,7 @@ Teams ──► Bot Service ──► Container App (M365 Agents SDK)
 - **Azure Queue + Blob Storage** — RBAC-only (no shared keys), conversation state in Blob
 - **Cross-sub logging** — all Container Apps logs go to `DIBSecCom` LAW in the Security subscription
 
-See [`bot-app/python-teams-bot-sample/README.md`](bot-app/python-teams-bot-sample/README.md) for full bot documentation and [`deployment/README.md`](deployment/README.md) for the Teams command listener.
+See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot documentation and [`deployment/README.md`](deployment/README.md) for the Teams command listener.
 
 ---
 

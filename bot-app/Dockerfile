@@ -9,7 +9,7 @@
 #   docker build -t zolab-bot:latest -f bot-app/Dockerfile .
 #
 # Run locally:
-#   docker run -p 8000:8000 --env-file bot-app/python-teams-bot-sample/.env zolab-bot:latest
+#   docker run -p 8000:8000 --env-file bot-app/runtime/.env zolab-bot:latest
 # ════════════════════════════════════════════════════════════════
 
 ARG BASE_IMAGE=zolabbotacrbotprd.azurecr.io/zolab-bot:botfix-20260311173803-756bbc6
@@ -18,11 +18,12 @@ FROM ${BASE_IMAGE} AS base
 # ── Application layout ──────────────────────────────────────────
 #
 #   /app/
-#     bot-app/python-teams-bot-sample/   ← workdir (bot code)
+#     bot-app/runtime/                   ← runtime root
+#       src/                            ← workdir (bot code)
 #     deployment/                        ← PowerShell scripts + Bicep
 #
 # This matches app.py's path resolution:
-#   BASE_PATH.parent.parent / "deployment" / "deploy-foundry-env.ps1"
+#   BASE_PATH.parent.parent.parent / "deployment" / "deploy-foundry-env.ps1"
 # ─────────────────────────────────────────────────────────────────
 
 WORKDIR /app
@@ -31,19 +32,19 @@ WORKDIR /app
 COPY deployment/ /app/deployment/
 
 # Copy bot application code
-COPY bot-app/python-teams-bot-sample/ /app/bot-app/python-teams-bot-sample/
+COPY bot-app/runtime/ /app/bot-app/runtime/
 
 # Copy the Teams package icon so the bot can serve it publicly for Teams avatars
-COPY bot-app/teams-app/color.png /app/bot-app/python-teams-bot-sample/assets/bot-icon.png
+COPY bot-app/teams-app/color.png /app/bot-app/runtime/src/assets/bot-icon.png
 
 # Remove any inherited local env file so production only uses platform-provided settings.
-RUN rm -f /app/bot-app/python-teams-bot-sample/.env
+RUN rm -f /app/bot-app/runtime/.env
 
 # ── Python dependencies ──────────────────────────────────────────
-RUN pip install --no-cache-dir -r /app/bot-app/python-teams-bot-sample/requirements.txt
+RUN pip install --no-cache-dir -r /app/bot-app/runtime/requirements.txt
 
 # ── Startup ──────────────────────────────────────────────────────
-WORKDIR /app/bot-app/python-teams-bot-sample
+WORKDIR /app/bot-app/runtime/src
 EXPOSE 8000
 ENV PORT=8000
 

@@ -8,9 +8,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 
-SAMPLE_DIR = Path(__file__).resolve().parents[1]
-if str(SAMPLE_DIR) not in sys.path:
-    sys.path.insert(0, str(SAMPLE_DIR))
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 from heartbeat import HeartbeatService
 from service_lifecycle import start_background_services, stop_background_services

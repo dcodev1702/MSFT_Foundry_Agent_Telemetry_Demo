@@ -12,7 +12,7 @@
 #   docker build -t zolab-worker:latest -f deployment/Dockerfile.worker .
 #
 # Run locally:
-#   docker run --env-file bot-app/python-teams-bot-sample/.env zolab-worker:latest
+#   docker run --env-file bot-app/runtime/.env zolab-worker:latest
 # ════════════════════════════════════════════════════════════════
 
 FROM python:3.13-slim-bookworm AS base
@@ -64,11 +64,12 @@ RUN pwsh -NoProfile -Command " \
 # ── Application layout ──────────────────────────────────────────
 #
 #   /app/
-#     bot-app/python-teams-bot-sample/   ← worker code (workdir)
+#     bot-app/runtime/                   ← runtime root
+#       src/                            ← worker code (workdir)
 #     deployment/                        ← PowerShell scripts + Bicep
 #
 # Matches app.py / worker_standalone.py path resolution:
-#   BASE_PATH.parent.parent / "deployment" / "deploy-foundry-env.ps1"
+#   BASE_PATH.parent.parent.parent / "deployment" / "deploy-foundry-env.ps1"
 # ─────────────────────────────────────────────────────────────────
 
 WORKDIR /app
@@ -80,12 +81,12 @@ RUN printf '{\n  "build_utc": "%s",\n  "build_commit": "%s",\n  "build_source": 
 COPY deployment/ /app/deployment/
 
 # Copy bot application code (worker + proactive + models + store)
-COPY bot-app/python-teams-bot-sample/ /app/bot-app/python-teams-bot-sample/
+COPY bot-app/runtime/ /app/bot-app/runtime/
 
 # ── Python dependencies ──────────────────────────────────────────
-RUN pip install --no-cache-dir -r /app/bot-app/python-teams-bot-sample/requirements.txt
+RUN pip install --no-cache-dir -r /app/bot-app/runtime/requirements.txt
 
 # ── Startup ──────────────────────────────────────────────────────
-WORKDIR /app/bot-app/python-teams-bot-sample
+WORKDIR /app/bot-app/runtime/src
 
 CMD ["python", "worker_standalone.py"]

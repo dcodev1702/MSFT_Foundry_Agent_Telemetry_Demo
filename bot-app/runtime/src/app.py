@@ -55,13 +55,13 @@ logger = logging.getLogger(__name__)
 BASE_PATH = Path(__file__).resolve().parent
 BOT_ICON_PATH = BASE_PATH / "assets" / "bot-icon.png"
 
-# Default deploy script path: two levels up → deployment/
+# Default deploy script path: three levels up → deployment/
 DEFAULT_DEPLOY_SCRIPT = str(
-    BASE_PATH.parent.parent / "deployment" / "deploy-foundry-env.ps1"
+    BASE_PATH.parent.parent.parent / "deployment" / "deploy-foundry-env.ps1"
 )
 
 # ── Environment ────────────────────────────────────────────────
-load_dotenv(BASE_PATH / ".env")
+load_dotenv(BASE_PATH.parent / ".env")
 PORT = int(os.getenv("PORT", "3978"))
 DEPLOY_SCRIPT = Path(os.getenv("DEPLOY_SCRIPT_PATH", DEFAULT_DEPLOY_SCRIPT))
 WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() in ("true", "1", "yes")

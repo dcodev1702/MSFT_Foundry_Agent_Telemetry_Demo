@@ -1,7 +1,7 @@
-bot-app/python-teams-bot-sample/.env
-bot-app/python-teams-bot-sample/.venv/
-bot-app/python-teams-bot-sample/.queue/
-bot-app/python-teams-bot-sample/.state/
+bot-app/runtime/.env
+bot-app/runtime/.venv/
+bot-app/runtime/.queue/
+bot-app/runtime/.state/
 **/__pycache__/
 **/*.pyc
 **/*.pyo

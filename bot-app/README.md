@@ -13,7 +13,7 @@ This is the chat-first control plane for the Foundry environment described in [.
 | `Dockerfile` | Bot container image definition for Azure Container Apps |
 | `deployment/` | Bot infrastructure Bicep, deploy script, and Container Apps resources |
 | `docs/` | Implementation notes and bot automation design guidance |
-| `python-teams-bot-sample/` | Bot runtime, worker runtime, queue dispatch, storage, and proactive messaging code |
+| `runtime/` | Bot runtime, worker runtime, queue dispatch, storage, and proactive messaging code |
 | `teams-app/` | Teams app manifest and icons for sideloading |
 
 ---
@@ -77,9 +77,9 @@ What changed conceptually:
 
 Concrete examples in this repo:
 
-- Host setup and core imports: [python-teams-bot-sample/app.py](python-teams-bot-sample/app.py)
-- Decorator-based message registration on `AgentApplication`: [python-teams-bot-sample/bot.py](python-teams-bot-sample/bot.py)
-- Proactive continuation pattern with A365 imports: [python-teams-bot-sample/proactive.py](python-teams-bot-sample/proactive.py)
+- Host setup and core imports: [runtime/src/app.py](runtime/src/app.py)
+- Decorator-based message registration on `AgentApplication`: [runtime/src/bot.py](runtime/src/bot.py)
+- Proactive continuation pattern with A365 imports: [runtime/src/proactive.py](runtime/src/proactive.py)
 - Full SDK import reference: [docs/m365-agents-sdk-imports.md](docs/m365-agents-sdk-imports.md)
 - One-page quick reference: [docs/m365-agents-sdk-cheat-sheet.md](docs/m365-agents-sdk-cheat-sheet.md)
 
@@ -124,18 +124,20 @@ bot-app/
 ├── docs/
 │   ├── m365-agents-sdk-cheat-sheet.md
 │   └── m365-agents-sdk-imports.md
-├── python-teams-bot-sample/
-│   ├── app.py
-│   ├── bot.py
-│   ├── worker.py
-│   ├── worker_standalone.py
-│   ├── proactive.py
-│   ├── heartbeat.py
-│   ├── job_dispatcher.py
-│   ├── command_parser.py
-│   ├── conversation_store.py
-│   ├── storage_config.py
-│   ├── models.py
+├── runtime/
+│   ├── src/
+│   │   ├── app.py
+│   │   ├── bot.py
+│   │   ├── worker.py
+│   │   ├── worker_standalone.py
+│   │   ├── proactive.py
+│   │   ├── heartbeat.py
+│   │   ├── job_dispatcher.py
+│   │   ├── command_parser.py
+│   │   ├── conversation_store.py
+│   │   ├── storage_config.py
+│   │   └── models.py
+│   ├── tests/
 │   ├── requirements.txt
 │   └── README.md
 └── teams-app/
@@ -149,14 +151,15 @@ bot-app/
 ### Run the bot locally
 
 ```bash
-cd bot-app/python-teams-bot-sample
+cd bot-app/runtime
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cd src
 python3 app.py
 ```
 
-See [python-teams-bot-sample/README.md](python-teams-bot-sample/README.md) for the full local environment variable set and runtime details.
+See [runtime/README.md](runtime/README.md) for the full local environment variable set and runtime details.
 
 ### Test local bot flow with Agents Playground
 
@@ -169,8 +172,9 @@ npm install -g @microsoft/m365agentsplayground
 Then run the local bot server and connect the Playground to it:
 
 ```bash
-cd bot-app/python-teams-bot-sample
+cd bot-app/runtime
 source .venv/bin/activate
+cd src
 python3 app.py
 ```
 
@@ -182,7 +186,7 @@ agentsplayground
 
 How it works:
 
-- `python3 app.py` starts the local aiohttp-based agent server from [python-teams-bot-sample/app.py](python-teams-bot-sample/app.py).
+- `python3 app.py` starts the local aiohttp-based agent server from [runtime/src/app.py](runtime/src/app.py).
 - The server loads the same bot handlers used in Azure and waits for inbound activities on the local `/api/messages` endpoint.
 - `agentsplayground` acts as the local test client, sending activities to your running bot so you can exercise commands without redeploying the Container App.
 - This is for local bot-loop testing only; the ACI worker, Azure Storage, and Teams channel integration still depend on the configured Azure resources and environment variables.
@@ -208,7 +212,7 @@ If Teams keeps showing a stale custom app package after uninstalling it in the c
 
 | Document | Use it for |
 |---|---|
-| [python-teams-bot-sample/README.md](python-teams-bot-sample/README.md) | Bot runtime, worker runtime, local dev, and command behavior |
+| [runtime/README.md](runtime/README.md) | Bot runtime, worker runtime, local dev, and command behavior |
 | [deployment/README.md](deployment/README.md) | Bot Azure infrastructure, ACR build, Container App deployment, and RBAC |
 | [docs/m365-agents-sdk-imports.md](docs/m365-agents-sdk-imports.md) | Detailed explanation of the `microsoft_agents.*` imports used in this repo |
 | [docs/m365-agents-sdk-cheat-sheet.md](docs/m365-agents-sdk-cheat-sheet.md) | One-page quick reference for the bot's M365 Agents SDK surface |

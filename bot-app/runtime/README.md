@@ -86,19 +86,19 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 
 | File | Purpose |
 |------|---------|
-| `app.py` | aiohttp host, M365 Agents SDK adapter, JWT middleware |
-| `bot.py` | Teams message/event handlers, command routing |
-| `command_parser.py` | Regex command parser |
-| `conversation_store.py` | Azure Blob-backed conversation reference store |
-| `job_dispatcher.py` | Azure Queue Storage job dispatcher |
-| `models.py` | Command, job, and session models |
-| `weather_service.py` | Live weather lookup plus grounded LLM narration fallback |
-| `msft_docs_service.py` | Microsoft Learn MCP-backed docs lookup service |
-| `worker.py` | Background queue worker (used in ACI container) |
-| `worker_standalone.py` | Standalone entry point for the worker container |
-| `proactive.py` | Proactive messaging via stored conversation references |
-| `heartbeat.py` | Periodic heartbeat broadcast service |
-| `storage_config.py` | Shared Azure credential and client configuration |
+| `src/app.py` | aiohttp host, M365 Agents SDK adapter, JWT middleware |
+| `src/bot.py` | Teams message/event handlers, command routing |
+| `src/command_parser.py` | Regex command parser |
+| `src/conversation_store.py` | Azure Blob-backed conversation reference store |
+| `src/job_dispatcher.py` | Azure Queue Storage job dispatcher |
+| `src/models.py` | Command, job, and session models |
+| `src/weather_service.py` | Live weather lookup plus grounded LLM narration fallback |
+| `src/msft_docs_service.py` | Microsoft Learn MCP-backed docs lookup service |
+| `src/worker.py` | Background queue worker (used in ACI container) |
+| `src/worker_standalone.py` | Standalone entry point for the worker container |
+| `src/proactive.py` | Proactive messaging via stored conversation references |
+| `src/heartbeat.py` | Periodic heartbeat broadcast service |
+| `src/storage_config.py` | Shared Azure credential and client configuration |
 | `requirements.txt` | Python dependencies |
 
 The bot web app sends a proactive heartbeat to stored conversations every 15 minutes. This runs independently from the queue worker so heartbeat messages continue even when the bot container is configured with `WORKER_ENABLED=false` and Azure Container Instances handle job execution.
@@ -129,7 +129,7 @@ The bot web app sends a proactive heartbeat to stored conversations every 15 min
 ## Run Locally
 
 ```bash
-cd bot-app/python-teams-bot-sample
+cd bot-app/runtime
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -148,6 +148,7 @@ export WEATHER_LLM_AZURE_OPENAI_ENDPOINT="https://<bot-owned-stable-endpoint>.co
 export WEATHER_LLM_MODEL="gpt-5.3-chat"
 export WEATHER_LLM_API_VERSION="2024-10-21"
 
+cd src
 python app.py
 ```
 

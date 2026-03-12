@@ -186,7 +186,7 @@ If you are looking for the bot rollout or crash history, start with the system l
 | Document | Use it for |
 |---|---|
 | [../README.md](../README.md) | Bot workspace overview |
-| [../python-teams-bot-sample/README.md](../python-teams-bot-sample/README.md) | Runtime code and local dev |
+| [../runtime/README.md](../runtime/README.md) | Runtime code and local dev |
 | [../../deployment/README.md](../../deployment/README.md) | Foundry environment deployment and cleanup |
 
 ---
