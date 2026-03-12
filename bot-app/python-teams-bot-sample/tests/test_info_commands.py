@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SAMPLE_DIR = Path(__file__).resolve().parents[1]
@@ -297,8 +298,115 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("Weather for `New York, United States`", result)
 
+    async def test_weather_service_matches_international_region_and_country_after_fallback(self) -> None:
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            if "geocoding-api" in url:
+                name = params["name"]
+                if name == "Mainz, Rheinland-Pfalz, Germany":
+                    return {"generationtime_ms": 1.0}
+                if name == "Mainz":
+                    return {
+                        "results": [
+                            {
+                                "name": "Mainz",
+                                "admin1": "Rheinland-Pfalz",
+                                "country": "Germany",
+                                "country_code": "DE",
+                                "feature_code": "PPLA",
+                                "population": 217556,
+                                "latitude": 49.9842,
+                                "longitude": 8.2791,
+                            },
+                            {
+                                "name": "Mainz",
+                                "admin1": "Bavaria",
+                                "country": "Germany",
+                                "country_code": "DE",
+                                "feature_code": "PPL",
+                                "population": 2000,
+                                "latitude": 48.1351,
+                                "longitude": 11.5820,
+                            },
+                        ]
+                    }
+
+            return {
+                "current": {
+                    "temperature_2m": 14.0,
+                    "apparent_temperature": 13.0,
+                    "relative_humidity_2m": 65,
+                    "precipitation": 0.0,
+                    "weather_code": 1,
+                    "wind_speed_10m": 9.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        service = WeatherService(fetch_json=fake_fetch)
+
+        result = await service.get_weather_text("Mainz, Rheinland-Pfalz, Germany")
+
+        self.assertIn("Weather for `Mainz, Rheinland-Pfalz, Germany`", result)
+
+    async def test_weather_service_matches_country_code_after_fallback(self) -> None:
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            if "geocoding-api" in url:
+                name = params["name"]
+                if name == "Wiesbaden, DE":
+                    return {"generationtime_ms": 1.0}
+                if name == "Wiesbaden":
+                    return {
+                        "results": [
+                            {
+                                "name": "Wiesbaden",
+                                "admin1": "Hesse",
+                                "country": "Germany",
+                                "country_code": "DE",
+                                "feature_code": "PPLA",
+                                "population": 278342,
+                                "latitude": 50.0826,
+                                "longitude": 8.24,
+                            }
+                        ]
+                    }
+
+            return {
+                "current": {
+                    "temperature_2m": 12.0,
+                    "apparent_temperature": 11.0,
+                    "relative_humidity_2m": 70,
+                    "precipitation": 0.4,
+                    "weather_code": 61,
+                    "wind_speed_10m": 11.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        service = WeatherService(fetch_json=fake_fetch)
+
+        result = await service.get_weather_text("Wiesbaden, DE")
+
+        self.assertIn("Weather for `Wiesbaden, Hesse, Germany`", result)
+
     async def test_weather_service_requires_city(self) -> None:
-        service = WeatherService(fetch_json=lambda *_args, **_kwargs: None)
+        async def fake_fetch(_url: str, _params: dict[str, object]) -> dict[str, object]:
+            return {}
+
+        service = WeatherService(fetch_json=fake_fetch)
 
         result = await service.get_weather_text(None)
 

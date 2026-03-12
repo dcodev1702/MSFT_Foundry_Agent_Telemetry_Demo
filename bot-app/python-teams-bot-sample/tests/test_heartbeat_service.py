@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from os import environ
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -37,6 +38,29 @@ class HeartbeatServiceTests(unittest.IsolatedAsyncioTestCase):
         sent_text = proactive.broadcast.await_args_list[0].args[0]
         self.assertIn("Status: Online", sent_text)
         self.assertIn("Queue depth: 3", sent_text)
+
+    async def test_heartbeat_includes_llm_model_line(self) -> None:
+        proactive = SimpleNamespace(broadcast=AsyncMock(return_value=1))
+        store = MagicMock()
+        dispatcher = SimpleNamespace(queue_depth=lambda: 0)
+
+        heartbeat = HeartbeatService(
+            proactive=proactive,
+            store=store,
+            dispatcher=dispatcher,
+        )
+
+        previous_value = environ.get("WEATHER_LLM_MODEL")
+        environ["WEATHER_LLM_MODEL"] = "gpt-5.3-chat"
+        try:
+            text = heartbeat.get_heartbeat_text()
+        finally:
+            if previous_value is None:
+                environ.pop("WEATHER_LLM_MODEL", None)
+            else:
+                environ["WEATHER_LLM_MODEL"] = previous_value
+
+        self.assertIn("🤖 LLM: gpt-5.3-chat", text)
 
 
 class BackgroundServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):

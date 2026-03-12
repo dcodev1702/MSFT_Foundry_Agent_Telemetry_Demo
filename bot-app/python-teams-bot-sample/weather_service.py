@@ -99,6 +99,21 @@ US_STATE_ABBREVIATIONS = {
     "DC": "District of Columbia",
 }
 
+COUNTRY_ALIASES = {
+    "DE": "GERMANY",
+    "DEU": "GERMANY",
+    "DEUTSCHLAND": "GERMANY",
+    "GERMANY": "GERMANY",
+    "UK": "UNITEDKINGDOM",
+    "GB": "UNITEDKINGDOM",
+    "GBR": "UNITEDKINGDOM",
+    "UNITEDKINGDOM": "UNITEDKINGDOM",
+    "US": "UNITEDSTATES",
+    "USA": "UNITEDSTATES",
+    "UNITEDSTATES": "UNITEDSTATES",
+    "UNITEDSTATESOFAMERICA": "UNITEDSTATES",
+}
+
 
 @dataclass(slots=True)
 class WeatherSnapshot:
@@ -335,7 +350,7 @@ class WeatherService:
         if results:
             return results[0]
 
-        city_part, region_part = self._split_city_region(city_name)
+        city_part, location_hints = self._split_location_hints(city_name)
         if not city_part:
             return None
 
@@ -343,19 +358,15 @@ class WeatherService:
         if not fallback_results:
             return None
 
-        if not region_part:
+        if not location_hints:
             return fallback_results[0]
 
-        normalized_region = self._normalize_region(region_part)
-        for result in fallback_results:
-            admin1 = self._normalize_region(str(result.get("admin1") or ""))
-            country_code = str(result.get("country_code") or "").upper()
-            if admin1 == normalized_region:
-                return result
-            if country_code == normalized_region:
-                return result
-
-        return fallback_results[0]
+        ranked_results = sorted(
+            fallback_results,
+            key=lambda result: self._score_place_match(result, location_hints),
+            reverse=True,
+        )
+        return ranked_results[0]
 
     async def _geocode(self, query: str, *, count: int) -> list[dict[str, Any]]:
         geocoding_payload = await self._fetch_json(
@@ -373,21 +384,41 @@ class WeatherService:
         ]
 
     @staticmethod
-    def _split_city_region(city_name: str) -> tuple[str, str | None]:
-        if "," not in city_name:
-            return city_name.strip(), None
-
-        city_part, region_part = city_name.split(",", 1)
-        return city_part.strip(), region_part.strip() or None
+    def _split_location_hints(city_name: str) -> tuple[str, list[str]]:
+        parts = [part.strip() for part in city_name.split(",") if part.strip()]
+        if not parts:
+            return "", []
+        return parts[0], parts[1:]
 
     @staticmethod
-    def _normalize_region(value: str) -> str:
+    def _normalize_location_token(value: str) -> str:
         cleaned = re.sub(r"[^A-Za-z]", "", value).upper()
         if not cleaned:
             return ""
         if cleaned in US_STATE_ABBREVIATIONS:
             return re.sub(r"[^A-Za-z]", "", US_STATE_ABBREVIATIONS[cleaned]).upper()
+        if cleaned in COUNTRY_ALIASES:
+            return COUNTRY_ALIASES[cleaned]
         return cleaned
+
+    @classmethod
+    def _score_place_match(cls, place: dict[str, Any], location_hints: list[str]) -> tuple[int, int, int]:
+        normalized_hints = [cls._normalize_location_token(hint) for hint in location_hints if hint.strip()]
+        normalized_fields = {
+            cls._normalize_location_token(str(place.get("name") or "")),
+            cls._normalize_location_token(str(place.get("admin1") or "")),
+            cls._normalize_location_token(str(place.get("admin2") or "")),
+            cls._normalize_location_token(str(place.get("admin3") or "")),
+            cls._normalize_location_token(str(place.get("admin4") or "")),
+            cls._normalize_location_token(str(place.get("country") or "")),
+            cls._normalize_location_token(str(place.get("country_code") or "")),
+        }
+
+        matches = sum(1 for hint in normalized_hints if hint and hint in normalized_fields)
+        feature_code = str(place.get("feature_code") or "")
+        feature_bonus = 1 if feature_code.startswith("PPL") or feature_code == "ADM1" else 0
+        population = int(place.get("population") or 0)
+        return matches, feature_bonus, population
 
     @staticmethod
     def _format_place(place: dict[str, Any]) -> str:

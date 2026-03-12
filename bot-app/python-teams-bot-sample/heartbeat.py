@@ -26,6 +26,7 @@ class HeartbeatService:
     """Broadcasts live bot health metrics every 15 minutes."""
 
     INTERVAL = 900  # 15 minutes in seconds
+    DEFAULT_LLM_MODEL = "gpt-5.3-chat"
 
     def __init__(
         self,
@@ -79,10 +80,12 @@ class HeartbeatService:
         process = psutil.Process(os.getpid())
         mem_info = process.memory_info()
         mem_mb = mem_info.rss / (1024 * 1024)
+        llm_model = (os.getenv("WEATHER_LLM_MODEL", self.DEFAULT_LLM_MODEL).strip() or self.DEFAULT_LLM_MODEL)
 
         lines = [
             "🟢 Status: Online ✅",
             "📜 Script: Bot-the-Builder (M365 Agents SDK)",
+            f"🤖 LLM: {llm_model}",
             f"🆔 PID: {os.getpid()}",
             f"🐍 Python: {sys.version.split()[0]}",
             f"⏱️ Uptime: {uptime_str}",
