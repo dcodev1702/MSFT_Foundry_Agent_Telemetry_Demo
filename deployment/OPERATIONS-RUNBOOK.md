@@ -2,6 +2,8 @@
 
 This runbook captures the shortest path for build, deploy, rollback, verification, and smoke checking across the bot and worker runtimes.
 
+For Foundry environment operations, prefer Teams-triggered or queue-driven builds over direct local `pwsh ./deploy-foundry-env.ps1` runs. Those operational flows use the Azure-hosted managed identity; local runs use your desktop identity and can fail after PIM changes until both Azure CLI and Az PowerShell tokens are refreshed.
+
 ## Bot
 
 Build and deploy the latest bot image locally:

@@ -202,6 +202,9 @@ Recommended admin-consent baseline for `Microsoft Graph Command Line Tools`:
 
 Helpful notes:
 
+- Treat the local `pwsh ./deploy-foundry-env.ps1` path and the bot or worker managed identity path as two different operator modes. When you run the script from your Mac or Windows workstation, Azure CLI and Az PowerShell evaluate your desktop identity, not the Azure managed identity attached to the live worker. That means local runs are sensitive to stale PIM state, stale `az login` tokens, and mismatched Az PowerShell context even when the Azure-hosted automation is healthy.
+- Prefer Teams-triggered or queue-driven builds for normal operations. Those flows run under the Azure-hosted managed identity and are the most reliable path for production-like build and teardown work.
+- Reserve direct local deployment for development, debugging, or break-glass administration. After PIM elevation or any RBAC change, refresh both auth stacks before rerunning the script: reconnect Azure CLI, reconnect Az PowerShell, and then retry the deployment so the local session picks up the new role assignments.
 - The scripts default to `Connect-MgGraph -ContextScope CurrentUser` on every platform so auth state can be reused consistently. If a macOS/Linux shell cannot write the Graph auth cache, either fix the cache directory permissions or override the session with `FOUNDRY_GRAPH_CONTEXT_SCOPE=Process`.
 - Admin consent is persistent, but the signed-in Graph token is not. After PIM elevation, new consent, or any role/scope change, reconnect with `Connect-MgGraph` and restart the listener so it picks up a fresh token.
 - If the chat scopes are missing, or the token was issued before the latest consent/PIM state, Teams commands can appear to arrive but the listener can fail to respond. The most common symptom is `403 Forbidden` / `InsufficientPrivileges` from `New-MgChatMessage`, followed by a missing heartbeat/build-status/build reply in the chat.
