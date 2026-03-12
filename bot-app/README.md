@@ -1,4 +1,4 @@
-# 🤖 Bot the Builder — Teams Bot Workspace
+# 🤖 Bot-The-Builder — Teams Bot Workspace
 
 The `bot-app/` workspace contains the Teams-facing automation layer for this repo: a Microsoft Teams bot built on the M365 Agents SDK, the bot-specific Azure deployment assets, the Teams app manifest, and the Python worker/runtime that brokers Foundry build and teardown operations.
 
