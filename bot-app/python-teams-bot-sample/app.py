@@ -39,6 +39,7 @@ from proactive import ProactiveMessenger
 from storage_config import get_blob_service_client, get_queue_client, BLOB_CONTAINER_NAME
 from worker import BackgroundWorker
 from heartbeat import HeartbeatService
+from public_routes import is_anonymous_route
 from service_lifecycle import start_background_services, stop_background_services
 
 # ── Logging ────────────────────────────────────────────────────
@@ -165,6 +166,14 @@ async def download_build_info(request: web.Request) -> web.Response:
         return web.Response(status=404, text="File not found")
 
 
+@web.middleware
+async def selective_jwt_authorization_middleware(request: web.Request, handler):
+    if is_anonymous_route(request.method, request.path):
+        return await handler(request)
+
+    return await jwt_authorization_middleware(request, handler)
+
+
 # ── Lifecycle Hooks ────────────────────────────────────────────
 async def on_startup(app: web.Application) -> None:
     await start_background_services(
@@ -189,7 +198,7 @@ async def on_shutdown(app: web.Application) -> None:
 
 # ── Application Factory ───────────────────────────────────────
 def create_app(argv=None) -> web.Application:
-    app = web.Application(middlewares=[jwt_authorization_middleware])
+    app = web.Application(middlewares=[selective_jwt_authorization_middleware])
 
     # Store SDK objects on the app for middleware access
     app["adapter"] = adapter
