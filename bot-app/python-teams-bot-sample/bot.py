@@ -145,10 +145,9 @@ def _get_help_text() -> str:
 
 
 def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
-    app_id = os.getenv(
+    bot_client_id = os.getenv(
         "CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID", "<bot-app-id>"
     )
-    app_name = os.getenv("BOT_APP_REGISTRATION_NAME", "unknown-app-registration")
     managed_identity_name = os.getenv(
         "AZURE_MANAGED_IDENTITY_NAME", "unknown-managed-identity"
     )
@@ -158,8 +157,8 @@ def _get_listener_status_text(dispatcher: AzureQueueJobDispatcher) -> str:
         "⚙️ Worker status: Running",
         f"📦 Queue depth: {dispatcher.queue_depth()}",
         "🤖 Bot Identity:",
-        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name: {app_name}",
-        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {app_id}",
+        "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Mode: UserAssignedMSI",
+        f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {bot_client_id}",
         "🔑 Azure User Managed Identity:",
         f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Name: {managed_identity_name}",
         f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Client ID: {managed_identity_client_id}",

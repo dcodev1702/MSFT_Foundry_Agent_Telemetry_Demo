@@ -332,7 +332,7 @@ The `bot-app/` directory contains a separate deployment for **Bot the Builder**,
 ### Architecture
 
 ```
-Teams ──► Azure Bot Service (F0, SingleTenant)
+Teams ──► Azure Bot Service (F0, UserAssignedMSI)
               │
               ▼
      Azure Container App (zolab-bot-ca-botprd)

@@ -131,9 +131,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Set environment variables
+export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__AUTHTYPE="UserManagedIdentity"
 export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID="<bot-app-id>"
 export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID="<tenant-id>"
-export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET="<bot-secret>"
+export TEAMS_APP_ID="<teams-app-manifest-id>"
 export AZURE_STORAGE_ACCOUNT="zolabworkerstbotprd"
 export AZURE_QUEUE_NAME="botjobs"
 export AZURE_BLOB_CONTAINER="botstate"

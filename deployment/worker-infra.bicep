@@ -69,7 +69,7 @@ module workerResources 'modules/worker-resources.bicep' = {
   params: {
     location: location
     suffix: suffix
-    botAppId: botClientId
+    botClientId: botClientId
     tenantId: tenantId
     managedIdentityResourceId: managedIdentityResourceId
     managedIdentityPrincipalId: managedIdentityPrincipalId

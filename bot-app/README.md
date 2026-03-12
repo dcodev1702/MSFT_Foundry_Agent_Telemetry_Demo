@@ -24,7 +24,7 @@ This is the chat-first control plane for the Foundry environment described in [.
 Teams
   |
   v
-Azure Bot Service (SingleTenant, F0)
+Azure Bot Service (UserAssignedMSI, F0)
   |
   v
 Azure Container App (bot web server)
@@ -123,8 +123,7 @@ bot-app/
 │       └── bot-resources.bicep
 ├── docs/
 │   ├── m365-agents-sdk-cheat-sheet.md
-│   ├── m365-agents-sdk-imports.md
-│   └── teams-bot-automation-implementation-guide.md
+│   └── m365-agents-sdk-imports.md
 ├── python-teams-bot-sample/
 │   ├── app.py
 │   ├── bot.py
@@ -213,7 +212,6 @@ If Teams keeps showing a stale custom app package after uninstalling it in the c
 | [deployment/README.md](deployment/README.md) | Bot Azure infrastructure, ACR build, Container App deployment, and RBAC |
 | [docs/m365-agents-sdk-imports.md](docs/m365-agents-sdk-imports.md) | Detailed explanation of the `microsoft_agents.*` imports used in this repo |
 | [docs/m365-agents-sdk-cheat-sheet.md](docs/m365-agents-sdk-cheat-sheet.md) | One-page quick reference for the bot's M365 Agents SDK surface |
-| [docs/teams-bot-automation-implementation-guide.md](docs/teams-bot-automation-implementation-guide.md) | Design-level implementation guidance and expected behavior |
 | [../deployment/README.md](../deployment/README.md) | Foundry environment deployment and cleanup automation |
 
 ---

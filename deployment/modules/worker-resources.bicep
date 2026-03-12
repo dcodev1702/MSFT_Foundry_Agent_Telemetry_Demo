@@ -13,8 +13,8 @@ param location string
 @description('6-char alphanumeric suffix')
 param suffix string
 
-@description('Bot App Registration Client ID (for proactive messaging)')
-param botAppId string
+@description('Bot client ID used for proactive messaging')
+param botClientId string
 
 @description('Entra Tenant ID')
 param tenantId string
@@ -183,7 +183,7 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
               }
               {
                 name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
-                value: botAppId
+                value: botClientId
               }
               {
                 name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
