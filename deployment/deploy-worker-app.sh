@@ -48,13 +48,9 @@ if [[ -n "${BOT_SECRET:-}" ]]; then
   BOT_SECRET_OVERRIDE_PRESENT=1
 fi
 
-BOT_SECRET="$(resolve_bot_secret)"
-BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
 WORKER_IMAGE_TAG="workerfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 WORKER_BUILD_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 WORKER_BUILD_COMMIT=$(git rev-parse HEAD)
-
-echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Worker Container Deployment                                ║"
@@ -86,6 +82,10 @@ echo ""
 echo "┌──────────────────────────────────────────────────────────────┐"
 echo "│ Step 2/3: Deploying worker infrastructure (Bicep)          │"
 echo "└──────────────────────────────────────────────────────────────┘"
+
+BOT_SECRET="$(resolve_bot_secret)"
+BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
+echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
 
 az deployment sub create \
   --location "${LOCATION}" \

@@ -67,13 +67,10 @@ if [[ -n "${BOT_SECRET:-}" ]]; then
   BOT_SECRET_OVERRIDE_PRESENT=1
 fi
 
-BOT_SECRET="$(resolve_bot_secret)"
-BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 BOT_APP_REGISTRATION_NAME="Bot-The-Builder"
 OPERATOR_GROUP_OBJECT_ID="$(az ad group list --filter "displayName eq '${BOT_OPERATOR_GROUP_DISPLAY_NAME}'" --query '[0].id' -o tsv 2>/dev/null || true)"
 
-echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
 if [[ -n "${OPERATOR_GROUP_OBJECT_ID}" ]]; then
   echo "  ✓ Shared operator group ${BOT_OPERATOR_GROUP_DISPLAY_NAME}: ${OPERATOR_GROUP_OBJECT_ID}"
 else
@@ -126,6 +123,10 @@ echo ""
 echo "┌──────────────────────────────────────────────────────────────┐"
 echo "│ Step 2/4: Deploying Container App infrastructure (Bicep)    │"
 echo "└──────────────────────────────────────────────────────────────┘"
+
+BOT_SECRET="$(resolve_bot_secret)"
+BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
+echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
 
 az deployment sub create \
   --location "${LOCATION}" \
