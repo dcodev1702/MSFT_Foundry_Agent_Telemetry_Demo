@@ -7,13 +7,13 @@
 //   - User-Assigned Managed Identity (with Graph permissions)
 //   - Container Apps Environment (logs → DIBSecCom LAW in Security sub)
 //   - Container App (bot web server, pulls from ACR via UAMI)
-//   - Azure Bot Service (F0, SingleTenant) + Teams Channel
+//   - Azure Bot Service (F0, UserAssignedMSI) + Teams Channel
 //
 // Usage:
 //   az deployment sub create \
 //     --location eastus2 \
 //     --template-file bot-infra.bicep \
-//     --parameters suffix=botprd botAppId=<guid> tenantId=<guid>
+//     --parameters suffix=botprd tenantId=<guid>
 //
 // NOTE: Uses Azure Container Apps (Microsoft.App) instead of
 //       App Service due to Microsoft.Web quota restrictions.
@@ -28,18 +28,11 @@ param location string = 'eastus2'
 @description('6-char alphanumeric suffix for resource naming')
 param suffix string
 
-@description('Bot App Registration Client ID (from Entra ID)')
-param botAppId string
-
 @description('Entra Tenant ID')
 param tenantId string
 
 @description('Resource group name for bot infrastructure')
 param botResourceGroupName string = 'zolab-bot-${suffix}'
-
-@secure()
-@description('Bot App Registration Client Secret')
-param botAppSecret string = ''
 
 @description('DIBSecCom Log Analytics Workspace customer ID (Security sub)')
 param logAnalyticsCustomerId string
@@ -47,15 +40,6 @@ param logAnalyticsCustomerId string
 @secure()
 @description('DIBSecCom Log Analytics Workspace shared key (Security sub)')
 param logAnalyticsSharedKey string
-
-@description('DIBSecCom Log Analytics Workspace resource ID (Security sub)')
-param logAnalyticsWorkspaceResourceId string
-
-@description('Object ID of the shared operator group to grant Key Vault secret access')
-param operatorGroupPrincipalId string = ''
-
-@description('Bot app registration display name')
-param botAppRegistrationName string = 'unknown-app-registration'
 
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
@@ -75,14 +59,9 @@ module botResources 'modules/bot-resources.bicep' = {
   params: {
     location: location
     suffix: suffix
-    botAppId: botAppId
     tenantId: tenantId
-    botAppSecret: botAppSecret
     logAnalyticsCustomerId: logAnalyticsCustomerId
     logAnalyticsSharedKey: logAnalyticsSharedKey
-    logAnalyticsWorkspaceResourceId: logAnalyticsWorkspaceResourceId
-    operatorGroupPrincipalId: operatorGroupPrincipalId
-    botAppRegistrationName: botAppRegistrationName
     botImageTag: botImageTag
   }
 }
@@ -98,7 +77,5 @@ output managedIdentityClientId string = botResources.outputs.managedIdentityClie
 output managedIdentityResourceId string = botResources.outputs.managedIdentityResourceId
 output acrLoginServer string = botResources.outputs.acrLoginServer
 output acrName string = botResources.outputs.acrName
-output keyVaultName string = botResources.outputs.keyVaultName
-output keyVaultSecretUri string = botResources.outputs.keyVaultSecretUri
 output botServiceName string = botResources.outputs.botServiceName
 output messagingEndpoint string = botResources.outputs.messagingEndpoint

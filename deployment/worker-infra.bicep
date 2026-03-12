@@ -11,8 +11,7 @@
 //   az deployment sub create \
 //     --location eastus2 \
 //     --template-file worker-infra.bicep \
-//     --parameters worker-infra.bicepparam \
-//     --parameters botAppSecret='<secret>'
+//     --parameters worker-infra.bicepparam
 //
 // NOTE: This is INDEPENDENT of the Bot App Service deployment.
 //       The worker handles PowerShell/Bicep execution only.
@@ -28,15 +27,11 @@ param location string = 'eastus2'
 @description('6-char alphanumeric suffix for resource naming')
 param suffix string
 
-@description('Bot App Registration Client ID (for proactive messaging)')
-param botAppId string
+@description('Bot client ID used for proactive messaging (UAMI client ID after MI cutover)')
+param botClientId string
 
 @description('Entra Tenant ID')
 param tenantId string
-
-@secure()
-@description('Bot App Registration Client Secret (for proactive messaging)')
-param botAppSecret string = ''
 
 @description('Resource group name for worker infrastructure')
 param workerResourceGroupName string = 'zolab-worker-${suffix}'
@@ -74,9 +69,8 @@ module workerResources 'modules/worker-resources.bicep' = {
   params: {
     location: location
     suffix: suffix
-    botAppId: botAppId
+    botAppId: botClientId
     tenantId: tenantId
-    botAppSecret: botAppSecret
     managedIdentityResourceId: managedIdentityResourceId
     managedIdentityPrincipalId: managedIdentityPrincipalId
     managedIdentityClientId: managedIdentityClientId

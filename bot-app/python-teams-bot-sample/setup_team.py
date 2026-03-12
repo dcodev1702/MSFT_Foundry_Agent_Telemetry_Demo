@@ -5,7 +5,7 @@
 #
 # Usage:
 #   python setup_team.py
-#   python setup_team.py --bot-app-id <app-registration-client-id>
+#   python setup_team.py --bot-app-id <teams-app-manifest-id>
 #
 # Prerequisites:
 #   - Azure CLI authenticated (az login) OR Managed Identity
@@ -60,8 +60,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--bot-app-id",
-        default=os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID"),
-        help="Bot app registration client ID (to install in the Team)",
+        default=os.getenv("TEAMS_APP_ID") or os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID"),
+        help="Teams app manifest ID (to install in the Team)",
     )
     args = parser.parse_args()
 

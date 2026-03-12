@@ -14,21 +14,20 @@
 # Prerequisites:
 #   - az login (authenticated)
 #   - local Docker daemon available
-#   - Key Vault secret bot-app-client-secret exists in zolabbotkv<suffix>
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/../../deployment/bot-secret-common.sh"
 
 # ── Configuration ────────────────────────────────────────────────
 SUFFIX="botprd"
-BOT_APP_ID="ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef"
+TEAMS_APP_ID="${TEAMS_APP_ID:-ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef}"
 TENANT_ID="b22dee98-83da-4207-b9ab-5ba931866f44"
 LOCATION="eastus2"
 
 RG_BOT="zolab-bot-${SUFFIX}"
 CONTAINER_APP_NAME="zolab-bot-ca-${SUFFIX}"
+BOT_SERVICE_NAME="zolab-bot-${SUFFIX}"
 BOT_ACR_NAME="zolabbotacr${SUFFIX}"
 
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
@@ -41,15 +40,15 @@ SECURITY_SUB="192ad012-896e-4f14-8525-c37a2a9640f9"
 LAW_RG="Sentinel"
 LAW_NAME="DIBSecCom"
 
-BOT_SECRET_SUFFIX="${SUFFIX}"
-BOT_SECRET_NAME="${BOT_SECRET_NAME:-bot-app-client-secret}"
-BOT_KEY_VAULT_NAME="${BOT_SECRET_KEYVAULT_NAME:-zolabbotkv${SUFFIX}}"
-BOT_OPERATOR_GROUP_DISPLAY_NAME="${BOT_OPERATOR_GROUP_DISPLAY_NAME:-zolab-ai-dev}"
 LAW_WORKSPACE_RESOURCE_ID="/subscriptions/${SECURITY_SUB}/resourceGroups/${LAW_RG}/providers/Microsoft.OperationalInsights/workspaces/${LAW_NAME}"
 
 # ── Resolve repo root ───────────────────────────────────────────
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
+TEAMS_APP_DIR="${REPO_ROOT}/bot-app/teams-app"
+TEAMS_MANIFEST_TEMPLATE="${TEAMS_APP_DIR}/manifest.template.json"
+TEAMS_MANIFEST_PATH="${TEAMS_APP_DIR}/manifest.json"
+TEAMS_ZIP_PATH="${TEAMS_APP_DIR}/Bot-The-Builder.zip"
 
 # ── Validate prerequisites ──────────────────────────────────────
 if ! az account show &>/dev/null; then
@@ -62,31 +61,7 @@ if ! docker version &>/dev/null; then
   exit 1
 fi
 
-BOT_SECRET_OVERRIDE_PRESENT=0
-if [[ -n "${BOT_SECRET:-}" ]]; then
-  BOT_SECRET_OVERRIDE_PRESENT=1
-fi
-
-BOT_SECRET="${BOT_SECRET:-}"
-BOT_SECRET_RESOLUTION="managed identity"
-
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
-BOT_APP_REGISTRATION_NAME="Bot-The-Builder"
-OPERATOR_GROUP_OBJECT_ID="$(az ad group list --filter "displayName eq '${BOT_OPERATOR_GROUP_DISPLAY_NAME}'" --query '[0].id' -o tsv 2>/dev/null || true)"
-
-if [[ -n "${OPERATOR_GROUP_OBJECT_ID}" ]]; then
-  echo "  ✓ Shared operator group ${BOT_OPERATOR_GROUP_DISPLAY_NAME}: ${OPERATOR_GROUP_OBJECT_ID}"
-else
-  echo "ERROR: Shared operator group ${BOT_OPERATOR_GROUP_DISPLAY_NAME} was not found in Entra ID." >&2
-  echo "Set BOT_OPERATOR_GROUP_DISPLAY_NAME to the correct group and retry so new deployments preserve shared Key Vault access." >&2
-  exit 1
-fi
-
-CURRENT_BOT_APP_REGISTRATION_NAME=$(az ad app show --id "${BOT_APP_ID}" --query displayName -o tsv)
-if [[ "${CURRENT_BOT_APP_REGISTRATION_NAME}" != "${BOT_APP_REGISTRATION_NAME}" ]]; then
-  az ad app update --id "${BOT_APP_ID}" --display-name "${BOT_APP_REGISTRATION_NAME}" --output none
-  echo "  ✓ Updated bot app registration display name to ${BOT_APP_REGISTRATION_NAME}"
-fi
 
 # Fetch DIBSecCom LAW credentials (cross-subscription)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
@@ -127,26 +102,16 @@ echo "┌───────────────────────�
 echo "│ Step 2/4: Deploying Container App infrastructure (Bicep)    │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
-if [[ -n "${BOT_SECRET}" ]]; then
-  BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
-  echo "  ✓ Using bot app secret from ${BOT_SECRET_RESOLUTION}"
-else
-  echo "  ✓ No bot app secret provided; bot will use the existing Key Vault secret at runtime"
-fi
+echo "  ✓ Managed identity only cutover: no app registration or Key Vault secret will be used"
 
 az deployment sub create \
   --location "${LOCATION}" \
   --template-file bot-app/deployment/bot-infra.bicep \
   --parameters \
     suffix="${SUFFIX}" \
-    botAppId="${BOT_APP_ID}" \
     tenantId="${TENANT_ID}" \
-    botAppSecret="${BOT_SECRET}" \
     logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
     logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
-    logAnalyticsWorkspaceResourceId="${LAW_WORKSPACE_RESOURCE_ID}" \
-    operatorGroupPrincipalId="${OPERATOR_GROUP_OBJECT_ID}" \
-    botAppRegistrationName="${BOT_APP_REGISTRATION_NAME}" \
     botImageTag="${BOT_IMAGE_TAG}" \
   --output none
 
@@ -190,18 +155,46 @@ CA_FQDN=$(az containerapp show \
   --query "properties.configuration.ingress.fqdn" \
   -o tsv)
 
-KEY_VAULT_SECRET_ID=$(az keyvault secret show \
-  --vault-name "${BOT_KEY_VAULT_NAME}" \
-  --name "${BOT_SECRET_NAME}" \
-  --query id \
-  -o tsv 2>/dev/null || true)
+BOT_CLIENT_ID=$(az bot show \
+  --name "${BOT_SERVICE_NAME}" \
+  --resource-group "${RG_BOT}" \
+  --query "properties.msaAppId" \
+  -o tsv)
 
-if [[ -z "${KEY_VAULT_SECRET_ID}" ]]; then
-  KEY_VAULT_SECRET_ID="https://${BOT_KEY_VAULT_NAME}.vault.azure.net/secrets/${BOT_SECRET_NAME}"
+if [[ ! -f "${TEAMS_MANIFEST_TEMPLATE}" ]]; then
+  echo "ERROR: Teams manifest template not found at ${TEAMS_MANIFEST_TEMPLATE}" >&2
+  exit 1
 fi
 
+TEAMS_APP_ID="${TEAMS_APP_ID}" BOT_CLIENT_ID="${BOT_CLIENT_ID}" CA_FQDN="${CA_FQDN}" \
+TEAMS_MANIFEST_TEMPLATE="${TEAMS_MANIFEST_TEMPLATE}" TEAMS_MANIFEST_PATH="${TEAMS_MANIFEST_PATH}" \
+python3 - <<'PY'
+from pathlib import Path
+import os
+
+template = Path(os.environ["TEAMS_MANIFEST_TEMPLATE"]).read_text(encoding="utf-8")
+rendered = template.replace("__TEAMS_APP_ID__", os.environ["TEAMS_APP_ID"])
+rendered = rendered.replace("__BOT_CLIENT_ID__", os.environ["BOT_CLIENT_ID"])
+rendered = rendered.replace("__BOT_DOMAIN__", os.environ["CA_FQDN"])
+Path(os.environ["TEAMS_MANIFEST_PATH"]).write_text(rendered, encoding="utf-8")
+PY
+
 echo "  ✓ Container App FQDN: ${CA_FQDN}"
-echo "  ✓ Bot Key Vault secret: ${KEY_VAULT_SECRET_ID}"
+echo "  ✓ Bot client ID: ${BOT_CLIENT_ID}"
+echo "  ✓ Teams manifest updated: ${TEAMS_MANIFEST_PATH}"
+
+if [[ ! -f "${TEAMS_APP_DIR}/color.png" || ! -f "${TEAMS_APP_DIR}/outline.png" ]]; then
+  echo "ERROR: Teams app icons not found in ${TEAMS_APP_DIR}" >&2
+  exit 1
+fi
+
+rm -f "${TEAMS_ZIP_PATH}"
+(
+  cd "${TEAMS_APP_DIR}"
+  zip -q -r "${TEAMS_ZIP_PATH}" manifest.json color.png outline.png
+)
+
+echo "  ✓ Teams package updated in place: ${TEAMS_ZIP_PATH}"
 echo ""
 
 # ── Done ─────────────────────────────────────────────────────────
@@ -210,16 +203,19 @@ echo "║  Deployment complete!                                       ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║                                                             ║"
 echo "║  Bot Image Tag: ${BOT_IMAGE_TAG}"
-echo "║  Bot Key Vault: ${BOT_KEY_VAULT_NAME}"
+echo "║  Bot Client ID: ${BOT_CLIENT_ID}"
+echo "║  Teams App ID: ${TEAMS_APP_ID}"
 echo "║  Container App: https://${CA_FQDN}                          "
 echo "║  Bot Endpoint:  https://${CA_FQDN}/api/messages              "
+echo "║  Teams Zip:     ${TEAMS_ZIP_PATH}"
 echo "║                                                             ║"
 echo "║  Useful commands:                                           ║"
 echo "║    az containerapp logs show -n ${CONTAINER_APP_NAME} -g ${RG_BOT}"
 echo "║    az containerapp revision list -n ${CONTAINER_APP_NAME} -g ${RG_BOT} -o table"
 echo "║                                                             ║"
 echo "║  Next steps:                                                ║"
-echo "║    1. Open Teams → Bot the Builder → send 'health'         ║"
-echo "║    2. Test 'list builds' and 'build it' commands            ║"
+echo "║    1. Re-upload the updated Teams app package                ║"
+echo "║    2. Reinstall it in Teams if the bot identity changed      ║"
+echo "║    3. Test 'health' and 'list builds' in Teams              ║"
 echo "║                                                             ║"
 echo "╚══════════════════════════════════════════════════════════════╝"

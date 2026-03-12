@@ -1,3 +1,8 @@
+# Historical note
+
+This document describes the earlier app-registration and Key Vault-based automation design.
+The live bot and worker deployment in this repo now use user-assigned managed identity end to end, and the current operational source of truth is `deployment/OPERATIONS-RUNBOOK.md` plus the deployment scripts under `bot-app/deployment/` and `deployment/`.
+
 # Teams Bot + Automation App Implementation Guide
 
 ## Purpose

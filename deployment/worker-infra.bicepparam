@@ -4,16 +4,13 @@
 // Usage:
 //   az deployment sub create \
 //     --location eastus2 \
-//     --parameters worker-infra.bicepparam \
-//     --parameters botAppSecret='<secret>'
-//
-// NOTE: botAppSecret is optional; leave it unset to use managed identity.
+//     --parameters worker-infra.bicepparam
 // ════════════════════════════════════════════════════════════════
 using './worker-infra.bicep'
 
 // ── Required (override at deploy time) ────────────────────────
 param suffix   = 'botprd'
-param botAppId = 'ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef'
+param botClientId = '59bffc04-c429-4580-9833-8ce88c088877'
 param tenantId = 'b22dee98-83da-4207-b9ab-5ba931866f44'
 
 // ── Existing UAMI (created in zolab-bot-botprd RG) ──────────

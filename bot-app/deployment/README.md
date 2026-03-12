@@ -12,7 +12,7 @@ This deployment is separate from the root Foundry environment deployment in [../
 |---|---|
 | Azure CLI | Installed and authenticated with access to the `zolab` subscription |
 | Docker | Local Docker daemon available for clean local image builds and pushes |
-| Bot secret source | Required at runtime: Key Vault secret `bot-app-client-secret` in `zolabbotkv<suffix>` |
+| Bot identity | User-assigned managed identity is the only supported bot auth model |
 | Security subscription access | Needed to read the DIBSecCom Log Analytics workspace keys in `Sentinel` |
 | ACR push permissions | Required to log in and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
@@ -31,7 +31,6 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | `zolab-bot-<suffix>` | Resource Group | Dedicated resource group for the bot surface |
 | `zolabbotacr<suffix>` | Azure Container Registry | Stores the bot image |
 | `zolab-bot-mi-<suffix>` | User-Assigned Managed Identity | Used for ACR pulls and bot-side Azure access |
-| `zolabbotkv<suffix>` | Azure Key Vault | Stores the bot app secret for bot and worker deployments |
 | `zolab-bot-env-<suffix>` | Container Apps Environment | Hosts the Container App and ships logs to DIBSecCom LAW |
 | `zolab-bot-ca-<suffix>` | Azure Container App | Hosts the aiohttp/M365 Agents SDK bot runtime |
 | `zolab-bot-<suffix>` | Azure Bot Service | Teams-facing bot registration |
@@ -42,10 +41,8 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | Capability | Implementation |
 |---|---|
 | Log destination | Cross-subscription DIBSecCom Log Analytics workspace |
-| Key Vault auditing | Diagnostic settings on the bot Key Vault stream to DIBSecCom LAW |
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
-| Bot Azure access | UAMI attached to the Container App and granted `Key Vault Secrets User` on the bot Key Vault |
-| Shared operator access | The static `zolab-ai-dev` group is granted `Key Vault Secrets User`; the Foundry build lifecycle adds and removes requesting users from that group as builds start and finish |
+| Bot Azure access | UAMI attached to the Container App and used by Azure Bot Service as `UserAssignedMSI` |
 | Worker storage access | Additional RBAC assigned by `deploy-bot-app.sh` |
 
 ---
@@ -66,8 +63,9 @@ bot-app/deployment/
 |---|---|
 | [deploy-bot-app.sh](deploy-bot-app.sh) | End-to-end bot image build, infra deploy, RBAC wiring, and verification |
 | [bot-infra.bicep](bot-infra.bicep) | Subscription-scoped entry point for bot resources |
-| [bot-infra.bicepparam](bot-infra.bicepparam) | Parameter defaults for the bot deployment, including shared Key Vault operator access |
+| [bot-infra.bicepparam](bot-infra.bicepparam) | Parameter defaults for the MI-only bot deployment |
 | [modules/bot-resources.bicep](modules/bot-resources.bicep) | Container App, ACR, UAMI, and Azure Bot Service resources |
+| [../../deployment/remove-teams-app.ps1](../../deployment/remove-teams-app.ps1) | Removes the previous Teams catalog entry and current-user install before uploading a refreshed app package |
 
 ---
 
@@ -84,7 +82,7 @@ The script performs four steps:
 1. Builds the bot image locally with Docker using a clean `--no-cache` build, then pushes `zolabbotacrbotprd.azurecr.io/zolab-bot:<immutable-tag>` and refreshes `:latest`
 2. Deploys the bot infrastructure Bicep template
 3. Grants Storage Queue and Blob RBAC to the bot UAMI on the worker storage account
-4. Verifies the deployed Container App FQDN and prints follow-up commands
+4. Regenerates the Teams manifest and refreshes the in-repo Teams app zip with the live bot identity and domain
 
 ---
 
@@ -106,14 +104,12 @@ The deploy script now generates an immutable bot image tag from the current UTC 
 
 The deploy script resolves these values at runtime:
 
-- Bot app ID
+- Teams app manifest ID
 - Tenant ID
-- Existing bot runtime secret from `zolabbotkv<suffix>` secret `bot-app-client-secret`, referenced by the Container App through Key Vault
-- Shared Entra operator group (`zolab-ai-dev`), which the Foundry build lifecycle uses to grant and revoke per-user bot/worker secret access while builds are active
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription
 - Worker storage scope for RBAC assignment
 
-The deploy script does not need to read the bot secret locally. It deploys the Container App with a Key Vault reference so the bot's user-assigned managed identity can resolve the secret at runtime.
+The deploy script does not use an app registration or Key Vault secret. The bot runtime and Azure Bot Service both use the bot UAMI.
 
 The script currently assumes the production-style suffix `botprd` and the matching resource names used across the repo.
 
@@ -134,6 +130,12 @@ Useful commands:
 az containerapp show -n zolab-bot-ca-botprd -g zolab-bot-botprd -o json
 az containerapp logs show -n zolab-bot-ca-botprd -g zolab-bot-botprd
 az containerapp revision list -n zolab-bot-ca-botprd -g zolab-bot-botprd -o table
+```
+
+To remove a stale Teams catalog package before reinstalling the refreshed archive:
+
+```powershell
+pwsh -NoProfile -File deployment/remove-teams-app.ps1
 ```
 
 ### View Logs In Log Analytics

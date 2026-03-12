@@ -19,10 +19,6 @@ param botAppId string
 @description('Entra Tenant ID')
 param tenantId string
 
-@secure()
-@description('Bot App Registration Client Secret (for proactive messaging)')
-param botAppSecret string = ''
-
 @description('Resource ID of the existing User-Assigned Managed Identity')
 param managedIdentityResourceId string
 
@@ -182,18 +178,16 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
           environmentVariables: concat(
             [
               {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__AUTHTYPE'
+                value: 'UserManagedIdentity'
+              }
+              {
                 name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
                 value: botAppId
               }
               {
                 name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
                 value: tenantId
-              }
-            ],
-            empty(botAppSecret) ? [] : [
-              {
-                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
-                secureValue: botAppSecret
               }
             ],
             [

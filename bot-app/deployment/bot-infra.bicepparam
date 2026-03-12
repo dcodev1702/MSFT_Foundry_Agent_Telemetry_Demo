@@ -6,17 +6,18 @@
 //     --location eastus2 \
 //     --parameters bot-infra.bicepparam
 //
-// NOTE: suffix, botAppId, and tenantId MUST be supplied.
+// NOTE: logAnalyticsCustomerId and logAnalyticsSharedKey MUST be supplied.
 //       Override them via CLI --parameters or replace placeholders.
 // ════════════════════════════════════════════════════════════════
 using './bot-infra.bicep'
 
-// ── Required (override at deploy time) ────────────────────────
-param suffix   = 'botprd'
-param botAppId = 'ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef'
+// ── Required ───────────────────────────────────────────────────
+param suffix = 'botprd'
 param tenantId = 'b22dee98-83da-4207-b9ab-5ba931866f44'
+param logAnalyticsCustomerId = '<dibseccom-customer-id>'
+param logAnalyticsSharedKey = '<dibseccom-shared-key>'
 
 // ── Optional (defaults are fine for dev/pilot) ────────────────
-param location           = 'eastus2'
-param appServicePlanSku  = 'B1'
-param operatorGroupPrincipalId = '8b75f31d-b624-4e40-837e-65692e9a5922'
+param location = 'eastus2'
+param botResourceGroupName = 'zolab-bot-botprd'
+param botImageTag = 'latest'
