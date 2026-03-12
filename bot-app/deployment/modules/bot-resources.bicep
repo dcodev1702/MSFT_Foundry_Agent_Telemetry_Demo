@@ -210,7 +210,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           identity: botManagedIdentity.id
         }
       ]
-      secrets: empty(botAppSecret) ? [] : [
+      secrets: [
         {
           name: 'bot-app-secret'
           keyVaultUrl: botSecretKeyVaultUrl
@@ -245,8 +245,6 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
                 name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
                 value: tenantId
               }
-            ],
-            empty(botAppSecret) ? [] : [
               {
                 name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
                 secretRef: 'bot-app-secret'

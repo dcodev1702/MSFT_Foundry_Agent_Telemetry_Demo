@@ -150,7 +150,7 @@ The bot listens on `http://localhost:8000/api/messages`. `DefaultAzureCredential
 bash bot-app/deployment/deploy-bot-app.sh
 ```
 
-This builds both container images, deploys the Bicep infrastructure, grants RBAC, and verifies the deployment. See `bot-app/deployment/deploy-bot-app.sh` for details.
+This builds the bot container image, deploys the bot-side Bicep infrastructure, grants RBAC, and verifies the deployment. The worker image is deployed separately from the repo-root `deployment/` folder. See `bot-app/deployment/deploy-bot-app.sh` for details.
 
 For the full bot infrastructure walkthrough, resource inventory, and rollout notes, see [../deployment/README.md](../deployment/README.md).
 

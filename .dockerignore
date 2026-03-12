@@ -1,0 +1,13 @@
+bot-app/python-teams-bot-sample/.env
+bot-app/python-teams-bot-sample/.venv/
+bot-app/python-teams-bot-sample/.queue/
+bot-app/python-teams-bot-sample/.state/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.git/
+.claude/
+.vscode/
+.idea/
+build_info.json
+build_info-*.json

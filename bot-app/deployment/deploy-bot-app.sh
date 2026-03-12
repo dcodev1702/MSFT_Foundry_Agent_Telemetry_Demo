@@ -131,7 +131,7 @@ if [[ -n "${BOT_SECRET}" ]]; then
   BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
   echo "  ✓ Using bot app secret from ${BOT_SECRET_RESOLUTION}"
 else
-  echo "  ✓ No bot app secret provided; deploying bot for managed identity auth"
+  echo "  ✓ No bot app secret provided; bot will use the existing Key Vault secret at runtime"
 fi
 
 az deployment sub create \

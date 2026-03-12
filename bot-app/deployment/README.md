@@ -12,7 +12,7 @@ This deployment is separate from the root Foundry environment deployment in [../
 |---|---|
 | Azure CLI | Installed and authenticated with access to the `zolab` subscription |
 | Docker | Local Docker daemon available for clean local image builds and pushes |
-| Bot secret source | Required: bot deployment Key Vault secret `bot-app-client-secret` in `zolabbotkv<suffix>` |
+| Bot secret source | Required at runtime: Key Vault secret `bot-app-client-secret` in `zolabbotkv<suffix>` |
 | Security subscription access | Needed to read the DIBSecCom Log Analytics workspace keys in `Sentinel` |
 | ACR push permissions | Required to log in and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
@@ -108,10 +108,12 @@ The deploy script resolves these values at runtime:
 
 - Bot app ID
 - Tenant ID
-- Bot app secret from `zolabbotkv<suffix>` secret `bot-app-client-secret`
+- Existing bot runtime secret from `zolabbotkv<suffix>` secret `bot-app-client-secret`, referenced by the Container App through Key Vault
 - Shared Entra operator group (`zolab-ai-dev`), which the Foundry build lifecycle uses to grant and revoke per-user bot/worker secret access while builds are active
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription
 - Worker storage scope for RBAC assignment
+
+The deploy script does not need to read the bot secret locally. It deploys the Container App with a Key Vault reference so the bot's user-assigned managed identity can resolve the secret at runtime.
 
 The script currently assumes the production-style suffix `botprd` and the matching resource names used across the repo.
 
