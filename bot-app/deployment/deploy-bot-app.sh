@@ -67,6 +67,9 @@ if [[ -n "${BOT_SECRET:-}" ]]; then
   BOT_SECRET_OVERRIDE_PRESENT=1
 fi
 
+BOT_SECRET="${BOT_SECRET:-}"
+BOT_SECRET_RESOLUTION="managed identity"
+
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 BOT_APP_REGISTRATION_NAME="Bot-The-Builder"
 OPERATOR_GROUP_OBJECT_ID="$(az ad group list --filter "displayName eq '${BOT_OPERATOR_GROUP_DISPLAY_NAME}'" --query '[0].id' -o tsv 2>/dev/null || true)"
@@ -124,9 +127,12 @@ echo "┌───────────────────────�
 echo "│ Step 2/4: Deploying Container App infrastructure (Bicep)    │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
-BOT_SECRET="$(resolve_bot_secret)"
-BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
-echo "  ✓ Resolved bot app secret from ${BOT_SECRET_RESOLUTION}"
+if [[ -n "${BOT_SECRET}" ]]; then
+  BOT_SECRET_RESOLUTION="$(resolve_bot_secret_source)"
+  echo "  ✓ Using bot app secret from ${BOT_SECRET_RESOLUTION}"
+else
+  echo "  ✓ No bot app secret provided; deploying bot for managed identity auth"
+fi
 
 az deployment sub create \
   --location "${LOCATION}" \
@@ -188,7 +194,11 @@ KEY_VAULT_SECRET_ID=$(az keyvault secret show \
   --vault-name "${BOT_KEY_VAULT_NAME}" \
   --name "${BOT_SECRET_NAME}" \
   --query id \
-  -o tsv)
+  -o tsv 2>/dev/null || true)
+
+if [[ -z "${KEY_VAULT_SECRET_ID}" ]]; then
+  KEY_VAULT_SECRET_ID="https://${BOT_KEY_VAULT_NAME}.vault.azure.net/secrets/${BOT_SECRET_NAME}"
+fi
 
 echo "  ✓ Container App FQDN: ${CA_FQDN}"
 echo "  ✓ Bot Key Vault secret: ${KEY_VAULT_SECRET_ID}"

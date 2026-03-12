@@ -173,7 +173,7 @@ resource operatorGroupKeyVaultSecretsUser 'Microsoft.Authorization/roleAssignmen
   }
 }
 
-resource botAppSecretResource 'Microsoft.KeyVault/vaults/secrets@2024-04-01-preview' = {
+resource botAppSecretResource 'Microsoft.KeyVault/vaults/secrets@2024-04-01-preview' = if (!empty(botAppSecret)) {
   parent: keyVault
   name: botSecretName
   properties: {
@@ -187,7 +187,6 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   location: location
   dependsOn: [
     botManagedIdentityKeyVaultSecretsUser
-    botAppSecretResource
   ]
   identity: {
     type: 'UserAssigned'
@@ -211,7 +210,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           identity: botManagedIdentity.id
         }
       ]
-      secrets: [
+      secrets: empty(botAppSecret) ? [] : [
         {
           name: 'bot-app-secret'
           keyVaultUrl: botSecretKeyVaultUrl
@@ -228,56 +227,62 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: [
-            {
-              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
-              value: botAppId
-            }
-            {
-              name: 'BOT_APP_REGISTRATION_NAME'
-              value: botAppRegistrationName
-            }
-            {
-              name: 'AZURE_MANAGED_IDENTITY_NAME'
-              value: botManagedIdentity.name
-            }
-            {
-              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
-              value: tenantId
-            }
-            {
-              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
-              secretRef: 'bot-app-secret'
-            }
-            {
-              name: 'AZURE_CLIENT_ID'
-              value: botManagedIdentity.properties.clientId
-            }
-            {
-              name: 'AZURE_STORAGE_ACCOUNT'
-              value: 'zolabworkerstbotprd'
-            }
-            {
-              name: 'AZURE_QUEUE_NAME'
-              value: 'botjobs'
-            }
-            {
-              name: 'AZURE_BLOB_CONTAINER'
-              value: 'botstate'
-            }
-            {
-              name: 'AZURE_SUBSCRIPTION_ID'
-              value: subscription().subscriptionId
-            }
-            {
-              name: 'WORKER_ENABLED'
-              value: 'false'
-            }
-            {
-              name: 'HEARTBEAT_ENABLED'
-              value: 'true'
-            }
-          ]
+          env: concat(
+            [
+              {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
+                value: botAppId
+              }
+              {
+                name: 'BOT_APP_REGISTRATION_NAME'
+                value: botAppRegistrationName
+              }
+              {
+                name: 'AZURE_MANAGED_IDENTITY_NAME'
+                value: botManagedIdentity.name
+              }
+              {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
+                value: tenantId
+              }
+            ],
+            empty(botAppSecret) ? [] : [
+              {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
+                secretRef: 'bot-app-secret'
+              }
+            ],
+            [
+              {
+                name: 'AZURE_CLIENT_ID'
+                value: botManagedIdentity.properties.clientId
+              }
+              {
+                name: 'AZURE_STORAGE_ACCOUNT'
+                value: 'zolabworkerstbotprd'
+              }
+              {
+                name: 'AZURE_QUEUE_NAME'
+                value: 'botjobs'
+              }
+              {
+                name: 'AZURE_BLOB_CONTAINER'
+                value: 'botstate'
+              }
+              {
+                name: 'AZURE_SUBSCRIPTION_ID'
+                value: subscription().subscriptionId
+              }
+              {
+                name: 'WORKER_ENABLED'
+                value: 'false'
+              }
+              {
+                name: 'HEARTBEAT_ENABLED'
+                value: 'true'
+              }
+            ]
+          )
         }
       ]
       scale: {

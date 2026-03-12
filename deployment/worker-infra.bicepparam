@@ -7,7 +7,7 @@
 //     --parameters worker-infra.bicepparam \
 //     --parameters botAppSecret='<secret>'
 //
-// NOTE: botAppSecret MUST be supplied at deploy time via CLI.
+// NOTE: botAppSecret is optional; leave it unset to use managed identity.
 // ════════════════════════════════════════════════════════════════
 using './worker-infra.bicep'
 

@@ -21,7 +21,7 @@ param tenantId string
 
 @secure()
 @description('Bot App Registration Client Secret (for proactive messaging)')
-param botAppSecret string
+param botAppSecret string = ''
 
 @description('Resource ID of the existing User-Assigned Managed Identity')
 param managedIdentityResourceId string
@@ -179,36 +179,42 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
               memoryInGB: json(string(workerMemoryInGb))
             }
           }
-          environmentVariables: [
-            {
-              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
-              value: botAppId
-            }
-            {
-              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
-              value: tenantId
-            }
-            {
-              name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
-              secureValue: botAppSecret
-            }
-            {
-              name: 'AZURE_CLIENT_ID'
-              value: managedIdentityClientId
-            }
-            {
-              name: 'AZURE_STORAGE_ACCOUNT'
-              value: storageAccountName
-            }
-            {
-              name: 'AZURE_QUEUE_NAME'
-              value: queueName
-            }
-            {
-              name: 'AZURE_BLOB_CONTAINER'
-              value: blobContainerName
-            }
-          ]
+          environmentVariables: concat(
+            [
+              {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID'
+                value: botAppId
+              }
+              {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID'
+                value: tenantId
+              }
+            ],
+            empty(botAppSecret) ? [] : [
+              {
+                name: 'CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET'
+                secureValue: botAppSecret
+              }
+            ],
+            [
+              {
+                name: 'AZURE_CLIENT_ID'
+                value: managedIdentityClientId
+              }
+              {
+                name: 'AZURE_STORAGE_ACCOUNT'
+                value: storageAccountName
+              }
+              {
+                name: 'AZURE_QUEUE_NAME'
+                value: queueName
+              }
+              {
+                name: 'AZURE_BLOB_CONTAINER'
+                value: blobContainerName
+              }
+            ]
+          )
         }
       }
     ]

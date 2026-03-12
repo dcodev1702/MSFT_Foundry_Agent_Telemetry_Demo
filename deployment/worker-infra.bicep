@@ -36,7 +36,7 @@ param tenantId string
 
 @secure()
 @description('Bot App Registration Client Secret (for proactive messaging)')
-param botAppSecret string
+param botAppSecret string = ''
 
 @description('Resource group name for worker infrastructure')
 param workerResourceGroupName string = 'zolab-worker-${suffix}'
