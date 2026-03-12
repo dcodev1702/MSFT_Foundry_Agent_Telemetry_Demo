@@ -80,6 +80,8 @@ Concrete examples in this repo:
 - Host setup and core imports: [python-teams-bot-sample/app.py](python-teams-bot-sample/app.py)
 - Decorator-based message registration on `AgentApplication`: [python-teams-bot-sample/bot.py](python-teams-bot-sample/bot.py)
 - Proactive continuation pattern with A365 imports: [python-teams-bot-sample/proactive.py](python-teams-bot-sample/proactive.py)
+- Full SDK import reference: [docs/m365-agents-sdk-imports.md](docs/m365-agents-sdk-imports.md)
+- One-page quick reference: [docs/m365-agents-sdk-cheat-sheet.md](docs/m365-agents-sdk-cheat-sheet.md)
 
 ---
 
@@ -120,6 +122,8 @@ bot-app/
 │   └── modules/
 │       └── bot-resources.bicep
 ├── docs/
+│   ├── m365-agents-sdk-cheat-sheet.md
+│   ├── m365-agents-sdk-imports.md
 │   └── teams-bot-automation-implementation-guide.md
 ├── python-teams-bot-sample/
 │   ├── app.py
@@ -207,6 +211,8 @@ If Teams keeps showing a stale custom app package after uninstalling it in the c
 |---|---|
 | [python-teams-bot-sample/README.md](python-teams-bot-sample/README.md) | Bot runtime, worker runtime, local dev, and command behavior |
 | [deployment/README.md](deployment/README.md) | Bot Azure infrastructure, ACR build, Container App deployment, and RBAC |
+| [docs/m365-agents-sdk-imports.md](docs/m365-agents-sdk-imports.md) | Detailed explanation of the `microsoft_agents.*` imports used in this repo |
+| [docs/m365-agents-sdk-cheat-sheet.md](docs/m365-agents-sdk-cheat-sheet.md) | One-page quick reference for the bot's M365 Agents SDK surface |
 | [docs/teams-bot-automation-implementation-guide.md](docs/teams-bot-automation-implementation-guide.md) | Design-level implementation guidance and expected behavior |
 | [../deployment/README.md](../deployment/README.md) | Foundry environment deployment and cleanup automation |
 
