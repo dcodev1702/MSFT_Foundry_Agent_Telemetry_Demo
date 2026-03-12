@@ -39,6 +39,7 @@ from proactive import ProactiveMessenger
 from storage_config import get_blob_service_client, get_queue_client, BLOB_CONTAINER_NAME
 from worker import BackgroundWorker
 from heartbeat import HeartbeatService
+from service_lifecycle import start_background_services, stop_background_services
 
 # ── Logging ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -61,6 +62,7 @@ load_dotenv(BASE_PATH / ".env")
 PORT = int(os.getenv("PORT", "3978"))
 DEPLOY_SCRIPT = Path(os.getenv("DEPLOY_SCRIPT_PATH", DEFAULT_DEPLOY_SCRIPT))
 WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() in ("true", "1", "yes")
+HEARTBEAT_ENABLED = os.getenv("HEARTBEAT_ENABLED", "true").lower() in ("true", "1", "yes")
 
 # ── M365 Agents SDK Configuration ─────────────────────────────
 agents_sdk_config = load_configuration_from_env(environ)
@@ -165,28 +167,24 @@ async def download_build_info(request: web.Request) -> web.Response:
 
 # ── Lifecycle Hooks ────────────────────────────────────────────
 async def on_startup(app: web.Application) -> None:
-    if WORKER_ENABLED:
-        logger.info("Starting background worker and heartbeat service …")
-        app["worker_task"] = asyncio.create_task(worker.run())
-        app["heartbeat_task"] = asyncio.create_task(heartbeat_service.run())
-    else:
-        logger.info("Worker disabled (WORKER_ENABLED=false) — ACI handles execution")
+    await start_background_services(
+        app,
+        worker=worker,
+        heartbeat_service=heartbeat_service,
+        worker_enabled=WORKER_ENABLED,
+        heartbeat_enabled=HEARTBEAT_ENABLED,
+    )
 
 
 async def on_shutdown(app: web.Application) -> None:
-    if WORKER_ENABLED:
-        logger.info("Shutting down background services …")
-        worker.stop()
-        heartbeat_service.stop()
-
-        for task_name in ("worker_task", "heartbeat_task"):
-            task = app.get(task_name)
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+    logger.info("Shutting down background services …")
+    await stop_background_services(
+        app,
+        worker=worker,
+        heartbeat_service=heartbeat_service,
+        worker_enabled=WORKER_ENABLED,
+        heartbeat_enabled=HEARTBEAT_ENABLED,
+    )
 
 
 # ── Application Factory ───────────────────────────────────────

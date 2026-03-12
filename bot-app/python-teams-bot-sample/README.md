@@ -97,6 +97,8 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `storage_config.py` | Shared Azure credential and client configuration |
 | `requirements.txt` | Python dependencies |
 
+The bot web app sends a proactive heartbeat to stored conversations every 15 minutes. This runs independently from the queue worker so heartbeat messages continue even when the bot container is configured with `WORKER_ENABLED=false` and Azure Container Instances handle job execution.
+
 ## Azure Resources
 
 | Resource | Type | Purpose |

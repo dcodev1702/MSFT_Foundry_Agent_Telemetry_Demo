@@ -273,6 +273,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'WORKER_ENABLED'
               value: 'false'
             }
+            {
+              name: 'HEARTBEAT_ENABLED'
+              value: 'true'
+            }
           ]
         }
       ]

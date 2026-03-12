@@ -1,0 +1,99 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+
+SAMPLE_DIR = Path(__file__).resolve().parents[1]
+if str(SAMPLE_DIR) not in sys.path:
+    sys.path.insert(0, str(SAMPLE_DIR))
+
+from heartbeat import HeartbeatService
+from service_lifecycle import start_background_services, stop_background_services
+
+
+class HeartbeatServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_broadcasts_to_all_stored_conversations_each_interval(self) -> None:
+        proactive = SimpleNamespace(broadcast=AsyncMock(return_value=2))
+        store = MagicMock()
+        dispatcher = SimpleNamespace(queue_depth=lambda: 3)
+
+        heartbeat = HeartbeatService(
+            proactive=proactive,
+            store=store,
+            dispatcher=dispatcher,
+        )
+        heartbeat.INTERVAL = 0.01
+
+        task = __import__("asyncio").create_task(heartbeat.run())
+        await __import__("asyncio").sleep(0.03)
+        heartbeat.stop()
+        await task
+
+        proactive.broadcast.assert_awaited()
+        sent_text = proactive.broadcast.await_args_list[0].args[0]
+        self.assertIn("Status: Online", sent_text)
+        self.assertIn("Queue depth: 3", sent_text)
+
+
+class BackgroundServiceLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_background_services_runs_heartbeat_even_when_worker_disabled(self) -> None:
+        app = {}
+        worker = SimpleNamespace(run=AsyncMock(), stop=MagicMock())
+        heartbeat_service = SimpleNamespace(run=AsyncMock(), stop=MagicMock())
+
+        await start_background_services(
+            app,
+            worker=worker,
+            heartbeat_service=heartbeat_service,
+            worker_enabled=False,
+            heartbeat_enabled=True,
+        )
+
+        self.assertNotIn("worker_task", app)
+        self.assertIn("heartbeat_task", app)
+
+        await stop_background_services(
+            app,
+            worker=worker,
+            heartbeat_service=heartbeat_service,
+            worker_enabled=False,
+            heartbeat_enabled=True,
+        )
+
+        heartbeat_service.stop.assert_called_once()
+        worker.stop.assert_not_called()
+
+    async def test_start_background_services_can_run_both_worker_and_heartbeat(self) -> None:
+        app = {}
+        worker = SimpleNamespace(run=AsyncMock(), stop=MagicMock())
+        heartbeat_service = SimpleNamespace(run=AsyncMock(), stop=MagicMock())
+
+        await start_background_services(
+            app,
+            worker=worker,
+            heartbeat_service=heartbeat_service,
+            worker_enabled=True,
+            heartbeat_enabled=True,
+        )
+
+        self.assertIn("worker_task", app)
+        self.assertIn("heartbeat_task", app)
+
+        await stop_background_services(
+            app,
+            worker=worker,
+            heartbeat_service=heartbeat_service,
+            worker_enabled=True,
+            heartbeat_enabled=True,
+        )
+
+        worker.stop.assert_called_once()
+        heartbeat_service.stop.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()
