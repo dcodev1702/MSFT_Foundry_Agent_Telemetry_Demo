@@ -99,6 +99,112 @@ class WeatherServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Condition: Partly cloudy", result)
         self.assertIn("Temperature: 11.2C", result)
 
+    async def test_weather_service_falls_back_for_city_and_state_abbreviation(self) -> None:
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            if "geocoding-api" in url:
+                name = params["name"]
+                if name == "San Diego, CA":
+                    return {"generationtime_ms": 1.0}
+                if name == "San Diego":
+                    return {
+                        "results": [
+                            {
+                                "name": "San Diego",
+                                "admin1": "California",
+                                "country": "United States",
+                                "country_code": "US",
+                                "latitude": 32.7157,
+                                "longitude": -117.1611,
+                            },
+                            {
+                                "name": "San Diego",
+                                "admin1": "Texas",
+                                "country": "United States",
+                                "country_code": "US",
+                                "latitude": 31.0,
+                                "longitude": -100.0,
+                            },
+                        ]
+                    }
+
+            return {
+                "current": {
+                    "temperature_2m": 20.0,
+                    "apparent_temperature": 20.0,
+                    "relative_humidity_2m": 60,
+                    "precipitation": 0.0,
+                    "weather_code": 1,
+                    "wind_speed_10m": 8.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        service = WeatherService(fetch_json=fake_fetch)
+
+        result = await service.get_weather_text("San Diego, CA")
+
+        self.assertIn("Weather for `San Diego, California, United States`", result)
+
+    async def test_weather_service_matches_full_state_name_after_fallback(self) -> None:
+        async def fake_fetch(url: str, params: dict[str, object]) -> dict[str, object]:
+            if "geocoding-api" in url:
+                name = params["name"]
+                if name == "New York, New York":
+                    return {"generationtime_ms": 1.0}
+                if name == "New York":
+                    return {
+                        "results": [
+                            {
+                                "name": "New York",
+                                "admin1": "New York",
+                                "country": "United States",
+                                "country_code": "US",
+                                "latitude": 40.71427,
+                                "longitude": -74.00597,
+                            },
+                            {
+                                "name": "New York",
+                                "admin1": "Texas",
+                                "country": "United States",
+                                "country_code": "US",
+                                "latitude": 33.0,
+                                "longitude": -96.0,
+                            },
+                        ]
+                    }
+
+            return {
+                "current": {
+                    "temperature_2m": 8.0,
+                    "apparent_temperature": 6.0,
+                    "relative_humidity_2m": 55,
+                    "precipitation": 0.0,
+                    "weather_code": 3,
+                    "wind_speed_10m": 12.0,
+                    "time": "2026-03-12T19:00",
+                },
+                "current_units": {
+                    "temperature_2m": "C",
+                    "apparent_temperature": "C",
+                    "relative_humidity_2m": "%",
+                    "precipitation": "mm",
+                    "wind_speed_10m": "km/h",
+                },
+            }
+
+        service = WeatherService(fetch_json=fake_fetch)
+
+        result = await service.get_weather_text("New York, New York")
+
+        self.assertIn("Weather for `New York, United States`", result)
+
     async def test_weather_service_requires_city(self) -> None:
         service = WeatherService(fetch_json=lambda *_args, **_kwargs: None)
 

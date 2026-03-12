@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Awaitable, Callable
 
 JsonFetcher = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -36,6 +37,60 @@ WEATHER_CODE_DESCRIPTIONS = {
     99: "Thunderstorm with heavy hail",
 }
 
+US_STATE_ABBREVIATIONS = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+    "DC": "District of Columbia",
+}
+
 
 class WeatherService:
     """Retrieve current weather for a city using the Open-Meteo APIs."""
@@ -52,23 +107,13 @@ class WeatherService:
             return "Usage: `weather <city>`"
 
         try:
-            geocoding_payload = await self._fetch_json(
-                self.GEOCODING_URL,
-                {
-                    "name": city_name,
-                    "count": 1,
-                    "language": "en",
-                    "format": "json",
-                },
-            )
+            place = await self._resolve_place(city_name)
         except Exception as exc:
             return f"Weather lookup failed while geocoding `{city_name}`: {exc}"
 
-        results = geocoding_payload.get("results") or []
-        if not results:
+        if not place:
             return f"No weather location match found for `{city_name}`."
 
-        place = results[0]
         display_name = self._format_place(place)
 
         try:
@@ -137,6 +182,65 @@ class WeatherService:
                 if not isinstance(payload, dict):
                     raise ValueError("Unexpected weather API response shape")
                 return payload
+
+    async def _resolve_place(self, city_name: str) -> dict[str, Any] | None:
+        results = await self._geocode(city_name, count=1)
+        if results:
+            return results[0]
+
+        city_part, region_part = self._split_city_region(city_name)
+        if not city_part:
+            return None
+
+        fallback_results = await self._geocode(city_part, count=10)
+        if not fallback_results:
+            return None
+
+        if not region_part:
+            return fallback_results[0]
+
+        normalized_region = self._normalize_region(region_part)
+        for result in fallback_results:
+            admin1 = self._normalize_region(str(result.get("admin1") or ""))
+            country_code = str(result.get("country_code") or "").upper()
+            if admin1 == normalized_region:
+                return result
+            if country_code == normalized_region:
+                return result
+
+        return fallback_results[0]
+
+    async def _geocode(self, query: str, *, count: int) -> list[dict[str, Any]]:
+        geocoding_payload = await self._fetch_json(
+            self.GEOCODING_URL,
+            {
+                "name": query,
+                "count": count,
+                "language": "en",
+                "format": "json",
+            },
+        )
+        return [
+            result for result in (geocoding_payload.get("results") or [])
+            if isinstance(result, dict)
+        ]
+
+    @staticmethod
+    def _split_city_region(city_name: str) -> tuple[str, str | None]:
+        if "," not in city_name:
+            return city_name.strip(), None
+
+        city_part, region_part = city_name.split(",", 1)
+        return city_part.strip(), region_part.strip() or None
+
+    @staticmethod
+    def _normalize_region(value: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z]", "", value).upper()
+        if not cleaned:
+            return ""
+        if cleaned in US_STATE_ABBREVIATIONS:
+            return re.sub(r"[^A-Za-z]", "", US_STATE_ABBREVIATIONS[cleaned]).upper()
+        return cleaned
 
     @staticmethod
     def _format_place(place: dict[str, Any]) -> str:
