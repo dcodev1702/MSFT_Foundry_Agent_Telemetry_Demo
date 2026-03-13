@@ -385,6 +385,12 @@ Teams ──► Azure Bot Service (F0, UserAssignedMSI)
 | Identity | User-Assigned MI | Single UAMI for bot + worker (ACR, Storage, Az ops) |
 | Logging | DIBSecCom LAW | Cross-subscription logging to Security sub when workspace keys are available |
 
+Azure Container Apps also provisions a separate Azure-managed infrastructure resource group for each managed environment. For the live bot environment this appears as `ME_zolab-bot-env-botprd-vnet_zolab-bot-botprd_eastus2`.
+
+- The managed environment resource still lives in the main bot resource group.
+- The `ME_...` resource group is owned by the Container Apps service and remains separate by design.
+- Do not place application resources in that group or try to consolidate it into `zolab-bot-botprd`.
+
 ### Bot Deploy
 
 ```bash

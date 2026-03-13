@@ -36,6 +36,13 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | `zolab-bot-<suffix>` | Azure Bot Service | Teams-facing bot registration |
 | `MsTeamsChannel` | Bot Service channel | Enables Teams integration |
 
+Azure Container Apps also creates a separate infrastructure resource group for each managed environment. In production this appears as `ME_zolab-bot-env-botprd-vnet_zolab-bot-botprd_eastus2`.
+
+- The bot environment resource itself lives in `zolab-bot-botprd`.
+- The `ME_...` resource group is Azure-managed infrastructure for that environment.
+- It is expected to stay separate and should not be used for customer-managed resources.
+- It is removed by Azure when the corresponding Container Apps environment is fully deleted.
+
 ### Logging and Identity
 
 | Capability | Implementation |
@@ -200,3 +207,4 @@ If you are looking for the bot rollout or crash history, start with the system l
 - The worker container and worker ACR are defined under the repo-root `deployment/` folder because they execute the shared PowerShell/Bicep automation.
 - The bot Container App uses `activeRevisionsMode: Single`, so redeployments naturally roll forward to a single active revision.
 - The initial private-storage migration path is captured in [../../deployment/deploy-private-storage-rollout.sh](../../deployment/deploy-private-storage-rollout.sh), which stages the worker first, then the new public bot endpoint, and only falls back if validation fails.
+- The `ME_...` resource group attached to the Container Apps environment is service-managed Azure infrastructure and is not intended to be moved into the main bot resource group.
