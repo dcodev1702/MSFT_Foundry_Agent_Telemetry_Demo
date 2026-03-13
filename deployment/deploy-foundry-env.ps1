@@ -48,12 +48,79 @@ if ($PreviewCleanup -and -not $CleanupResourceGroup) {
     throw "Preview cleanup mode currently supports only targeted cleanup. Specify -CleanupResourceGroup."
 }
 
+function Test-ManagedIdentityBootstrapAvailable {
+    if ([string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_ID)) {
+        return $false
+    }
+
+    if (Test-Path '/.dockerenv') {
+        return $true
+    }
+
+    $managedIdentitySignals = @(
+        'IDENTITY_ENDPOINT',
+        'IDENTITY_API_VERSION',
+        'IDENTITY_HEADER',
+        'MSI_ENDPOINT',
+        'IMDS_ENDPOINT',
+        'Fabric_ApplicationName',
+        'Fabric_ServiceName',
+        'CONTAINER_APP_NAME',
+        'CONTAINER_APP_REVISION',
+        'CONTAINER_GROUP_NAME',
+        'WEBSITE_SITE_NAME',
+        'WEBSITE_INSTANCE_ID'
+    )
+
+    foreach ($signal in $managedIdentitySignals) {
+        if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($signal))) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Connect-AzWithManagedIdentityRetry {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ClientId,
+
+        [int]$MaxAttempts = 5,
+
+        [int]$InitialDelaySeconds = 2
+    )
+
+    $attempt = 1
+    $delaySeconds = $InitialDelaySeconds
+    $lastError = $null
+
+    while ($attempt -le $MaxAttempts) {
+        try {
+            Connect-AzAccount -Identity -AccountId $ClientId -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
+            return
+        } catch {
+            $lastError = $_
+            if ($attempt -ge $MaxAttempts) {
+                break
+            }
+
+            Write-Warning "Managed identity sign-in attempt $attempt/$MaxAttempts failed: $($_.Exception.Message)"
+            Start-Sleep -Seconds $delaySeconds
+            $attempt += 1
+            $delaySeconds = [Math]::Min($delaySeconds * 2, 15)
+        }
+    }
+
+    throw $lastError
+}
+
 # ── Auto-authenticate with Managed Identity when running in ACI/Container Apps ──
 if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
     $miClientId = $env:AZURE_CLIENT_ID
-    if ($miClientId) {
+    if ($miClientId -and (Test-ManagedIdentityBootstrapAvailable)) {
         Write-Host "No Az session — connecting via managed identity (AZURE_CLIENT_ID=$miClientId)..."
-        Connect-AzAccount -Identity -AccountId $miClientId -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
+        Connect-AzWithManagedIdentityRetry -ClientId $miClientId
         Write-Host "Authenticated via managed identity."
 
         # Also authenticate Azure CLI with managed identity
@@ -70,6 +137,8 @@ if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
                 Write-Host "WARNING: Azure CLI managed identity auth failed (non-fatal for list/status operations)."
             }
         }
+    } elseif ($miClientId) {
+        Write-Host "AZURE_CLIENT_ID is set, but no Azure managed-identity host markers were detected. Skipping managed identity bootstrap and using the local operator auth flow instead."
     }
 }
 
