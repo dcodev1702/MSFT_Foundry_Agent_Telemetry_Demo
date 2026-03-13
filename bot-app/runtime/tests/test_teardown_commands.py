@@ -5,6 +5,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 
 SRC_DIR = Path(__file__).resolve().parents[1] / "src"
@@ -26,7 +27,7 @@ azure_module.storage = storage_module
 
 from command_parser import parse_command
 from models import TeardownSession
-from worker import BackgroundWorker
+from worker import BackgroundWorker, _get_bot_download_base_url
 
 
 class TeardownCommandTests(unittest.TestCase):
@@ -173,6 +174,47 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
             "- build_info-orphan.json — resource group: zolab-ai-orphan1 ⚠️",
             result,
         )
+
+
+class WorkerDownloadUrlTests(unittest.TestCase):
+    def test_prefers_explicit_public_base_url(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "BOT_PUBLIC_BASE_URL": "https://example.contoso.com/root/",
+                "BOT_FQDN": "ignored.example.com",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                _get_bot_download_base_url(),
+                "https://example.contoso.com/root",
+            )
+
+    def test_uses_bot_fqdn_when_base_url_is_not_set(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "BOT_PUBLIC_BASE_URL": "",
+                "BOT_FQDN": "zolab-bot.example.azurecontainerapps.io",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                _get_bot_download_base_url(),
+                "https://zolab-bot.example.azurecontainerapps.io",
+            )
+
+    def test_returns_none_when_no_public_url_is_configured(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {
+                "BOT_PUBLIC_BASE_URL": "",
+                "BOT_FQDN": "",
+            },
+            clear=False,
+        ):
+            self.assertIsNone(_get_bot_download_base_url())
 
 
 if __name__ == "__main__":

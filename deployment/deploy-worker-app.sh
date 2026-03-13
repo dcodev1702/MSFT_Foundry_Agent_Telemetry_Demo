@@ -21,6 +21,7 @@ TENANT_ID="b22dee98-83da-4207-b9ab-5ba931866f44"
 WORKER_ACR_NAME="zolabworkeracr${SUFFIX}"
 WORKER_ACI_NAME="zolab-worker-aci-${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
+BOT_RG="zolab-bot-${SUFFIX}"
 ENABLE_PRIVATE_STORAGE_ACCESS="${ENABLE_PRIVATE_STORAGE_ACCESS:-true}"
 WORKER_VNET_ADDRESS_PREFIX="${WORKER_VNET_ADDRESS_PREFIX:-10.42.0.0/24}"
 CONTAINER_APPS_SUBNET_ADDRESS_PREFIX="${CONTAINER_APPS_SUBNET_ADDRESS_PREFIX:-10.42.0.0/27}"
@@ -44,6 +45,53 @@ if ! docker version &>/dev/null; then
     exit 1
 fi
 
+resolve_bot_fqdn() {
+    if [[ -n "${BOT_FQDN:-}" ]]; then
+        printf '%s\n' "${BOT_FQDN}"
+        return 0
+    fi
+
+    local explicit_container_app_name="${BOT_CONTAINER_APP_NAME:-}"
+    if [[ -n "${explicit_container_app_name}" ]]; then
+        az containerapp show \
+          --name "${explicit_container_app_name}" \
+          --resource-group "${BOT_RG}" \
+          --query 'properties.configuration.ingress.fqdn' \
+          -o tsv
+        return 0
+    fi
+
+    local fqdn
+    fqdn="$(az containerapp list \
+      --resource-group "${BOT_RG}" \
+      --query "[?name=='zolab-bot-ca-${SUFFIX}-vnet'].properties.configuration.ingress.fqdn | [0]" \
+      -o tsv 2>/dev/null || true)"
+    if [[ -n "${fqdn}" ]]; then
+        printf '%s\n' "${fqdn}"
+        return 0
+    fi
+
+    fqdn="$(az containerapp list \
+      --resource-group "${BOT_RG}" \
+      --query "[?name=='zolab-bot-ca-${SUFFIX}'].properties.configuration.ingress.fqdn | [0]" \
+      -o tsv 2>/dev/null || true)"
+    if [[ -n "${fqdn}" ]]; then
+        printf '%s\n' "${fqdn}"
+        return 0
+    fi
+
+    az containerapp list \
+      --resource-group "${BOT_RG}" \
+      --query "[?starts_with(name, 'zolab-bot-ca-${SUFFIX}')].properties.configuration.ingress.fqdn | [0]" \
+      -o tsv
+}
+
+BOT_FQDN_RESOLVED="$(resolve_bot_fqdn)"
+if [[ -z "${BOT_FQDN_RESOLVED}" ]]; then
+    echo "ERROR: Could not resolve the current bot Container App FQDN. Set BOT_FQDN or BOT_CONTAINER_APP_NAME and retry." >&2
+    exit 1
+fi
+
 WORKER_IMAGE_TAG="workerfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 WORKER_BUILD_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 WORKER_BUILD_COMMIT=$(git rev-parse HEAD)
@@ -56,6 +104,7 @@ echo "  ✓ Private storage networking: ${ENABLE_PRIVATE_STORAGE_ACCESS}"
 if [[ "${ENABLE_PRIVATE_STORAGE_ACCESS}" == "true" ]]; then
   echo "  ✓ Shared VNet address space: ${WORKER_VNET_ADDRESS_PREFIX}"
 fi
+echo "  ✓ Worker download host: ${BOT_FQDN_RESOLVED}"
 echo ""
 
 echo "┌──────────────────────────────────────────────────────────────┐"
@@ -120,6 +169,7 @@ az deployment sub create \
     workerCpu=2 \
     workerMemoryInGb=4 \
     workerImageTag="${WORKER_IMAGE_TAG}" \
+    botFqdn="${BOT_FQDN_RESOLVED}" \
     enablePrivateStorageAccess="${ENABLE_PRIVATE_STORAGE_ACCESS}" \
     workerVnetAddressPrefix="${WORKER_VNET_ADDRESS_PREFIX}" \
     containerAppsSubnetAddressPrefix="${CONTAINER_APPS_SUBNET_ADDRESS_PREFIX}" \

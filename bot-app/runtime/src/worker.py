@@ -50,6 +50,20 @@ def _load_worker_build_info() -> dict[str, str]:
     }
 
 
+def _get_bot_download_base_url() -> str | None:
+    configured_base_url = (os.getenv("BOT_PUBLIC_BASE_URL") or "").strip().rstrip("/")
+    if configured_base_url:
+        if configured_base_url.startswith(("http://", "https://")):
+            return configured_base_url
+        return f"https://{configured_base_url}"
+
+    bot_fqdn = (os.getenv("BOT_FQDN") or "").strip().rstrip("/")
+    if bot_fqdn:
+        return f"https://{bot_fqdn}"
+
+    return None
+
+
 class BackgroundWorker:
     """Async background worker that processes queued jobs from Azure Queue Storage."""
 
@@ -236,13 +250,18 @@ class BackgroundWorker:
             )
             logger.info("Uploaded %s to blob %s", latest.name, blob_name)
 
-            # Build download URL via the bot's own endpoint
-            import os
-            fqdn = os.getenv(
-                "BOT_FQDN",
-                "zolab-bot-ca-botprd.wonderfulisland-c279134c.eastus2.azurecontainerapps.io",
-            )
-            download_url = f"https://{fqdn}/api/download/{latest.name}"
+            bot_download_base_url = _get_bot_download_base_url()
+            if not bot_download_base_url:
+                logger.error(
+                    "Build info uploaded but BOT_FQDN/BOT_PUBLIC_BASE_URL is not configured; cannot publish a download link"
+                )
+                await self._proactive.send_to_conversation(
+                    conversation_id,
+                    f"📄 Build info uploaded: `{latest.name}`. Download link unavailable because the bot public URL is not configured.",
+                )
+                return
+
+            download_url = f"{bot_download_base_url}/api/download/{latest.name}"
 
             await self._proactive.send_to_conversation(
                 conversation_id,

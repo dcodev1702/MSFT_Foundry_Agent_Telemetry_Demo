@@ -33,6 +33,7 @@ BOT_ACR_NAME="zolabbotacr${SUFFIX}"
 
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
+WORKER_ACI_NAME="zolab-worker-aci-${SUFFIX}"
 ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING:-true}"
 CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID:-}"
 
@@ -228,6 +229,36 @@ echo "  ✓ Bot client ID: ${BOT_CLIENT_ID}"
 if [[ -n "${BOT_LLM_ENDPOINT}" ]]; then
   echo "  ✓ Bot LLM endpoint: ${BOT_LLM_ENDPOINT}"
 fi
+
+CURRENT_WORKER_IMAGE="$(az container show \
+  --name "${WORKER_ACI_NAME}" \
+  --resource-group "${WORKER_RG}" \
+  --query 'containers[0].image' \
+  -o tsv 2>/dev/null || true)"
+
+if [[ -n "${CURRENT_WORKER_IMAGE}" ]]; then
+  CURRENT_WORKER_IMAGE_TAG="${CURRENT_WORKER_IMAGE##*:}"
+  az deployment sub create \
+    --location "${LOCATION}" \
+    --template-file deployment/worker-infra.bicep \
+    --parameters \
+      suffix="${SUFFIX}" \
+      botClientId="59bffc04-c429-4580-9833-8ce88c088877" \
+      tenantId="${TENANT_ID}" \
+      managedIdentityResourceId="/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourcegroups/zolab-bot-botprd/providers/Microsoft.ManagedIdentity/userAssignedIdentities/zolab-bot-mi-botprd" \
+      managedIdentityPrincipalId="${UAMI_PRINCIPAL_ID}" \
+      managedIdentityClientId="59bffc04-c429-4580-9833-8ce88c088877" \
+      workerCpu=2 \
+      workerMemoryInGb=4 \
+      workerImageTag="${CURRENT_WORKER_IMAGE_TAG}" \
+      botFqdn="${CA_FQDN}" \
+      enablePrivateStorageAccess=true \
+    --output none
+  echo "  ✓ Worker download host synced to ${CA_FQDN}"
+else
+  echo "  ! Worker container not found; skipped worker download-host sync"
+fi
+
 echo "  ✓ Teams manifest updated: ${TEAMS_MANIFEST_PATH}"
 
 if [[ ! -f "${TEAMS_APP_DIR}/color.png" || ! -f "${TEAMS_APP_DIR}/outline.png" ]]; then

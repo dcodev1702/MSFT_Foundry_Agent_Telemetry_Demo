@@ -37,6 +37,9 @@ param workerMemoryInGb int
 @description('Worker container image tag to deploy from the worker ACR')
 param workerImageTag string = 'latest'
 
+@description('Public bot hostname used when the worker publishes anonymous build-info download links')
+param botFqdn string = ''
+
 @description('Enable private connectivity from the worker and bot to the shared storage account')
 param enablePrivateStorageAccess bool = false
 
@@ -391,6 +394,10 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
               {
                 name: 'AZURE_BLOB_CONTAINER'
                 value: blobContainerName
+              }
+              {
+                name: 'BOT_FQDN'
+                value: botFqdn
               }
             ]
           )
