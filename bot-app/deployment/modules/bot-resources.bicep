@@ -16,11 +16,11 @@ param suffix string
 param tenantId string
 
 @description('Log Analytics Workspace customer (workspace) ID — DIBSecCom in Security sub')
-param logAnalyticsCustomerId string
+param logAnalyticsCustomerId string = ''
 
 @secure()
 @description('Log Analytics Workspace shared key — DIBSecCom in Security sub')
-param logAnalyticsSharedKey string
+param logAnalyticsSharedKey string = ''
 
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
@@ -46,12 +46,24 @@ param weatherLlmSkuName string = 'GlobalStandard'
 @description('SKU capacity for the bot-owned weather deployment')
 param weatherLlmSkuCapacity int = 50
 
+@description('Optional override for the Container Apps environment name')
+param containerEnvName string = ''
+
+@description('Optional override for the Container App name')
+param containerAppName string = ''
+
+@description('Enable custom VNet integration for the Container Apps environment')
+param enablePrivateContainerAppsNetworking bool = false
+
+@description('Resource ID of the delegated infrastructure subnet for the Container Apps environment')
+param containerAppsInfrastructureSubnetResourceId string = ''
+
 // ── Resource Names ────────────────────────────────────────────
 var managedIdentityName = 'zolab-bot-mi-${suffix}'
 var acrName             = 'zolabbotacr${suffix}'
 var botServiceName      = 'zolab-bot-${suffix}'
-var containerEnvName    = 'zolab-bot-env-${suffix}'
-var containerAppName    = 'zolab-bot-ca-${suffix}'
+var resolvedContainerEnvName = empty(containerEnvName) ? 'zolab-bot-env-${suffix}' : containerEnvName
+var resolvedContainerAppName = empty(containerAppName) ? 'zolab-bot-ca-${suffix}' : containerAppName
 var botLlmAccountName   = 'zolab-bot-llm-${suffix}'
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
@@ -97,9 +109,9 @@ resource acrPullRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 // ── Container Apps Environment ──────────────────────────────────
 // Logs go to DIBSecCom LAW in the Security subscription (cross-sub)
 resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: containerEnvName
+  name: resolvedContainerEnvName
   location: location
-  properties: {
+  properties: union(empty(logAnalyticsCustomerId) || empty(logAnalyticsSharedKey) ? {} : {
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
@@ -107,7 +119,18 @@ resource containerEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
         sharedKey: logAnalyticsSharedKey
       }
     }
-  }
+  }, enablePrivateContainerAppsNetworking ? {
+    workloadProfiles: [
+      {
+        name: 'Consumption'
+        workloadProfileType: 'Consumption'
+      }
+    ]
+    vnetConfiguration: {
+      infrastructureSubnetId: containerAppsInfrastructureSubnetResourceId
+      internal: false
+    }
+  } : {})
 }
 
 // ── Stable AI Services account for bot-owned LLM features ─────
@@ -152,7 +175,7 @@ resource botMIAzureAIUser 'Microsoft.Authorization/roleAssignments@2022-04-01' =
 
 // ── Container App (Bot Web Server) ──────────────────────────────
 resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
-  name: containerAppName
+  name: resolvedContainerAppName
   location: location
   identity: {
     type: 'UserAssigned'

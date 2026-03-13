@@ -54,6 +54,21 @@ param workerMemoryInGb int = 4
 @description('Worker container image tag to deploy from the worker ACR')
 param workerImageTag string = 'latest'
 
+@description('Enable private connectivity from the worker and bot to the shared storage account')
+param enablePrivateStorageAccess bool = false
+
+@description('Address space for the shared worker virtual network when private storage access is enabled')
+param workerVnetAddressPrefix string = '10.42.0.0/24'
+
+@description('Subnet prefix reserved for the Container Apps environment infrastructure')
+param containerAppsSubnetAddressPrefix string = '10.42.0.0/27'
+
+@description('Subnet prefix reserved for the worker container group')
+param workerSubnetAddressPrefix string = '10.42.0.32/28'
+
+@description('Subnet prefix reserved for storage private endpoints')
+param privateEndpointSubnetAddressPrefix string = '10.42.0.48/28'
+
 // ── Resource Group ────────────────────────────────────────────
 
 resource workerRg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -77,6 +92,11 @@ module workerResources 'modules/worker-resources.bicep' = {
     workerCpu: workerCpu
     workerMemoryInGb: workerMemoryInGb
     workerImageTag: workerImageTag
+    enablePrivateStorageAccess: enablePrivateStorageAccess
+    workerVnetAddressPrefix: workerVnetAddressPrefix
+    containerAppsSubnetAddressPrefix: containerAppsSubnetAddressPrefix
+    workerSubnetAddressPrefix: workerSubnetAddressPrefix
+    privateEndpointSubnetAddressPrefix: privateEndpointSubnetAddressPrefix
   }
 }
 
@@ -89,3 +109,7 @@ output storageAccountName string = workerResources.outputs.storageAccountName
 output queueName string = workerResources.outputs.queueName
 output blobContainerName string = workerResources.outputs.blobContainerName
 output aciName string = workerResources.outputs.aciName
+output workerVnetName string = workerResources.outputs.workerVnetName
+output containerAppsInfrastructureSubnetId string = workerResources.outputs.containerAppsInfrastructureSubnetId
+output workerSubnetId string = workerResources.outputs.workerSubnetId
+output privateEndpointSubnetId string = workerResources.outputs.privateEndpointSubnetId

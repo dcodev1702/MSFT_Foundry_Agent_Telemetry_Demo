@@ -21,3 +21,7 @@ param logAnalyticsSharedKey = '<dibseccom-shared-key>'
 param location = 'eastus2'
 param botResourceGroupName = 'zolab-bot-botprd'
 param botImageTag = 'latest'
+param containerEnvName = 'zolab-bot-env-botprd-vnet'
+param containerAppName = 'zolab-bot-ca-botprd-vnet'
+param enablePrivateContainerAppsNetworking = true
+param containerAppsInfrastructureSubnetResourceId = '/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourceGroups/zolab-worker-botprd/providers/Microsoft.Network/virtualNetworks/zolab-worker-vnet-botprd/subnets/snet-containerapps'

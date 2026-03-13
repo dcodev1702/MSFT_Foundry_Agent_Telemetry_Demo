@@ -37,12 +37,33 @@ param workerMemoryInGb int
 @description('Worker container image tag to deploy from the worker ACR')
 param workerImageTag string = 'latest'
 
+@description('Enable private connectivity from the worker and bot to the shared storage account')
+param enablePrivateStorageAccess bool = false
+
+@description('Address space for the shared worker virtual network when private storage access is enabled')
+param workerVnetAddressPrefix string = '10.42.0.0/24'
+
+@description('Subnet prefix reserved for the Container Apps environment infrastructure')
+param containerAppsSubnetAddressPrefix string = '10.42.0.0/27'
+
+@description('Subnet prefix reserved for the worker container group')
+param workerSubnetAddressPrefix string = '10.42.0.32/28'
+
+@description('Subnet prefix reserved for storage private endpoints')
+param privateEndpointSubnetAddressPrefix string = '10.42.0.48/28'
+
 // ── Resource Names ────────────────────────────────────────────
 var acrName            = 'zolabworkeracr${suffix}'
 var storageAccountName = 'zolabworkerst${suffix}'
 var queueName          = 'botjobs'
 var blobContainerName  = 'botstate'
 var aciName            = 'zolab-worker-aci-${suffix}'
+var workerVnetName     = 'zolab-worker-vnet-${suffix}'
+var containerAppsSubnetName = 'snet-containerapps'
+var workerSubnetName = 'snet-worker-aci'
+var privateEndpointSubnetName = 'snet-storage-private-endpoints'
+var blobPrivateDnsZoneName = 'privatelink.blob.core.windows.net'
+var queuePrivateDnsZoneName = 'privatelink.queue.core.windows.net'
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
 var roles = {
@@ -89,8 +110,167 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   properties: {
     minimumTlsVersion: 'TLS1_2'
     supportsHttpsTrafficOnly: true
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: enablePrivateStorageAccess ? 'Disabled' : 'Enabled'
     allowSharedKeyAccess: false  // Entra ID / RBAC only
+  }
+}
+
+resource workerVnet 'Microsoft.Network/virtualNetworks@2024-05-01' = if (enablePrivateStorageAccess) {
+  name: workerVnetName
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: [
+        workerVnetAddressPrefix
+      ]
+    }
+  }
+}
+
+resource containerAppsSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = if (enablePrivateStorageAccess) {
+  parent: workerVnet
+  name: containerAppsSubnetName
+  properties: {
+    addressPrefix: containerAppsSubnetAddressPrefix
+    delegations: [
+      {
+        name: 'containerapps-delegation'
+        properties: {
+          serviceName: 'Microsoft.App/environments'
+        }
+      }
+    ]
+  }
+}
+
+resource workerSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = if (enablePrivateStorageAccess) {
+  parent: workerVnet
+  name: workerSubnetName
+  properties: {
+    addressPrefix: workerSubnetAddressPrefix
+    delegations: [
+      {
+        name: 'aci-delegation'
+        properties: {
+          serviceName: 'Microsoft.ContainerInstance/containerGroups'
+        }
+      }
+    ]
+  }
+}
+
+resource privateEndpointSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' = if (enablePrivateStorageAccess) {
+  parent: workerVnet
+  name: privateEndpointSubnetName
+  properties: {
+    addressPrefix: privateEndpointSubnetAddressPrefix
+    privateEndpointNetworkPolicies: 'Disabled'
+  }
+}
+
+resource blobPrivateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (enablePrivateStorageAccess) {
+  name: blobPrivateDnsZoneName
+  location: 'global'
+}
+
+resource queuePrivateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (enablePrivateStorageAccess) {
+  name: queuePrivateDnsZoneName
+  location: 'global'
+}
+
+resource blobDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (enablePrivateStorageAccess) {
+  parent: blobPrivateDnsZone
+  name: '${workerVnetName}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: workerVnet.id
+    }
+  }
+}
+
+resource queueDnsZoneLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (enablePrivateStorageAccess) {
+  parent: queuePrivateDnsZone
+  name: '${workerVnetName}-link'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: {
+      id: workerVnet.id
+    }
+  }
+}
+
+resource blobPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (enablePrivateStorageAccess) {
+  name: '${storageAccountName}-blob-pe'
+  location: location
+  properties: {
+    subnet: {
+      id: privateEndpointSubnet.id
+    }
+    privateLinkServiceConnections: [
+      {
+        name: '${storageAccountName}-blob-connection'
+        properties: {
+          privateLinkServiceId: storageAccount.id
+          groupIds: [
+            'blob'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+resource blobPrivateEndpointDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (enablePrivateStorageAccess) {
+  parent: blobPrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'blob-zone'
+        properties: {
+          privateDnsZoneId: blobPrivateDnsZone.id
+        }
+      }
+    ]
+  }
+}
+
+resource queuePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (enablePrivateStorageAccess) {
+  name: '${storageAccountName}-queue-pe'
+  location: location
+  properties: {
+    subnet: {
+      id: privateEndpointSubnet.id
+    }
+    privateLinkServiceConnections: [
+      {
+        name: '${storageAccountName}-queue-connection'
+        properties: {
+          privateLinkServiceId: storageAccount.id
+          groupIds: [
+            'queue'
+          ]
+        }
+      }
+    ]
+  }
+}
+
+resource queuePrivateEndpointDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (enablePrivateStorageAccess) {
+  parent: queuePrivateEndpoint
+  name: 'default'
+  properties: {
+    privateDnsZoneConfigs: [
+      {
+        name: 'queue-zone'
+        properties: {
+          privateDnsZoneId: queuePrivateDnsZone.id
+        }
+      }
+    ]
   }
 }
 
@@ -158,6 +338,11 @@ resource aci 'Microsoft.ContainerInstance/containerGroups@2023-05-01' = {
   properties: {
     osType: 'Linux'
     restartPolicy: 'Always'
+    subnetIds: enablePrivateStorageAccess ? [
+      {
+        id: workerSubnet.id
+      }
+    ] : []
     imageRegistryCredentials: [
       {
         server: acr.properties.loginServer
@@ -225,3 +410,7 @@ output storageAccountName string = storageAccount.name
 output queueName string = queueName
 output blobContainerName string = blobContainerName
 output aciName string = aci.name
+output workerVnetName string = enablePrivateStorageAccess ? workerVnet.name : ''
+output containerAppsInfrastructureSubnetId string = enablePrivateStorageAccess ? containerAppsSubnet.id : ''
+output workerSubnetId string = enablePrivateStorageAccess ? workerSubnet.id : ''
+output privateEndpointSubnetId string = enablePrivateStorageAccess ? privateEndpointSubnet.id : ''

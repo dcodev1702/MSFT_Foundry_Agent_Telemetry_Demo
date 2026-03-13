@@ -35,11 +35,11 @@ param tenantId string
 param botResourceGroupName string = 'zolab-bot-${suffix}'
 
 @description('DIBSecCom Log Analytics Workspace customer ID (Security sub)')
-param logAnalyticsCustomerId string
+param logAnalyticsCustomerId string = ''
 
 @secure()
 @description('DIBSecCom Log Analytics Workspace shared key (Security sub)')
-param logAnalyticsSharedKey string
+param logAnalyticsSharedKey string = ''
 
 @description('Bot container image tag to deploy from ACR')
 param botImageTag string = 'latest'
@@ -64,6 +64,18 @@ param weatherLlmSkuName string = 'GlobalStandard'
 
 @description('SKU capacity for the bot-owned weather deployment')
 param weatherLlmSkuCapacity int = 50
+
+@description('Optional override for the Container Apps environment name')
+param containerEnvName string = ''
+
+@description('Optional override for the Container App name')
+param containerAppName string = ''
+
+@description('Enable custom VNet integration for the Container Apps environment')
+param enablePrivateContainerAppsNetworking bool = false
+
+@description('Resource ID of the delegated infrastructure subnet for the Container Apps environment')
+param containerAppsInfrastructureSubnetResourceId string = ''
 
 // ── Resource Group ────────────────────────────────────────────
 
@@ -91,6 +103,10 @@ module botResources 'modules/bot-resources.bicep' = {
     weatherLlmModelFormat: weatherLlmModelFormat
     weatherLlmSkuName: weatherLlmSkuName
     weatherLlmSkuCapacity: weatherLlmSkuCapacity
+    containerEnvName: containerEnvName
+    containerAppName: containerAppName
+    enablePrivateContainerAppsNetworking: enablePrivateContainerAppsNetworking
+    containerAppsInfrastructureSubnetResourceId: containerAppsInfrastructureSubnetResourceId
   }
 }
 

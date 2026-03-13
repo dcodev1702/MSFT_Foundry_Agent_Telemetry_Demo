@@ -70,6 +70,6 @@
     "messageTeamMembers"
   ],
   "validDomains": [
-    "zolab-bot-ca-botprd.wonderfulisland-c279134c.eastus2.azurecontainerapps.io"
+    "zolab-bot-ca-botprd-vnet.graywater-f634f34a.eastus2.azurecontainerapps.io"
   ]
 }

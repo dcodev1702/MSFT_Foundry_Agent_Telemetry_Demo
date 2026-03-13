@@ -26,12 +26,15 @@ TENANT_ID="b22dee98-83da-4207-b9ab-5ba931866f44"
 LOCATION="eastus2"
 
 RG_BOT="zolab-bot-${SUFFIX}"
-CONTAINER_APP_NAME="zolab-bot-ca-${SUFFIX}"
+CONTAINER_APP_NAME="${CONTAINER_APP_NAME:-zolab-bot-ca-${SUFFIX}-vnet}"
+CONTAINER_ENV_NAME="${CONTAINER_ENV_NAME:-zolab-bot-env-${SUFFIX}-vnet}"
 BOT_SERVICE_NAME="zolab-bot-${SUFFIX}"
 BOT_ACR_NAME="zolabbotacr${SUFFIX}"
 
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
+ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING:-true}"
+CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID:-}"
 
 UAMI_PRINCIPAL_ID="e9a17b6f-74e3-44f4-ae3e-14dd48d5c251"
 
@@ -64,6 +67,11 @@ if ! az account show &>/dev/null; then
     exit 1
 fi
 
+if [[ -z "${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID}" ]]; then
+  SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+  CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}/providers/Microsoft.Network/virtualNetworks/zolab-worker-vnet-${SUFFIX}/subnets/snet-containerapps"
+fi
+
 if ! docker version &>/dev/null; then
   echo "ERROR: Docker is not available. Start Docker Desktop and retry." >&2
   exit 1
@@ -74,11 +82,15 @@ BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 # Fetch DIBSecCom LAW credentials (cross-subscription)
 LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
   --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
-  --subscription "${SECURITY_SUB}" --query customerId -o tsv)
+  --subscription "${SECURITY_SUB}" --query customerId -o tsv 2>/dev/null || true)
 LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys \
   --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
-  --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv)
-echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
+  --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv 2>/dev/null || true)
+if [[ -n "${LAW_CUSTOMER_ID}" && -n "${LAW_SHARED_KEY}" ]]; then
+  echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
+else
+  echo "  ! DIBSecCom LAW shared key not available; deploying without explicit Container Apps log wiring"
+fi
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║  Bot Container App Deployment                               ║"
@@ -87,6 +99,9 @@ echo ""
 echo "  ✓ Stable bot LLM deployment: ${WEATHER_LLM_MODEL}"
 echo "  ✓ Backing model: ${WEATHER_LLM_MODEL_NAME} ${WEATHER_LLM_MODEL_VERSION}"
 echo "  ✓ Deployment SKU: ${WEATHER_LLM_SKU_NAME} (${WEATHER_LLM_SKU_CAPACITY})"
+echo "  ✓ Container App target: ${CONTAINER_APP_NAME}"
+echo "  ✓ Container Apps environment target: ${CONTAINER_ENV_NAME}"
+echo "  ✓ Private Container Apps networking: ${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING}"
 echo ""
 
 # ── Step 1: Build & push bot container to ACR ────────────────────
@@ -132,6 +147,10 @@ az deployment sub create \
     weatherLlmModelFormat="${WEATHER_LLM_MODEL_FORMAT}" \
     weatherLlmSkuName="${WEATHER_LLM_SKU_NAME}" \
     weatherLlmSkuCapacity="${WEATHER_LLM_SKU_CAPACITY}" \
+    containerEnvName="${CONTAINER_ENV_NAME}" \
+    containerAppName="${CONTAINER_APP_NAME}" \
+    enablePrivateContainerAppsNetworking="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING}" \
+    containerAppsInfrastructureSubnetResourceId="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID}" \
   --output none
 
 echo "  ✓ Container App + Bot Service deployed"
