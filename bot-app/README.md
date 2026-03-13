@@ -27,14 +27,17 @@ Teams
 Azure Bot Service (UserAssignedMSI, F0)
   |
   v
-Azure Container App (bot web server)
+Azure Container App (public ingress)
+  |
+  v
+Container Apps Environment on delegated subnet (`zolab-bot-env-botprd-vnet`)
   |\
-  | \__ Azure Queue Storage (`botjobs`)
+  | \__ Private Queue endpoint (`botjobs`)
   |     |
   |     v
-  |   Azure Container Instance worker
+  |   Azure Container Instance worker on delegated subnet
   |
-  \___ Azure Blob Storage (`botstate`)
+  \___ Private Blob endpoint (`botstate`)
 ```
 
 ### Key Responsibilities
@@ -42,10 +45,11 @@ Azure Container App (bot web server)
 | Component | Responsibility |
 |---|---|
 | Teams bot | Accepts chat commands, validates intent, prompts for confirmation, sends proactive updates |
-| Bot Container App | Hosts the aiohttp/M365 Agents SDK web app and handles Teams traffic |
-| Queue worker | Executes long-running PowerShell and Bicep operations outside the request path |
-| Blob state store | Persists conversation references and identities for proactive replies |
+| Bot Container App | Hosts the aiohttp/M365 Agents SDK web app and handles Teams traffic through public ingress on a VNet-backed environment |
+| Queue worker | Executes long-running PowerShell and Bicep operations outside the request path from a subnet-integrated ACI |
+| Blob state store | Persists conversation references and identities for proactive replies over private endpoints |
 | Shared UAMI | Handles Azure auth for ACR pulls, Storage access, and automation operations |
+| Shared worker VNet | Carries the Container Apps infrastructure subnet, worker subnet, and storage private endpoint subnet |
 
 ### A365 Agents SDK vs Bot Framework Imports
 
@@ -224,5 +228,6 @@ If Teams keeps showing a stale custom app package after uninstalling it in the c
 
 - The bot infrastructure and the Foundry environment deployment are separate concerns. The bot lives under `bot-app/`; the Foundry environment lives under `deployment/` at the repo root.
 - The bot Container App and the worker container are intentionally split so long-running PowerShell work does not block Teams request handling.
-- The deploy script in `bot-app/deployment/` now performs a local Docker `--no-cache --pull` rebuild, pushes the bot image to the bot ACR, and then redeploys the bot infrastructure.
-- The worker image is defined in [../deployment/Dockerfile.worker](../deployment/Dockerfile.worker) because it shares the same PowerShell/Bicep automation code used by the root deployment flow. Use [../deployment/deploy-worker-app.sh](../deployment/deploy-worker-app.sh) for the worker’s local Docker `--no-cache --pull` build, push, and rollout path.
+- The bot now defaults to the VNet-backed app and environment names `zolab-bot-ca-botprd-vnet` and `zolab-bot-env-botprd-vnet` so public Teams ingress stays up while storage access stays private.
+- The deploy script in `bot-app/deployment/` performs a local Docker `--no-cache --pull` rebuild, pushes the bot image to the bot ACR, and redeploys the bot infrastructure into that VNet-backed environment by default.
+- The worker image is defined in [../deployment/Dockerfile.worker](../deployment/Dockerfile.worker) because it shares the same PowerShell/Bicep automation code used by the root deployment flow. Use [../deployment/deploy-worker-app.sh](../deployment/deploy-worker-app.sh) for normal worker rollouts, and [../deployment/deploy-private-storage-rollout.sh](../deployment/deploy-private-storage-rollout.sh) for the staged bot+worker private-storage migration flow.

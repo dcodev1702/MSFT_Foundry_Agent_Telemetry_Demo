@@ -348,17 +348,17 @@ The `bot-app/` directory contains a separate deployment for **Bot the Builder**,
 Teams ──► Azure Bot Service (F0, UserAssignedMSI)
               │
               ▼
-     Azure Container App (zolab-bot-ca-botprd)
+  Azure Container App (zolab-bot-ca-botprd-vnet)
      ┌─────────────────────────────────────────┐
      │  M365 Agents SDK  │  aiohttp (:8000)    │
      │  JWT Auth          │  Heartbeat (15m)    │
      │  Proactive Msgs    │  UAMI Auth          │
      └────────┬───────────┬────────────────────┘
               │           │
-    ┌─────────▼───┐  ┌────▼──────────┐
-    │ Azure Queue │  │  Azure Blob   │
-    │  (botjobs)  │  │  (botstate)   │
-    └──────┬──────┘  └───────────────┘
+    ┌─────────▼──────────┐  ┌────▼──────────────┐
+    │ Private Queue PE   │  │ Private Blob PE   │
+    │  (botjobs)         │  │  (botstate)       │
+    └──────┬─────────────┘  └───────────────┬──┘
            │
            ▼
      ACI Worker (zolab-worker-aci-botprd)
@@ -366,24 +366,38 @@ Teams ──► Azure Bot Service (F0, UserAssignedMSI)
      │  Polls queue ──► PowerShell/Bicep        │
      │  Sends results ──► Proactive messaging   │
      └─────────────────────────────────────────┘
+
+  Shared VNet (zolab-worker-vnet-botprd)
+  ├── snet-containerapps
+  ├── snet-worker-aci
+  └── snet-storage-private-endpoints
 ```
 
 ### Key Components
 
 | Component | Resource | Details |
 |-----------|----------|---------|
-| Bot Server | Azure Container App | M365 Agents SDK, auto-TLS, UAMI for ACR/Storage |
-| Worker | Azure Container Instance | PowerShell 7.4 + Az CLI + Bicep, polls Azure Queue |
-| Queue | Azure Queue Storage | RBAC-only (`allowSharedKeyAccess: false`) |
-| State | Azure Blob Storage | Conversation refs + identities for proactive messaging |
+| Bot Server | Azure Container App | M365 Agents SDK, auto-TLS, public ingress on a VNet-backed environment |
+| Worker | Azure Container Instance | PowerShell 7.4 + Az CLI + Bicep, polls Azure Queue from a delegated subnet |
+| Queue | Azure Queue Storage | RBAC-only (`allowSharedKeyAccess: false`) via private endpoint |
+| State | Azure Blob Storage | Conversation refs + identities for proactive messaging via private endpoint |
+| Network | Shared worker VNet | Dedicated subnets for ACA infrastructure, ACI, and storage private endpoints |
 | Identity | User-Assigned MI | Single UAMI for bot + worker (ACR, Storage, Az ops) |
-| Logging | DIBSecCom LAW | Cross-subscription logging to Security sub |
+| Logging | DIBSecCom LAW | Cross-subscription logging to Security sub when workspace keys are available |
 
 ### Bot Deploy
 
 ```bash
 bash bot-app/deployment/deploy-bot-app.sh
 ```
+
+### Private-Storage Rollout
+
+```bash
+bash deployment/deploy-private-storage-rollout.sh
+```
+
+That staged rollout script exists for migrations or break-glass redeployments where the worker subnet integration, storage private endpoints, bot cutover, and rollback behavior need to be orchestrated together.
 
 See [`bot-app/runtime/README.md`](../bot-app/runtime/README.md) for full bot documentation.
 

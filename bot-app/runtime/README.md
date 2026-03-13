@@ -1,6 +1,6 @@
 # Bot the Builder — Teams Bot for Azure AI Foundry
 
-A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry deployments via chat commands. Runs as an **Azure Container App** with a separate **ACI-hosted worker** for long-running PowerShell operations.
+A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry deployments via chat commands. Runs as a **public Azure Container App on a VNet-backed environment** with a separate **subnet-integrated ACI worker** for long-running PowerShell operations.
 
 ## Related Docs
 
@@ -24,7 +24,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
                     v
   ┌──────────────────────────────────┐
   │  Azure Container App             │
-  │  (zolab-bot-ca-botprd)           │
+  │  (zolab-bot-ca-botprd-vnet)      │
   │                                  │
   │  - aiohttp web server (:8000)    │
   │  - M365 Agents SDK handlers      │
@@ -37,12 +37,11 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
              |
      ┌───────┴────────┐
      v                v
-┌─────────┐    ┌──────────────┐
-│  Azure  │    │    Azure     │
-│  Queue  │    │    Blob      │
-│ Storage │    │   Storage    │
-│(botjobs)│    │  (botstate)  │
-└────┬────┘    └──────────────┘
+┌───────────────┐    ┌──────────────────┐
+│ Private Queue │    │   Private Blob   │
+│   endpoint    │    │    endpoint      │
+│  (botjobs)    │    │   (botstate)     │
+└────┬──────────┘    └──────────────────┘
      |
      v
 ┌──────────────────────────────────┐
@@ -63,6 +62,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 - **Azure Container Apps** instead of App Service (subscription has zero `Microsoft.Web` quota on `Internal_2014-09-01` offer)
 - **Azure Queue Storage** for job dispatch (RBAC-only, `allowSharedKeyAccess: false`)
 - **Azure Blob Storage** for conversation state (`conversations.json`, `references.json`, `identities.json`)
+- **Private endpoints + private DNS** for queue and blob access while keeping Teams ingress public
 - **User-Assigned Managed Identity** for all Azure access (ACR pull, Storage, Az PowerShell)
 - **Cross-subscription logging** to `DIBSecCom` LAW in the Security subscription
 - **DefaultAzureCredential** everywhere — no connection strings or storage keys
@@ -107,14 +107,15 @@ The bot web app sends a proactive heartbeat to stored conversations every 15 min
 
 | Resource | Type | Purpose |
 |----------|------|---------|
-| `zolab-bot-ca-botprd` | Container App | Bot web server |
-| `zolab-bot-env-botprd` | Container Apps Environment | Hosting environment (logs to DIBSecCom LAW) |
+| `zolab-bot-ca-botprd-vnet` | Container App | Bot web server |
+| `zolab-bot-env-botprd-vnet` | Container Apps Environment | VNet-backed hosting environment |
 | `zolabbotacrbotprd` | Container Registry | Bot container images |
 | `zolab-bot-mi-botprd` | Managed Identity (UAMI) | All Azure auth |
 | `zolab-bot-botprd` | Bot Service (F0) | Teams channel registration |
 | `zolab-worker-aci-botprd` | Container Instance | Worker for PowerShell jobs |
 | `zolabworkeracrbotprd` | Container Registry | Worker container images |
-| `zolabworkerstbotprd` | Storage Account | Queue (`botjobs`) + Blob (`botstate`) |
+| `zolabworkerstbotprd` | Storage Account | Queue (`botjobs`) + Blob (`botstate`), private access only |
+| `zolab-worker-vnet-botprd` | Virtual Network | Shared private path for bot storage access and worker subnet integration |
 
 ### RBAC Roles (UAMI)
 
@@ -163,7 +164,7 @@ When `WEATHER_LLM_AZURE_OPENAI_ENDPOINT` is set, the bot fetches live current co
 bash bot-app/deployment/deploy-bot-app.sh
 ```
 
-This builds the bot container image, deploys the bot-side Bicep infrastructure, grants RBAC, and verifies the deployment. The worker image is deployed separately from the repo-root `deployment/` folder. See `bot-app/deployment/deploy-bot-app.sh` for details.
+This builds the bot container image, deploys the bot-side Bicep infrastructure into the VNet-backed environment, grants RBAC, and verifies the deployment. The worker image is deployed separately from the repo-root `deployment/` folder. See `bot-app/deployment/deploy-bot-app.sh` for details.
 
 For the full bot infrastructure walkthrough, resource inventory, and rollout notes, see [../deployment/README.md](../deployment/README.md).
 

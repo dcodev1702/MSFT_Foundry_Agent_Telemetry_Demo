@@ -13,10 +13,10 @@ This deployment is separate from the root Foundry environment deployment in [../
 | Azure CLI | Installed and authenticated with access to the `zolab` subscription |
 | Docker | Local Docker daemon available for clean local image builds and pushes |
 | Bot identity | User-assigned managed identity is the only supported bot auth model |
-| Security subscription access | Needed to read the DIBSecCom Log Analytics workspace keys in `Sentinel` |
+| Security subscription access | Optional for reading the DIBSecCom Log Analytics workspace keys in `Sentinel`; deployment can proceed without them |
 | ACR push permissions | Required to log in and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
-| Existing worker resources | The bot deployment expects the worker storage account and worker resource group to exist for RBAC wiring |
+| Existing worker resources | The bot deployment expects the worker storage account, worker resource group, and shared worker VNet/subnet path to exist for storage access |
 
 ---
 
@@ -31,8 +31,8 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 | `zolab-bot-<suffix>` | Resource Group | Dedicated resource group for the bot surface |
 | `zolabbotacr<suffix>` | Azure Container Registry | Stores the bot image |
 | `zolab-bot-mi-<suffix>` | User-Assigned Managed Identity | Used for ACR pulls and bot-side Azure access |
-| `zolab-bot-env-<suffix>` | Container Apps Environment | Hosts the Container App and ships logs to DIBSecCom LAW |
-| `zolab-bot-ca-<suffix>` | Azure Container App | Hosts the aiohttp/M365 Agents SDK bot runtime |
+| `zolab-bot-env-<suffix>-vnet` | Container Apps Environment | Delegated-subnet environment for the public bot app |
+| `zolab-bot-ca-<suffix>-vnet` | Azure Container App | Hosts the aiohttp/M365 Agents SDK bot runtime with public ingress |
 | `zolab-bot-<suffix>` | Azure Bot Service | Teams-facing bot registration |
 | `MsTeamsChannel` | Bot Service channel | Enables Teams integration |
 
@@ -40,10 +40,10 @@ The subscription-scoped Bicep entry point in [bot-infra.bicep](bot-infra.bicep) 
 
 | Capability | Implementation |
 |---|---|
-| Log destination | Cross-subscription DIBSecCom Log Analytics workspace |
+| Log destination | Cross-subscription DIBSecCom Log Analytics workspace when workspace keys are accessible at deploy time |
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
 | Bot Azure access | UAMI attached to the Container App and used by Azure Bot Service as `UserAssignedMSI` |
-| Worker storage access | Additional RBAC assigned by `deploy-bot-app.sh` |
+| Worker storage access | RBAC plus private endpoint routing through the worker-owned VNet |
 
 ---
 
@@ -80,7 +80,7 @@ bash bot-app/deployment/deploy-bot-app.sh
 The script performs four steps:
 
 1. Builds the bot image locally with Docker using a clean `--no-cache` build, then pushes `zolabbotacrbotprd.azurecr.io/zolab-bot:<immutable-tag>` and refreshes `:latest`
-2. Deploys the bot infrastructure Bicep template
+2. Deploys the bot infrastructure Bicep template into the VNet-backed Container Apps environment by default
 3. Grants Storage Queue and Blob RBAC to the bot UAMI on the worker storage account
 4. Regenerates the Teams manifest and refreshes the in-repo Teams app zip with the live bot identity and domain
 
@@ -94,7 +94,7 @@ If only bot runtime code changed and you want to republish the bot surface, reru
 bash bot-app/deployment/deploy-bot-app.sh
 ```
 
-That rebuilds the bot image and refreshes the Container App deployment. The worker image is separate and is built from [../../deployment/Dockerfile.worker](../../deployment/Dockerfile.worker).
+That rebuilds the bot image and refreshes the VNet-backed Container App deployment. The worker image is separate and is built from [../../deployment/Dockerfile.worker](../../deployment/Dockerfile.worker).
 
 The deploy script now generates an immutable bot image tag from the current UTC timestamp and Git commit, builds locally with Docker using `--no-cache --pull`, and passes that tag into Bicep so Azure Container Apps creates a new revision for each rollout. This avoids both stale revisions and flaky remote build-task failures.
 
@@ -106,8 +106,9 @@ The deploy script resolves these values at runtime:
 
 - Teams app manifest ID
 - Tenant ID
-- DIBSecCom Log Analytics customer ID and shared key from the Security subscription
+- DIBSecCom Log Analytics customer ID and shared key from the Security subscription when available
 - Worker storage scope for RBAC assignment
+- Worker-owned Container Apps infrastructure subnet resource ID when not explicitly supplied
 
 Grounded weather narration is intentionally separate from the ephemeral Foundry environments created by `build it`.
 
@@ -130,14 +131,16 @@ After deployment, confirm:
 - The Container App exists and serves `https://<fqdn>/api/messages`
 - The Azure Bot Service endpoint points to the Container App `/api/messages` path
 - The bot UAMI has queue/blob access to `zolabworkerstbotprd`
-- The Container Apps Environment is forwarding logs to DIBSecCom LAW
+- The storage account remains `publicNetworkAccess: Disabled`
+- The bot app is attached to the VNet-backed environment and the worker is attached to the delegated worker subnet
+- The Container Apps Environment is forwarding logs to DIBSecCom LAW when workspace keys were available during deploy
 
 Useful commands:
 
 ```bash
-az containerapp show -n zolab-bot-ca-botprd -g zolab-bot-botprd -o json
-az containerapp logs show -n zolab-bot-ca-botprd -g zolab-bot-botprd
-az containerapp revision list -n zolab-bot-ca-botprd -g zolab-bot-botprd -o table
+az containerapp show -n zolab-bot-ca-botprd-vnet -g zolab-bot-botprd -o json
+az containerapp logs show -n zolab-bot-ca-botprd-vnet -g zolab-bot-botprd
+az containerapp revision list -n zolab-bot-ca-botprd-vnet -g zolab-bot-botprd -o table
 ```
 
 To remove a stale Teams catalog package before reinstalling the refreshed archive:
@@ -167,17 +170,17 @@ Example filters:
 
 ```kusto
 ContainerAppConsoleLogs_CL
-| where ContainerAppName_s == "zolab-bot-ca-botprd"
+| where ContainerAppName_s == "zolab-bot-ca-botprd-vnet"
 | order by TimeGenerated desc
 ```
 
 ```kusto
 ContainerAppSystemLogs_CL
-| where ContainerAppName_s == "zolab-bot-ca-botprd"
+| where ContainerAppName_s == "zolab-bot-ca-botprd-vnet"
 | order by TimeGenerated desc
 ```
 
-If you are looking for the bot rollout or crash history, start with the system logs table and then filter down to revision `zolab-bot-ca-botprd--0000003` or any older revision you want to inspect.
+If you are looking for the bot rollout or crash history, start with the system logs table and then filter down to the current `zolab-bot-ca-botprd-vnet` revision names shown by `az containerapp revision list`.
 
 ---
 
@@ -196,3 +199,4 @@ If you are looking for the bot rollout or crash history, start with the system l
 - The bot deploy script currently handles the bot image and bot-side infrastructure only.
 - The worker container and worker ACR are defined under the repo-root `deployment/` folder because they execute the shared PowerShell/Bicep automation.
 - The bot Container App uses `activeRevisionsMode: Single`, so redeployments naturally roll forward to a single active revision.
+- The initial private-storage migration path is captured in [../../deployment/deploy-private-storage-rollout.sh](../../deployment/deploy-private-storage-rollout.sh), which stages the worker first, then the new public bot endpoint, and only falls back if validation fails.

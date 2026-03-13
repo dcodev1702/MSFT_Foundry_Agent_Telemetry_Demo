@@ -173,15 +173,20 @@ The `deployment/` directory contains Bicep IaC to provision the full AI Foundry 
 The `bot-app/` directory contains **Bot the Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status`, `teardown`, `heartbeat`).
 
 ```
-Teams ──► Bot Service ──► Container App (M365 Agents SDK)
-                               │
-                          Queue Storage ──► ACI Worker (PowerShell/Bicep)
+Teams ──► Bot Service ──► Public Container App ingress
+                         │
+                    VNet-backed Container Apps environment
+                         │
+                 Private Queue/Blob endpoints in shared worker VNet
+                         │
+                     Queue Storage ──► ACI Worker (PowerShell/Bicep)
 ```
 
-- **Azure Container App** — bot web server with auto-TLS and UAMI auth
-- **ACI Worker** — polls Azure Queue, executes PowerShell deployments, sends results back via proactive messaging
-- **Azure Queue + Blob Storage** — RBAC-only (no shared keys), conversation state in Blob
-- **Cross-sub logging** — all Container Apps logs go to `DIBSecCom` LAW in the Security subscription
+- **Azure Container App** — public Teams ingress is preserved, but the app now runs in a custom VNet-backed Container Apps environment
+- **ACI Worker** — runs inside the shared worker subnet and polls Queue Storage over the private network path
+- **Azure Queue + Blob Storage** — RBAC-only (no shared keys), `publicNetworkAccess: Disabled`, reached through private endpoints and private DNS
+- **Shared worker VNet** — hosts the Container Apps infrastructure subnet, the ACI subnet, and the storage private endpoint subnet
+- **Cross-sub logging** — Container Apps logging still targets `DIBSecCom` LAW when that shared key is available to the deployer; otherwise deployment proceeds without explicit LAW wiring
 
 See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot documentation and [`deployment/README.md`](deployment/README.md) for the Teams command listener.
 
