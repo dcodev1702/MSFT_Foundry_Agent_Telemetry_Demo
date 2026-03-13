@@ -810,6 +810,71 @@ function Sync-BuildInfoToBlobIfAvailable {
     }
 }
 
+function Remove-BuildInfoBlobIfAvailable {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Suffix
+    )
+
+    $storageAccountName = $env:AZURE_STORAGE_ACCOUNT
+    $blobContainerName = $env:AZURE_BLOB_CONTAINER
+    if ([string]::IsNullOrWhiteSpace($storageAccountName) -or [string]::IsNullOrWhiteSpace($blobContainerName)) {
+        return [pscustomobject]@{
+            Removed = $false
+            Found   = $false
+            Status  = 'Blob cleanup skipped because storage environment is not configured ℹ️'
+        }
+    }
+
+    $blobName = "builds/build_info-$Suffix.json"
+    $existsOutput = & az storage blob exists `
+        --auth-mode login `
+        --account-name $storageAccountName `
+        --container-name $blobContainerName `
+        --name $blobName `
+        --query exists `
+        --output tsv `
+        --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        $message = (($existsOutput -join ' ').Trim())
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = 'existence check failed'
+        }
+        throw "Failed to check blob cleanup state for '$blobName': $message"
+    }
+
+    $blobExists = [System.StringComparer]::OrdinalIgnoreCase.Equals((($existsOutput -join '').Trim()), 'true')
+    if (-not $blobExists) {
+        return [pscustomobject]@{
+            Removed = $false
+            Found   = $false
+            Status  = "No blob build record named $blobName found ℹ️"
+        }
+    }
+
+    $deleteOutput = & az storage blob delete `
+        --auth-mode login `
+        --account-name $storageAccountName `
+        --container-name $blobContainerName `
+        --name $blobName `
+        --only-show-errors 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        $message = (($deleteOutput -join ' ').Trim())
+        if ([string]::IsNullOrWhiteSpace($message)) {
+            $message = 'delete failed'
+        }
+        throw "Failed to delete blob build record '$blobName': $message"
+    }
+
+    [pscustomobject]@{
+        Removed = $true
+        Found   = $true
+        Status  = "Removed blob build record $blobName ✅"
+    }
+}
+
 function Get-BuildInfoPaths {
     $buildInfoPaths = @(
         Get-ChildItem -Path (Get-BuildInfoDirectory) -Filter 'build_info-*.json' -File -ErrorAction SilentlyContinue |
@@ -1737,15 +1802,22 @@ function Remove-BuildInfoForResourceGroup {
         [string]$ResourceGroupName
     )
 
+    $suffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $ResourceGroupName
     $buildInfoPath = Get-BuildInfoPathForResourceGroup -ResourceGroupName $ResourceGroupName
-    if (-not $buildInfoPath) {
-        Write-Host "No build_info file found for '$ResourceGroupName'."
-        return "No build_info file found for $ResourceGroupName ℹ️"
+    $blobCleanup = Remove-BuildInfoBlobIfAvailable -Suffix $suffix
+
+    $statusParts = @()
+    if ($buildInfoPath) {
+        Remove-Item -LiteralPath $buildInfoPath -Force
+        Write-Host "Removed build info file '$buildInfoPath' for '$ResourceGroupName'."
+        $statusParts += "Removed $(Split-Path -Leaf $buildInfoPath) for $ResourceGroupName ✅"
+    } else {
+        Write-Host "No local build_info file found for '$ResourceGroupName'."
+        $statusParts += "No local build_info file found for $ResourceGroupName ℹ️"
     }
 
-    Remove-Item -LiteralPath $buildInfoPath -Force
-    Write-Host "Removed build info file '$buildInfoPath' for '$ResourceGroupName'."
-    "Removed $(Split-Path -Leaf $buildInfoPath) for $ResourceGroupName ✅"
+    $statusParts += $blobCleanup.Status
+    $statusParts -join '; '
 }
 
 Write-Host "Resolved subscriptions:"
@@ -1865,8 +1937,9 @@ if ($Cleanup) {
                 }
 
                 $targetResourceGroup = Get-AzResourceGroup -Name $CleanupResourceGroup -ErrorAction SilentlyContinue
-                if (-not $targetResourceGroup) {
-                    throw "Resource group '$CleanupResourceGroup' was not found in subscription '$subscriptionId'."
+                $resourceGroupExists = ($null -ne $targetResourceGroup)
+                if (-not $resourceGroupExists) {
+                    Write-Host "Resource group '$CleanupResourceGroup' is already absent; continuing residual cleanup."
                 }
 
                 $sharedAccessPlan = Get-TargetedTeardownSharedAccessPlan `
@@ -1888,13 +1961,20 @@ if ($Cleanup) {
                     $rbacStatus = "Entra group '$groupDisplayName' not found; scoped RBAC cleanup skipped ℹ️"
                 }
 
-                if ($PreviewCleanup) {
-                    $resourceGroupCleanup = Get-FoundryResourceGroupCleanupPreview -ResourceGroupName $CleanupResourceGroup
+                if ($resourceGroupExists) {
+                    if ($PreviewCleanup) {
+                        $resourceGroupCleanup = Get-FoundryResourceGroupCleanupPreview -ResourceGroupName $CleanupResourceGroup
+                    } else {
+                        $resourceGroupCleanup = Remove-FoundryResourceGroup `
+                            -ResourceGroupName $CleanupResourceGroup `
+                            -Location $location `
+                            -SubscriptionId $subscriptionId
+                    }
                 } else {
-                    $resourceGroupCleanup = Remove-FoundryResourceGroup `
-                        -ResourceGroupName $CleanupResourceGroup `
-                        -Location $location `
-                        -SubscriptionId $subscriptionId
+                    $resourceGroupCleanup = [pscustomobject]@{
+                        ResourceGroupStatus = "Resource group $CleanupResourceGroup already deleted ℹ️"
+                        CognitiveServicesStatus = 'No Cognitive Services purge work required because the resource group is already deleted ℹ️'
+                    }
                 }
 
                 $targetSuffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $CleanupResourceGroup
