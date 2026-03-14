@@ -342,7 +342,14 @@ No hardcoded subscription GUIDs — subscriptions are looked up by display name.
 
 The `bot-app/` directory contains a separate deployment for **Bot the Builder**, a Teams bot that manages Foundry deployments via chat commands.
 
-### Architecture
+### Bot-The-Builder Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./images/foundry-bot-arch-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="./images/foundry-bot-arch-light.png">
+  <img alt="Architecture Diagram" src="./images/architecture-dark.png">
+</picture>
+
 
 ```
 Teams ──► Azure Bot Service (F0, UserAssignedMSI)
