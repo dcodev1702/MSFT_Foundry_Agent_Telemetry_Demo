@@ -338,9 +338,9 @@ No hardcoded subscription GUIDs — subscriptions are looked up by display name.
 
 ---
 
-## 🤖 Bot Infrastructure (Container Apps)
+## 🤖 Bot Infrastructure
 
-The `bot-app/` directory contains a separate deployment for **Bot the Builder**, a Teams bot that manages Foundry deployments via chat commands.
+The `bot-app/` directory contains a separate deployment for **Bot-The-Builder**, a Teams bot that manages Foundry deployments via chat commands.
 
 ### Bot-The-Builder Architecture
 
@@ -351,34 +351,7 @@ The `bot-app/` directory contains a separate deployment for **Bot the Builder**,
 </picture>
 
 
-```
-Teams ──► Azure Bot Service (F0, UserAssignedMSI)
-              │
-              ▼
-  Azure Container App (zolab-bot-ca-botprd-vnet)
-     ┌─────────────────────────────────────────┐
-     │  M365 Agents SDK  │  aiohttp (:8000)    │
-     │  JWT Auth          │  Heartbeat (15m)    │
-     │  Proactive Msgs    │  UAMI Auth          │
-     └────────┬───────────┬────────────────────┘
-              │           │
-    ┌─────────▼──────────┐  ┌────▼──────────────┐
-    │ Private Queue PE   │  │ Private Blob PE   │
-    │  (botjobs)         │  │  (botstate)       │
-    └──────┬─────────────┘  └───────────────┬──┘
-           │
-           ▼
-     ACI Worker (zolab-worker-aci-botprd)
-     ┌─────────────────────────────────────────┐
-     │  Polls queue ──► PowerShell/Bicep        │
-     │  Sends results ──► Proactive messaging   │
-     └─────────────────────────────────────────┘
-
-  Shared VNet (zolab-worker-vnet-botprd)
-  ├── snet-containerapps
-  ├── snet-worker-aci
-  └── snet-storage-private-endpoints
-```
+---
 
 ### Key Components
 
