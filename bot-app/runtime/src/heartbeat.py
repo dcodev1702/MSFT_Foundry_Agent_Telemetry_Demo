@@ -1,7 +1,7 @@
 # ════════════════════════════════════════════════════════════════
 # heartbeat.py — Automatic heartbeat service
 # Broadcasts bot health metrics to all stored conversations
-# every 15 minutes, and provides on-demand heartbeat text.
+# every 2 hours by default, and provides on-demand heartbeat text.
 # ════════════════════════════════════════════════════════════════
 from __future__ import annotations
 
@@ -23,10 +23,36 @@ logger = logging.getLogger(__name__)
 
 
 class HeartbeatService:
-    """Broadcasts live bot health metrics every 15 minutes."""
+    """Broadcasts live bot health metrics every 2 hours by default."""
 
-    INTERVAL = 900  # 15 minutes in seconds
+    INTERVAL = 7200  # 2 hours in seconds
     DEFAULT_LLM_MODEL = "gpt-5.3-chat"
+
+    @classmethod
+    def resolve_interval_seconds(cls, raw_value: str | None) -> int:
+        """Parse the configured heartbeat interval or fall back to the default."""
+        if raw_value is None or not raw_value.strip():
+            return cls.INTERVAL
+
+        try:
+            interval_seconds = int(raw_value)
+        except ValueError:
+            logger.warning(
+                "Invalid HEARTBEAT_INTERVAL_SECONDS=%r; defaulting to %d",
+                raw_value,
+                cls.INTERVAL,
+            )
+            return cls.INTERVAL
+
+        if interval_seconds <= 0:
+            logger.warning(
+                "Non-positive HEARTBEAT_INTERVAL_SECONDS=%r; defaulting to %d",
+                raw_value,
+                cls.INTERVAL,
+            )
+            return cls.INTERVAL
+
+        return interval_seconds
 
     def __init__(
         self,

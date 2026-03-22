@@ -52,6 +52,9 @@ param containerEnvName string = ''
 @description('Optional override for the Container App name')
 param containerAppName string = ''
 
+@description('Heartbeat broadcast interval for the bot web app in seconds')
+param heartbeatIntervalSeconds int = 7200
+
 @description('Enable custom VNet integration for the Container Apps environment')
 param enablePrivateContainerAppsNetworking bool = false
 
@@ -256,6 +259,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               {
                 name: 'HEARTBEAT_ENABLED'
                 value: 'true'
+              }
+              {
+                name: 'HEARTBEAT_INTERVAL_SECONDS'
+                value: string(heartbeatIntervalSeconds)
               }
               {
                 name: 'MSFT_LEARN_MCP_URL'

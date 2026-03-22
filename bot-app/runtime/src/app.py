@@ -66,6 +66,9 @@ PORT = int(os.getenv("PORT", "3978"))
 DEPLOY_SCRIPT = Path(os.getenv("DEPLOY_SCRIPT_PATH", DEFAULT_DEPLOY_SCRIPT))
 WORKER_ENABLED = os.getenv("WORKER_ENABLED", "true").lower() in ("true", "1", "yes")
 HEARTBEAT_ENABLED = os.getenv("HEARTBEAT_ENABLED", "true").lower() in ("true", "1", "yes")
+HEARTBEAT_INTERVAL_SECONDS = HeartbeatService.resolve_interval_seconds(
+    os.getenv("HEARTBEAT_INTERVAL_SECONDS")
+)
 
 # ── M365 Agents SDK Configuration ─────────────────────────────
 agents_sdk_config = load_configuration_from_env(environ)
@@ -101,6 +104,7 @@ heartbeat_service = HeartbeatService(
     store=store,
     dispatcher=dispatcher,
 )
+heartbeat_service.INTERVAL = HEARTBEAT_INTERVAL_SECONDS
 weather_service = WeatherService()
 msft_docs_service = MicrosoftLearnMcpService()
 

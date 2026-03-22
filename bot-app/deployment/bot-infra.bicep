@@ -71,6 +71,9 @@ param containerEnvName string = ''
 @description('Optional override for the Container App name')
 param containerAppName string = ''
 
+@description('Heartbeat broadcast interval for the bot web app in seconds')
+param heartbeatIntervalSeconds int = 7200
+
 @description('Enable custom VNet integration for the Container Apps environment')
 param enablePrivateContainerAppsNetworking bool = false
 
@@ -105,6 +108,7 @@ module botResources 'modules/bot-resources.bicep' = {
     weatherLlmSkuCapacity: weatherLlmSkuCapacity
     containerEnvName: containerEnvName
     containerAppName: containerAppName
+    heartbeatIntervalSeconds: heartbeatIntervalSeconds
     enablePrivateContainerAppsNetworking: enablePrivateContainerAppsNetworking
     containerAppsInfrastructureSubnetResourceId: containerAppsInfrastructureSubnetResourceId
   }

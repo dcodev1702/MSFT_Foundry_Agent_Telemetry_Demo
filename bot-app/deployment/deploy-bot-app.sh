@@ -61,6 +61,7 @@ WEATHER_LLM_MODEL_VERSION="${WEATHER_LLM_MODEL_VERSION:-2026-03-03}"
 WEATHER_LLM_MODEL_FORMAT="${WEATHER_LLM_MODEL_FORMAT:-OpenAI}"
 WEATHER_LLM_SKU_NAME="${WEATHER_LLM_SKU_NAME:-GlobalStandard}"
 WEATHER_LLM_SKU_CAPACITY="${WEATHER_LLM_SKU_CAPACITY:-50}"
+HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-7200}"
 
 # ── Validate prerequisites ──────────────────────────────────────
 if ! az account show &>/dev/null; then
@@ -100,6 +101,7 @@ echo ""
 echo "  ✓ Stable bot LLM deployment: ${WEATHER_LLM_MODEL}"
 echo "  ✓ Backing model: ${WEATHER_LLM_MODEL_NAME} ${WEATHER_LLM_MODEL_VERSION}"
 echo "  ✓ Deployment SKU: ${WEATHER_LLM_SKU_NAME} (${WEATHER_LLM_SKU_CAPACITY})"
+echo "  ✓ Heartbeat interval: ${HEARTBEAT_INTERVAL_SECONDS} seconds"
 echo "  ✓ Container App target: ${CONTAINER_APP_NAME}"
 echo "  ✓ Container Apps environment target: ${CONTAINER_ENV_NAME}"
 echo "  ✓ Private Container Apps networking: ${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING}"
@@ -148,6 +150,7 @@ az deployment sub create \
     weatherLlmModelFormat="${WEATHER_LLM_MODEL_FORMAT}" \
     weatherLlmSkuName="${WEATHER_LLM_SKU_NAME}" \
     weatherLlmSkuCapacity="${WEATHER_LLM_SKU_CAPACITY}" \
+    heartbeatIntervalSeconds="${HEARTBEAT_INTERVAL_SECONDS}" \
     containerEnvName="${CONTAINER_ENV_NAME}" \
     containerAppName="${CONTAINER_APP_NAME}" \
     enablePrivateContainerAppsNetworking="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING}" \

@@ -30,7 +30,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
   │  - M365 Agents SDK handlers      │
   │  - JWT auth middleware            │
   │  - Proactive messaging           │
-  │  - Heartbeat service (15 min)    │
+     │  - Heartbeat service (2 hours)   │
   │                                  │
   │  Identity: UAMI (zolab-bot-mi)   │
   └──────────┬───────────────────────┘
@@ -101,7 +101,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `src/storage_config.py` | Shared Azure credential and client configuration |
 | `requirements.txt` | Python dependencies |
 
-The bot web app sends a proactive heartbeat to stored conversations every 15 minutes. This runs independently from the queue worker so heartbeat messages continue even when the bot container is configured with `WORKER_ENABLED=false` and Azure Container Instances handle job execution.
+The bot web app sends a proactive heartbeat to stored conversations every 2 hours by default. This runs independently from the queue worker so heartbeat messages continue even when the bot container is configured with `WORKER_ENABLED=false` and Azure Container Instances handle job execution. Override this with `HEARTBEAT_INTERVAL_SECONDS` when you need a different cadence.
 
 ## Azure Resources
 
@@ -143,6 +143,7 @@ export TEAMS_APP_ID="<teams-app-manifest-id>"
 export AZURE_STORAGE_ACCOUNT="zolabworkerstbotprd"
 export AZURE_QUEUE_NAME="botjobs"
 export AZURE_BLOB_CONTAINER="botstate"
+export HEARTBEAT_INTERVAL_SECONDS="7200"
 export MSFT_LEARN_MCP_URL="https://learn.microsoft.com/api/mcp"
 export MSFT_LEARN_MCP_TIMEOUT_SECONDS="20"
 export WEATHER_LLM_AZURE_OPENAI_ENDPOINT="https://<bot-owned-stable-endpoint>.cognitiveservices.azure.com/"
