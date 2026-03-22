@@ -1786,6 +1786,123 @@ function Remove-FoundryLawWorkspaceAccess {
     }
 }
 
+function Invoke-CognitiveServicesAccountPurge {
+    param(
+        [Parameter(Mandatory)]
+        [string]$AccountName,
+
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId,
+
+        [int]$MaxAttempts = 12,
+
+        [int]$RetryDelaySeconds = 10
+    )
+
+    $lastErrorMessage = $null
+
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $deletedAccountCountOutput = az cognitiveservices account list-deleted `
+            --subscription $SubscriptionId `
+            --query "[?name=='$AccountName' && location=='$Location'] | length(@)" `
+            -o tsv 2>&1
+        $deletedAccountCountExitCode = $LASTEXITCODE
+
+        $deletedAccountCount = 0
+        if ($deletedAccountCountExitCode -eq 0) {
+            [void][int]::TryParse((($deletedAccountCountOutput -join '').Trim()), [ref]$deletedAccountCount)
+        } else {
+            $lastErrorMessage = "Failed to query soft-deleted Cognitive Services accounts: $($deletedAccountCountOutput -join ' ')"
+        }
+
+        if ($deletedAccountCount -lt 1) {
+            if ($attempt -lt $MaxAttempts) {
+                Write-Host "  Waiting for soft-deleted account '$AccountName' to become purgeable (attempt $attempt/$MaxAttempts)..."
+                Start-Sleep -Seconds $RetryDelaySeconds
+                continue
+            }
+
+            $status = if ($lastErrorMessage) {
+                "Soft-deleted account $AccountName was not purgeable after $MaxAttempts attempts ⚠️ ($lastErrorMessage)"
+            } else {
+                "Soft-deleted account $AccountName was not purgeable after $MaxAttempts attempts ⚠️"
+            }
+
+            return [pscustomobject]@{
+                Purged = $false
+                Status = $status
+            }
+        }
+
+        $purgeOutput = az cognitiveservices account purge `
+            --name $AccountName `
+            --resource-group $ResourceGroupName `
+            --location $Location `
+            --subscription $SubscriptionId 2>&1
+        $purgeExitCode = $LASTEXITCODE
+
+        if ($purgeExitCode -eq 0) {
+            return [pscustomobject]@{
+                Purged = $true
+                Status = "Purged $AccountName ✅"
+            }
+        }
+
+        $lastErrorMessage = ($purgeOutput -join ' ').Trim()
+        if ($attempt -lt $MaxAttempts) {
+            Write-Host "  Purge for '$AccountName' is not ready yet (attempt $attempt/$MaxAttempts). Retrying in $RetryDelaySeconds seconds..."
+            Start-Sleep -Seconds $RetryDelaySeconds
+        }
+    }
+
+    [pscustomobject]@{
+        Purged = $false
+        Status = "Failed to purge soft-deleted account $AccountName after $MaxAttempts attempts ⚠️ ($lastErrorMessage)"
+    }
+}
+
+function Remove-FoundryDeletedCognitiveServicesAccount {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+
+        [Parameter(Mandatory)]
+        [string]$Location,
+
+        [Parameter(Mandatory)]
+        [string]$SubscriptionId
+    )
+
+    $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $ResourceGroupName
+    if (-not $buildInfoRecord) {
+        return [pscustomobject]@{
+            Purged = $false
+            Status = 'No Cognitive Services purge work required because the resource group is already deleted ℹ️'
+        }
+    }
+
+    $foundryAccountName = [string]$buildInfoRecord.Data.foundry_name
+    if ([string]::IsNullOrWhiteSpace($foundryAccountName)) {
+        return [pscustomobject]@{
+            Purged = $false
+            Status = 'No Cognitive Services purge work required because the build info did not include a Foundry account name ℹ️'
+        }
+    }
+
+    Write-Host "Attempting residual purge for soft-deleted account '$foundryAccountName'..."
+    Invoke-CognitiveServicesAccountPurge `
+        -AccountName $foundryAccountName `
+        -ResourceGroupName $ResourceGroupName `
+        -Location $Location `
+        -SubscriptionId $SubscriptionId
+}
+
 function Remove-FoundryResourceGroup {
     param(
         [Parameter(Mandatory)]
@@ -1809,22 +1926,21 @@ function Remove-FoundryResourceGroup {
 
     Remove-AzResourceGroup -Name $ResourceGroupName -Force | Out-Null
 
+    $cognitiveServicesStatuses = @()
     foreach ($cog in $cogAccounts) {
         Write-Host "  Purging soft-deleted account '$($cog.Name)'..."
-        az cognitiveservices account purge `
-            --name $cog.Name `
-            --resource-group $ResourceGroupName `
-            --location $Location `
-            --subscription $SubscriptionId 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to purge Cognitive Services account '$($cog.Name)' after deleting '$ResourceGroupName'."
-        }
+        $purgeResult = Invoke-CognitiveServicesAccountPurge `
+            -AccountName $cog.Name `
+            -ResourceGroupName $ResourceGroupName `
+            -Location $Location `
+            -SubscriptionId $SubscriptionId
+        $cognitiveServicesStatuses += $purgeResult.Status
     }
 
     [pscustomobject]@{
         ResourceGroupStatus = "Deleted $ResourceGroupName ✅"
         CognitiveServicesStatus = if ($cogAccounts) {
-            "Purged $($cogAccounts.Name -join ', ') ✅"
+            $cognitiveServicesStatuses -join '; '
         } else {
             "No Cognitive Services accounts found ℹ️"
         }
@@ -2006,9 +2122,18 @@ if ($Cleanup) {
                             -SubscriptionId $subscriptionId
                     }
                 } else {
+                    $residualPurgeStatus = if ($PreviewCleanup) {
+                        'Would check for residual Cognitive Services purge work because the resource group is already deleted ℹ️'
+                    } else {
+                        (Remove-FoundryDeletedCognitiveServicesAccount `
+                            -ResourceGroupName $CleanupResourceGroup `
+                            -Location $location `
+                            -SubscriptionId $subscriptionId).Status
+                    }
+
                     $resourceGroupCleanup = [pscustomobject]@{
                         ResourceGroupStatus = "Resource group $CleanupResourceGroup already deleted ℹ️"
-                        CognitiveServicesStatus = 'No Cognitive Services purge work required because the resource group is already deleted ℹ️'
+                        CognitiveServicesStatus = $residualPurgeStatus
                     }
                 }
 
