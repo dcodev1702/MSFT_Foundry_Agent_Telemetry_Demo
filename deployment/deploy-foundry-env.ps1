@@ -768,7 +768,7 @@ function Sync-BuildInfoFromBlobIfAvailable {
     $targetPath = Get-BuildInfoPathForSuffix -Suffix $Suffix
     $blobName = "builds/build_info-$Suffix.json"
 
-    $downloadOutput = & az storage blob download `
+    $null = & az storage blob download `
         --auth-mode login `
         --account-name $storageAccountName `
         --container-name $blobContainerName `
@@ -2220,24 +2220,44 @@ if ($Cleanup) {
             } else {
                 Write-Host "=== CLEANUP MODE ==="
 
+                $rgList = @(Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' })
+                $managedResourceGroupScopes = @(
+                    $rgList |
+                        ForEach-Object { "/subscriptions/$subscriptionId/resourceGroups/$($_.ResourceGroupName)" }
+                )
+
                 $group = Get-MgGroup -Filter "displayName eq '$groupDisplayName'" -ErrorAction SilentlyContinue
                 if ($group) {
                     $groupObjectId = $group.Id
                     Write-Host "Found Entra group '$groupDisplayName' — ObjectId: $groupObjectId"
 
-                    Write-Host "Removing RBAC role assignments for '$groupDisplayName'..."
-                    $assignments = Get-AzRoleAssignment -ObjectId $groupObjectId -ErrorAction SilentlyContinue
-                    foreach ($a in $assignments) {
-                        Write-Host "  Removing: $($a.RoleDefinitionName) @ $($a.Scope)"
+                    Write-Host "Removing managed Foundry RBAC role assignments for '$groupDisplayName'..."
+                    $assignments = @(Get-AzRoleAssignment -ObjectId $groupObjectId -ErrorAction SilentlyContinue)
+                    $assignmentPlan = Get-FoundryFullTeardownAssignmentPlan `
+                        -Assignments $assignments `
+                        -ManagedResourceGroupScopes $managedResourceGroupScopes
+                    $managedAssignments = @($assignmentPlan.ManagedAssignments)
+                    $preservedAssignments = @($assignmentPlan.PreservedAssignments)
+
+                    foreach ($a in $managedAssignments) {
+                        Write-Host "  Removing managed role: $($a.RoleDefinitionName) @ $($a.Scope)"
                         Remove-AzRoleAssignment -ObjectId $groupObjectId `
                             -RoleDefinitionName $a.RoleDefinitionName `
                             -Scope $a.Scope `
                             -ErrorAction SilentlyContinue
                     }
-                    $rbacStatus = if ($assignments) {
-                        "Removed $($assignments.Count) role assignments for $groupDisplayName ✅"
+
+                    foreach ($a in $preservedAssignments) {
+                        Write-Host "  Preserving non-managed role: $($a.RoleDefinitionName) @ $($a.Scope)"
+                    }
+
+                    $rbacStatus = if ($managedAssignments) {
+                        "Removed $($managedAssignments.Count) managed role assignments for $groupDisplayName ✅"
                     } else {
-                        "No role assignments found for $groupDisplayName ℹ️"
+                        "No managed role assignments found for $groupDisplayName ℹ️"
+                    }
+                    if ($preservedAssignments) {
+                        $rbacStatus += "; preserved $($preservedAssignments.Count) non-managed assignment(s) ℹ️"
                     }
 
                     if (-not $userId) {
@@ -2257,7 +2277,6 @@ if ($Cleanup) {
                     $userStatus = "Entra group '$groupDisplayName' not found ℹ️"
                 }
 
-                $rgList = Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' }
                 $resourceGroupResults = foreach ($rg in $rgList) {
                     Remove-FoundryResourceGroup `
                         -ResourceGroupName $rg.ResourceGroupName `
@@ -2297,13 +2316,27 @@ if ($Cleanup) {
                     $securityStatus = $lawCleanupResult.Status
                 }
 
-                $buildInfoPaths = Get-BuildInfoPaths
-                $buildInfoStatus = if ($buildInfoPaths) {
-                    foreach ($path in $buildInfoPaths) {
+                $buildInfoStatuses = @()
+                foreach ($rg in $rgList) {
+                    $buildInfoStatuses += Remove-BuildInfoForResourceGroup -ResourceGroupName $rg.ResourceGroupName
+                }
+
+                $orphanedBuildInfoPaths = @(Get-BuildInfoPaths)
+                if ($orphanedBuildInfoPaths) {
+                    foreach ($path in $orphanedBuildInfoPaths) {
+                        $fileName = Split-Path -Leaf $path
+                        if ($fileName -match '^build_info-(.+)\.json$') {
+                            $buildInfoStatuses += (Remove-BuildInfoBlobIfAvailable -Suffix $matches[1]).Status
+                        }
+
                         Remove-Item -LiteralPath $path -Force
                         Write-Host "Removed stale build info file '$path'."
                     }
-                    "Removed $($buildInfoPaths.Count) build info file(s) ✅"
+                    $buildInfoStatuses += "Removed $($orphanedBuildInfoPaths.Count) orphaned local build info file(s) ✅"
+                }
+
+                $buildInfoStatus = if ($buildInfoStatuses) {
+                    $buildInfoStatuses -join '; '
                 } else {
                     Write-Host "No build_info files found to remove."
                     "No build info files found ℹ️"

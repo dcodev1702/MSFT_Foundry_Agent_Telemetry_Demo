@@ -101,3 +101,33 @@ Describe 'Get-FoundryManagedResourceGroupAssignmentPlan' {
         @($plan.PreservedAssignments | ForEach-Object RoleDefinitionName) | Should -Be @('custom role')
     }
 }
+
+Describe 'Get-FoundryFullTeardownAssignmentPlan' {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot '..' 'foundry-teardown.helpers.ps1')
+    }
+
+    It 'removes only managed assignments from managed Foundry resource groups' {
+        $managedScopeA = '/subscriptions/sub-123/resourceGroups/zolab-ai-abc123'
+        $managedScopeB = '/subscriptions/sub-123/resourceGroups/zolab-ai-def456'
+        $plan = Get-FoundryFullTeardownAssignmentPlan -Assignments @(
+            [pscustomobject]@{ RoleDefinitionName = 'Reader'; Scope = $managedScopeA },
+            [pscustomobject]@{ RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = $managedScopeB },
+            [pscustomobject]@{ RoleDefinitionName = 'Contributor'; Scope = $managedScopeA },
+            [pscustomobject]@{ RoleDefinitionName = 'Log Analytics Reader'; Scope = '/subscriptions/sec/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom' },
+            [pscustomobject]@{ RoleDefinitionName = 'Reader'; Scope = '/subscriptions/sub-123/resourceGroups/shared-rg' }
+        ) -ManagedResourceGroupScopes @($managedScopeA, $managedScopeB)
+
+        @($plan.ManagedAssignments | ForEach-Object RoleDefinitionName) | Should -Be @('Reader', 'Storage Blob Data Contributor')
+        @($plan.PreservedAssignments | ForEach-Object RoleDefinitionName) | Should -Be @('Contributor', 'Log Analytics Reader', 'Reader')
+    }
+
+    It 'preserves all assignments when no managed resource-group scopes are provided' {
+        $plan = Get-FoundryFullTeardownAssignmentPlan -Assignments @(
+            [pscustomobject]@{ RoleDefinitionName = 'Reader'; Scope = '/subscriptions/sub-123/resourceGroups/zolab-ai-abc123' }
+        ) -ManagedResourceGroupScopes @()
+
+        @($plan.ManagedAssignments).Count | Should -Be 0
+        @($plan.PreservedAssignments | ForEach-Object RoleDefinitionName) | Should -Be @('Reader')
+    }
+}

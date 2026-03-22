@@ -86,3 +86,54 @@ function Get-FoundryManagedResourceGroupAssignmentPlan {
         PreservedAssignments = $preservedAssignments
     }
 }
+
+function Get-FoundryFullTeardownAssignmentPlan {
+    param(
+        [AllowNull()]
+        [object[]]$Assignments,
+
+        [AllowEmptyCollection()]
+        [string[]]$ManagedResourceGroupScopes
+    )
+
+    $normalizedAssignments = @(
+        $Assignments |
+            Where-Object {
+                $_ -and
+                -not [string]::IsNullOrWhiteSpace([string]$_.RoleDefinitionName) -and
+                -not [string]::IsNullOrWhiteSpace([string]$_.Scope)
+            }
+    )
+
+    $managedScopeLookup = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($scope in @($ManagedResourceGroupScopes)) {
+        if (-not [string]::IsNullOrWhiteSpace($scope)) {
+            [void]$managedScopeLookup.Add($scope)
+        }
+    }
+
+    $managedAssignmentLookup = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $managedAssignments = @()
+
+    foreach ($scope in $managedScopeLookup) {
+        $scopePlan = Get-FoundryManagedResourceGroupAssignmentPlan -Assignments $normalizedAssignments -ResourceGroupScope $scope
+        foreach ($assignment in @($scopePlan.ManagedAssignments)) {
+            $assignmentKey = "{0}|{1}" -f [string]$assignment.Scope, [string]$assignment.RoleDefinitionName
+            if ($managedAssignmentLookup.Add($assignmentKey)) {
+                $managedAssignments += $assignment
+            }
+        }
+    }
+
+    $preservedAssignments = @(
+        $normalizedAssignments |
+            Where-Object {
+                -not $managedAssignmentLookup.Contains(("{0}|{1}" -f [string]$_.Scope, [string]$_.RoleDefinitionName))
+            }
+    )
+
+    [pscustomobject]@{
+        ManagedAssignments   = $managedAssignments
+        PreservedAssignments = $preservedAssignments
+    }
+}
