@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 stories.json
 .ipynb_checkpoints/
+.DS_Store
 *.jpg
 *.png
 *.gif
