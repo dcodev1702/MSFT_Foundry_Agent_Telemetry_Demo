@@ -5,10 +5,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
-BOT_NAME="${BOT_NAME:-zolab-bot-ca-botprd-vnet}"
-BOT_RG="zolab-bot-botprd"
-WORKER_NAME="zolab-worker-aci-botprd"
-WORKER_RG="zolab-worker-botprd"
+SUFFIX="${SUFFIX:-botprd}"
+BOT_NAME="${BOT_NAME:-zolab-bot-ca-${SUFFIX}-vnet}"
+BOT_RG="${BOT_RG:-zolab-bot-${SUFFIX}}"
+WORKER_NAME="${WORKER_NAME:-zolab-worker-aci-${SUFFIX}}"
+WORKER_RG="${WORKER_RG:-zolab-worker-${SUFFIX}}"
 
 if ! az account show >/dev/null 2>&1; then
     echo "ERROR: Not logged in. Run 'az login' first." >&2

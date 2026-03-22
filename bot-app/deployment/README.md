@@ -143,7 +143,7 @@ After deployment, confirm:
 
 - The Container App exists and serves `https://<fqdn>/api/messages`
 - The Azure Bot Service endpoint points to the Container App `/api/messages` path
-- The bot UAMI has queue/blob access to `zolabworkerstbotprd`
+- The bot UAMI has queue/blob access to the worker storage account derived from the active suffix (`zolabworkerst${SUFFIX}`)
 - The storage account remains `publicNetworkAccess: Disabled`
 - The bot app is attached to the VNet-backed environment and the worker is attached to the delegated worker subnet
 - The Container Apps Environment is forwarding logs to DIBSecCom LAW when workspace keys were available during deploy

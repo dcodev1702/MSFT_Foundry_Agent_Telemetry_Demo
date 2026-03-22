@@ -38,11 +38,9 @@ ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING="${ENABLE_PRIVATE_CONTAINER_APPS_NETWOR
 CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID:-}"
 
 # DIBSecCom LAW in Security subscription — all logs go here
-SECURITY_SUB="192ad012-896e-4f14-8525-c37a2a9640f9"
+SECURITY_SUB="${SECURITY_SUB:-}"
 LAW_RG="Sentinel"
 LAW_NAME="DIBSecCom"
-
-LAW_WORKSPACE_RESOURCE_ID="/subscriptions/${SECURITY_SUB}/resourceGroups/${LAW_RG}/providers/Microsoft.OperationalInsights/workspaces/${LAW_NAME}"
 
 # ── Resolve repo root ───────────────────────────────────────────
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -61,6 +59,25 @@ WEATHER_LLM_SKU_NAME="${WEATHER_LLM_SKU_NAME:-GlobalStandard}"
 WEATHER_LLM_SKU_CAPACITY="${WEATHER_LLM_SKU_CAPACITY:-50}"
 HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-7200}"
 
+resolve_law_subscription_id() {
+  local subscription_id
+
+  while IFS=$'\t' read -r subscription_id _; do
+    [[ -z "${subscription_id}" ]] && continue
+
+    if az monitor log-analytics workspace show \
+      --subscription "${subscription_id}" \
+      --resource-group "${LAW_RG}" \
+      --workspace-name "${LAW_NAME}" \
+      --query id -o tsv >/dev/null 2>&1; then
+      echo "${subscription_id}"
+      return 0
+    fi
+  done < <(az account list --all --query "[].{id:id,name:name}" -o tsv)
+
+  return 1
+}
+
 # ── Validate prerequisites ──────────────────────────────────────
 if ! az account show &>/dev/null; then
     echo "ERROR: Not logged in. Run 'az login' first." >&2
@@ -70,6 +87,9 @@ fi
 TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv)}"
 UAMI_PRINCIPAL_ID="${UAMI_PRINCIPAL_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query principalId -o tsv)}"
 UAMI_CLIENT_ID="${UAMI_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query clientId -o tsv)}"
+if [[ -z "${SECURITY_SUB}" ]]; then
+  SECURITY_SUB="$(resolve_law_subscription_id || true)"
+fi
 
 if [[ -z "${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID}" ]]; then
   SUBSCRIPTION_ID=$(az account show --query id -o tsv)
@@ -84,12 +104,16 @@ fi
 BOT_IMAGE_TAG="botfix-$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
 
 # Fetch DIBSecCom LAW credentials (cross-subscription)
-LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
-  --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
-  --subscription "${SECURITY_SUB}" --query customerId -o tsv 2>/dev/null || true)
-LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys \
-  --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
-  --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv 2>/dev/null || true)
+LAW_CUSTOMER_ID=""
+LAW_SHARED_KEY=""
+if [[ -n "${SECURITY_SUB}" ]]; then
+  LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
+    --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
+    --subscription "${SECURITY_SUB}" --query customerId -o tsv 2>/dev/null || true)
+  LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys \
+    --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
+    --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv 2>/dev/null || true)
+fi
 if [[ -n "${LAW_CUSTOMER_ID}" && -n "${LAW_SHARED_KEY}" ]]; then
   echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
 else

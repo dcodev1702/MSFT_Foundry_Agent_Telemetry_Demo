@@ -6,6 +6,19 @@ For Foundry environment operations, prefer Teams-triggered or queue-driven build
 
 ## Bot
 
+Set the environment-specific values once before running the commands below:
+
+```bash
+SUFFIX="${SUFFIX:-botprd}"
+BOT_NAME="${BOT_NAME:-zolab-bot-ca-${SUFFIX}-vnet}"
+BOT_RG="${BOT_RG:-zolab-bot-${SUFFIX}}"
+WORKER_NAME="${WORKER_NAME:-zolab-worker-aci-${SUFFIX}}"
+WORKER_RG="${WORKER_RG:-zolab-worker-${SUFFIX}}"
+SECURITY_SUB="${SECURITY_SUB:-<security-subscription-id>}"
+BOT_MI_NAME="${BOT_MI_NAME:-zolab-bot-mi-${SUFFIX}}"
+BOT_CLIENT_ID=$(az identity show --name "${BOT_MI_NAME}" --resource-group "${BOT_RG}" --query clientId -o tsv)
+```
+
 Build and deploy the latest bot image locally:
 
 ```bash
@@ -19,8 +32,8 @@ Verify the live bot revision:
 
 ```bash
 az containerapp revision list \
-  --name zolab-bot-ca-botprd \
-  --resource-group zolab-bot-botprd \
+  --name "${BOT_NAME}" \
+  --resource-group "${BOT_RG}" \
   --query "[].{name:name,active:properties.active,traffic:properties.trafficWeight,health:properties.healthState,image:properties.template.containers[0].image}" \
   -o table
 ```
@@ -28,15 +41,14 @@ az containerapp revision list \
 Rollback the bot to a prior immutable image tag:
 
 ```bash
-LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show --resource-group Sentinel --workspace-name DIBSecCom --subscription 192ad012-896e-4f14-8525-c37a2a9640f9 --query customerId -o tsv)
-LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys --resource-group Sentinel --workspace-name DIBSecCom --subscription 192ad012-896e-4f14-8525-c37a2a9640f9 --query primarySharedKey -o tsv)
+LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show --resource-group Sentinel --workspace-name DIBSecCom --subscription "${SECURITY_SUB}" --query customerId -o tsv)
+LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys --resource-group Sentinel --workspace-name DIBSecCom --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv)
 
 az deployment sub create \
   --location eastus2 \
   --template-file bot-app/deployment/bot-infra.bicep \
   --parameters \
-    suffix=botprd \
-    tenantId=b22dee98-83da-4207-b9ab-5ba931866f44 \
+    suffix="${SUFFIX}" \
     logAnalyticsCustomerId="$LAW_CUSTOMER_ID" \
     logAnalyticsSharedKey="$LAW_SHARED_KEY" \
     botImageTag="<prior-bot-tag>"
@@ -55,14 +67,14 @@ Verify the live worker image and build metadata:
 
 ```bash
 az container show \
-  --name zolab-worker-aci-botprd \
-  --resource-group zolab-worker-botprd \
+  --name "${WORKER_NAME}" \
+  --resource-group "${WORKER_RG}" \
   --query '{image:containers[0].image,state:instanceView.state,provisioning:provisioningState,startTime:containers[0].instanceView.currentState.startTime}' \
   -o table
 
 az container exec \
-  --name zolab-worker-aci-botprd \
-  --resource-group zolab-worker-botprd \
+  --name "${WORKER_NAME}" \
+  --resource-group "${WORKER_RG}" \
   --exec-command "cat /app/worker-build-info.json"
 ```
 
@@ -73,12 +85,8 @@ az deployment sub create \
   --location eastus2 \
   --template-file deployment/worker-infra.bicep \
   --parameters \
-    suffix=botprd \
-    botClientId=59bffc04-c429-4580-9833-8ce88c088877 \
-    tenantId=b22dee98-83da-4207-b9ab-5ba931866f44 \
-    managedIdentityResourceId=/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourcegroups/zolab-bot-botprd/providers/Microsoft.ManagedIdentity/userAssignedIdentities/zolab-bot-mi-botprd \
-    managedIdentityPrincipalId=e9a17b6f-74e3-44f4-ae3e-14dd48d5c251 \
-    managedIdentityClientId=59bffc04-c429-4580-9833-8ce88c088877 \
+    suffix="${SUFFIX}" \
+    botClientId="${BOT_CLIENT_ID}" \
     workerCpu=2 \
     workerMemoryInGb=4 \
     workerImageTag="<prior-worker-tag>"
@@ -112,11 +120,11 @@ pwsh -NoProfile -File deployment/remove-teams-app.ps1
 List recent bot tags:
 
 ```bash
-az acr repository show-tags --name zolabbotacrbotprd --repository zolab-bot --orderby time_desc --top 10 -o tsv
+az acr repository show-tags --name "zolabbotacr${SUFFIX}" --repository zolab-bot --orderby time_desc --top 10 -o tsv
 ```
 
 List recent worker tags:
 
 ```bash
-az acr repository show-tags --name zolabworkeracrbotprd --repository zolab-worker --orderby time_desc --top 10 -o tsv
+az acr repository show-tags --name "zolabworkeracr${SUFFIX}" --repository zolab-worker --orderby time_desc --top 10 -o tsv
 ```

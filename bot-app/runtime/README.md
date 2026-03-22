@@ -114,7 +114,7 @@ The bot web app sends a proactive heartbeat to stored conversations every 2 hour
 | `zolab-bot-botprd` | Bot Service (F0) | Teams channel registration |
 | `zolab-worker-aci-botprd` | Container Instance | Worker for PowerShell jobs |
 | `zolabworkeracrbotprd` | Container Registry | Worker container images |
-| `zolabworkerstbotprd` | Storage Account | Queue (`botjobs`) + Blob (`botstate`), private access only |
+| `zolabworkerst${SUFFIX}` | Storage Account | Queue (`botjobs`) + Blob (`botstate`), private access only |
 | `zolab-worker-vnet-botprd` | Virtual Network | Shared private path for bot storage access and worker subnet integration |
 
 ### RBAC Roles (UAMI)
@@ -136,11 +136,13 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Set environment variables
+export SUFFIX="${SUFFIX:-botprd}"
 export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__AUTHTYPE="UserManagedIdentity"
 export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID="<bot-app-id>"
 export CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID="<tenant-id>"
 export TEAMS_APP_ID="<teams-app-manifest-id>"
-export AZURE_STORAGE_ACCOUNT="zolabworkerstbotprd"
+# Required for queue/blob access:
+export AZURE_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 export AZURE_QUEUE_NAME="botjobs"
 export AZURE_BLOB_CONTAINER="botstate"
 export HEARTBEAT_INTERVAL_SECONDS="7200"

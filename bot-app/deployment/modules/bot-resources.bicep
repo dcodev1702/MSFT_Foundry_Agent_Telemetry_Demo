@@ -65,6 +65,7 @@ param containerAppsInfrastructureSubnetResourceId string = ''
 var managedIdentityName = 'zolab-bot-mi-${suffix}'
 var acrName             = 'zolabbotacr${suffix}'
 var botServiceName      = 'zolab-bot-${suffix}'
+var workerStorageAccountName = 'zolabworkerst${suffix}'
 var resolvedContainerEnvName = empty(containerEnvName) ? 'zolab-bot-env-${suffix}' : containerEnvName
 var resolvedContainerAppName = empty(containerAppName) ? 'zolab-bot-ca-${suffix}' : containerAppName
 var botLlmAccountName   = 'zolab-bot-llm-${suffix}'
@@ -238,7 +239,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               }
               {
                 name: 'AZURE_STORAGE_ACCOUNT'
-                value: 'zolabworkerstbotprd'
+                value: workerStorageAccountName
               }
               {
                 name: 'AZURE_QUEUE_NAME'

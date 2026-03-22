@@ -19,7 +19,7 @@ WORKER_VNET_NAME="${WORKER_VNET_NAME:-zolab-worker-vnet-${SUFFIX}}"
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 BOT_MANAGED_IDENTITY_NAME="${BOT_MANAGED_IDENTITY_NAME:-zolab-bot-mi-${SUFFIX}}"
 
-SECURITY_SUB="${SECURITY_SUB:-192ad012-896e-4f14-8525-c37a2a9640f9}"
+SECURITY_SUB="${SECURITY_SUB:-}"
 LAW_RG="${LAW_RG:-Sentinel}"
 LAW_NAME="${LAW_NAME:-DIBSecCom}"
 TEAMS_APP_ID="${TEAMS_APP_ID:-ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef}"
@@ -48,6 +48,25 @@ TEAMS_ZIP_PATH="${TEAMS_APP_DIR}/Bot-The-Builder.zip"
 
 log() {
 	printf '\n[%s] %s\n' "$(date -u +%H:%M:%S)" "$*"
+}
+
+resolve_law_subscription_id() {
+	local subscription_id
+
+	while IFS=$'\t' read -r subscription_id _; do
+		[[ -z "${subscription_id}" ]] && continue
+
+		if az monitor log-analytics workspace show \
+			--subscription "${subscription_id}" \
+			--resource-group "${LAW_RG}" \
+			--workspace-name "${LAW_NAME}" \
+			--query id -o tsv >/dev/null 2>&1; then
+			echo "${subscription_id}"
+			return 0
+		fi
+	done < <(az account list --all --query "[].{id:id,name:name}" -o tsv)
+
+	return 1
 }
 
 rollback() {
@@ -103,6 +122,9 @@ fi
 SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
 TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv)}"
 MANAGED_IDENTITY_CLIENT_ID="${MANAGED_IDENTITY_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${BOT_RG}" --query clientId -o tsv)}"
+if [[ -z "${SECURITY_SUB}" ]]; then
+	SECURITY_SUB="$(resolve_law_subscription_id || true)"
+fi
 CONTAINER_APPS_SUBNET_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}/providers/Microsoft.Network/virtualNetworks/${WORKER_VNET_NAME}/subnets/snet-containerapps"
 
 BOT_IMAGE="$(az containerapp show --name "${LEGACY_CONTAINER_APP_NAME}" --resource-group "${BOT_RG}" --query 'properties.template.containers[0].image' -o tsv)"
@@ -111,16 +133,20 @@ BOT_IMAGE_TAG="${BOT_IMAGE##*:}"
 WORKER_IMAGE_TAG="${WORKER_IMAGE##*:}"
 LEGACY_FQDN="$(az containerapp show --name "${LEGACY_CONTAINER_APP_NAME}" --resource-group "${BOT_RG}" --query 'properties.configuration.ingress.fqdn' -o tsv)"
 
-LAW_CUSTOMER_ID="$(az monitor log-analytics workspace show \
-	--resource-group "${LAW_RG}" \
-	--workspace-name "${LAW_NAME}" \
-	--subscription "${SECURITY_SUB}" \
-	--query customerId -o tsv 2>/dev/null || true)"
-LAW_SHARED_KEY="$(az monitor log-analytics workspace get-shared-keys \
-	--resource-group "${LAW_RG}" \
-	--workspace-name "${LAW_NAME}" \
-	--subscription "${SECURITY_SUB}" \
-	--query primarySharedKey -o tsv 2>/dev/null || true)"
+LAW_CUSTOMER_ID=""
+LAW_SHARED_KEY=""
+if [[ -n "${SECURITY_SUB}" ]]; then
+	LAW_CUSTOMER_ID="$(az monitor log-analytics workspace show \
+		--resource-group "${LAW_RG}" \
+		--workspace-name "${LAW_NAME}" \
+		--subscription "${SECURITY_SUB}" \
+		--query customerId -o tsv 2>/dev/null || true)"
+	LAW_SHARED_KEY="$(az monitor log-analytics workspace get-shared-keys \
+		--resource-group "${LAW_RG}" \
+		--workspace-name "${LAW_NAME}" \
+		--subscription "${SECURITY_SUB}" \
+		--query primarySharedKey -o tsv 2>/dev/null || true)"
+fi
 
 if [[ -z "${LAW_CUSTOMER_ID}" || -z "${LAW_SHARED_KEY}" ]]; then
 	log "Proceeding without explicit Log Analytics credentials for the new Container Apps environment"

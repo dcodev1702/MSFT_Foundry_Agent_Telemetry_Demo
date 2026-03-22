@@ -6,7 +6,7 @@
 # Authenticates via Entra ID / RBAC — no storage account keys.
 #
 # Environment variables:
-#   AZURE_STORAGE_ACCOUNT  — storage account name (default: zolabworkerstbotprd)
+#   AZURE_STORAGE_ACCOUNT  — storage account name (required)
 #   AZURE_QUEUE_NAME       — queue name (default: botjobs)
 #   AZURE_BLOB_CONTAINER   — blob container name (default: botstate)
 #   AZURE_CLIENT_ID        — UAMI client ID (for managed identity selection)
@@ -22,11 +22,18 @@ from azure.storage.blob import BlobServiceClient
 
 logger = logging.getLogger(__name__)
 
-STORAGE_ACCOUNT_NAME = os.getenv("AZURE_STORAGE_ACCOUNT", "zolabworkerstbotprd")
 QUEUE_NAME = os.getenv("AZURE_QUEUE_NAME", "botjobs")
 BLOB_CONTAINER_NAME = os.getenv("AZURE_BLOB_CONTAINER", "botstate")
 
 _credential: DefaultAzureCredential | None = None
+
+
+def get_storage_account_name() -> str:
+    storage_account_name = os.getenv("AZURE_STORAGE_ACCOUNT")
+    if storage_account_name:
+        return storage_account_name
+
+    raise RuntimeError("AZURE_STORAGE_ACCOUNT is required for storage access.")
 
 
 def get_credential() -> DefaultAzureCredential:
@@ -45,7 +52,7 @@ def get_credential() -> DefaultAzureCredential:
 
 def get_queue_client() -> QueueClient:
     return QueueClient(
-        account_url=f"https://{STORAGE_ACCOUNT_NAME}.queue.core.windows.net",
+        account_url=f"https://{get_storage_account_name()}.queue.core.windows.net",
         queue_name=QUEUE_NAME,
         credential=get_credential(),
     )
@@ -53,6 +60,6 @@ def get_queue_client() -> QueueClient:
 
 def get_blob_service_client() -> BlobServiceClient:
     return BlobServiceClient(
-        account_url=f"https://{STORAGE_ACCOUNT_NAME}.blob.core.windows.net",
+        account_url=f"https://{get_storage_account_name()}.blob.core.windows.net",
         credential=get_credential(),
     )
