@@ -7,7 +7,6 @@ cd "${REPO_ROOT}"
 
 SUFFIX="${SUFFIX:-botprd}"
 LOCATION="${LOCATION:-eastus2}"
-TENANT_ID="${TENANT_ID:-b22dee98-83da-4207-b9ab-5ba931866f44}"
 
 BOT_RG="zolab-bot-${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
@@ -18,10 +17,7 @@ NEW_CONTAINER_ENV_NAME="${NEW_CONTAINER_ENV_NAME:-zolab-bot-env-${SUFFIX}-vnet}"
 WORKER_CONTAINER_NAME="zolab-worker-aci-${SUFFIX}"
 WORKER_VNET_NAME="${WORKER_VNET_NAME:-zolab-worker-vnet-${SUFFIX}}"
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
-
-MANAGED_IDENTITY_RESOURCE_ID="${MANAGED_IDENTITY_RESOURCE_ID:-/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourcegroups/zolab-bot-botprd/providers/Microsoft.ManagedIdentity/userAssignedIdentities/zolab-bot-mi-botprd}"
-MANAGED_IDENTITY_PRINCIPAL_ID="${MANAGED_IDENTITY_PRINCIPAL_ID:-e9a17b6f-74e3-44f4-ae3e-14dd48d5c251}"
-MANAGED_IDENTITY_CLIENT_ID="${MANAGED_IDENTITY_CLIENT_ID:-59bffc04-c429-4580-9833-8ce88c088877}"
+BOT_MANAGED_IDENTITY_NAME="${BOT_MANAGED_IDENTITY_NAME:-zolab-bot-mi-${SUFFIX}}"
 
 SECURITY_SUB="${SECURITY_SUB:-192ad012-896e-4f14-8525-c37a2a9640f9}"
 LAW_RG="${LAW_RG:-Sentinel}"
@@ -105,6 +101,8 @@ if ! az account show &>/dev/null; then
 fi
 
 SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv)}"
+MANAGED_IDENTITY_CLIENT_ID="${MANAGED_IDENTITY_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${BOT_RG}" --query clientId -o tsv)}"
 CONTAINER_APPS_SUBNET_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}/providers/Microsoft.Network/virtualNetworks/${WORKER_VNET_NAME}/subnets/snet-containerapps"
 
 BOT_IMAGE="$(az containerapp show --name "${LEGACY_CONTAINER_APP_NAME}" --resource-group "${BOT_RG}" --query 'properties.template.containers[0].image' -o tsv)"
@@ -153,10 +151,6 @@ az deployment sub create \
 	--parameters \
 		suffix="${SUFFIX}" \
 		botClientId="${MANAGED_IDENTITY_CLIENT_ID}" \
-		tenantId="${TENANT_ID}" \
-		managedIdentityResourceId="${MANAGED_IDENTITY_RESOURCE_ID}" \
-		managedIdentityPrincipalId="${MANAGED_IDENTITY_PRINCIPAL_ID}" \
-		managedIdentityClientId="${MANAGED_IDENTITY_CLIENT_ID}" \
 		workerCpu=2 \
 		workerMemoryInGb=4 \
 		workerImageTag="${WORKER_IMAGE_TAG}" \

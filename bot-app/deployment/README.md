@@ -112,10 +112,16 @@ The deploy script now generates an immutable bot image tag from the current UTC 
 The deploy script resolves these values at runtime:
 
 - Teams app manifest ID
-- Tenant ID
+- Tenant ID from the active Azure CLI context unless `TENANT_ID` is explicitly provided
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription when available
 - Worker storage scope for RBAC assignment
 - Worker-owned Container Apps infrastructure subnet resource ID when not explicitly supplied
+
+The standalone parameter file in [bot-infra.bicepparam](bot-infra.bicepparam) no longer needs hard-coded tenant or subscription-scoped subnet resource IDs for the default `botprd` topology.
+
+- `tenantId` now defaults to the current deployment tenant in Bicep.
+- `botResourceGroupName` defaults to `zolab-bot-${suffix}`.
+- `containerAppsInfrastructureSubnetResourceId` can still be provided as a full override, but by default Bicep derives it from `workerSubscriptionId`, `workerResourceGroupName`, `workerVirtualNetworkName`, and `containerAppsInfrastructureSubnetName`.
 
 Grounded weather narration is intentionally separate from the ephemeral Foundry environments created by `build it`.
 

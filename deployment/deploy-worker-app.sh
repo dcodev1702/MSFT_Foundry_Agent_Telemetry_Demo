@@ -16,21 +16,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 SUFFIX="botprd"
 LOCATION="eastus2"
-TENANT_ID="b22dee98-83da-4207-b9ab-5ba931866f44"
 
 WORKER_ACR_NAME="zolabworkeracr${SUFFIX}"
 WORKER_ACI_NAME="zolab-worker-aci-${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
 BOT_RG="zolab-bot-${SUFFIX}"
+BOT_MANAGED_IDENTITY_NAME="${BOT_MANAGED_IDENTITY_NAME:-zolab-bot-mi-${SUFFIX}}"
 ENABLE_PRIVATE_STORAGE_ACCESS="${ENABLE_PRIVATE_STORAGE_ACCESS:-true}"
 WORKER_VNET_ADDRESS_PREFIX="${WORKER_VNET_ADDRESS_PREFIX:-10.42.0.0/24}"
 CONTAINER_APPS_SUBNET_ADDRESS_PREFIX="${CONTAINER_APPS_SUBNET_ADDRESS_PREFIX:-10.42.0.0/27}"
 WORKER_SUBNET_ADDRESS_PREFIX="${WORKER_SUBNET_ADDRESS_PREFIX:-10.42.0.32/28}"
 PRIVATE_ENDPOINT_SUBNET_ADDRESS_PREFIX="${PRIVATE_ENDPOINT_SUBNET_ADDRESS_PREFIX:-10.42.0.48/28}"
-
-MANAGED_IDENTITY_RESOURCE_ID="/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourcegroups/zolab-bot-botprd/providers/Microsoft.ManagedIdentity/userAssignedIdentities/zolab-bot-mi-botprd"
-MANAGED_IDENTITY_PRINCIPAL_ID="e9a17b6f-74e3-44f4-ae3e-14dd48d5c251"
-MANAGED_IDENTITY_CLIENT_ID="59bffc04-c429-4580-9833-8ce88c088877"
 
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
@@ -39,6 +35,8 @@ if ! az account show &>/dev/null; then
     echo "ERROR: Not logged in. Run 'az login' first." >&2
     exit 1
 fi
+
+MANAGED_IDENTITY_CLIENT_ID="${MANAGED_IDENTITY_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${BOT_RG}" --query clientId -o tsv)}"
 
 if ! docker version &>/dev/null; then
     echo "ERROR: Docker is not available. Start Docker Desktop and retry." >&2
@@ -162,10 +160,6 @@ az deployment sub create \
   --parameters \
     suffix="${SUFFIX}" \
     botClientId="${MANAGED_IDENTITY_CLIENT_ID}" \
-    tenantId="${TENANT_ID}" \
-    managedIdentityResourceId="${MANAGED_IDENTITY_RESOURCE_ID}" \
-    managedIdentityPrincipalId="${MANAGED_IDENTITY_PRINCIPAL_ID}" \
-    managedIdentityClientId="${MANAGED_IDENTITY_CLIENT_ID}" \
     workerCpu=2 \
     workerMemoryInGb=4 \
     workerImageTag="${WORKER_IMAGE_TAG}" \

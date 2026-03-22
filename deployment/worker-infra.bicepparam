@@ -10,13 +10,6 @@ using './worker-infra.bicep'
 
 // ── Required (override at deploy time) ────────────────────────
 param suffix   = 'botprd'
-param botClientId = '59bffc04-c429-4580-9833-8ce88c088877'
-param tenantId = 'b22dee98-83da-4207-b9ab-5ba931866f44'
-
-// ── Existing UAMI (created in zolab-bot-botprd RG) ──────────
-param managedIdentityResourceId  = '/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourcegroups/zolab-bot-botprd/providers/Microsoft.ManagedIdentity/userAssignedIdentities/zolab-bot-mi-botprd'
-param managedIdentityPrincipalId = 'e9a17b6f-74e3-44f4-ae3e-14dd48d5c251'
-param managedIdentityClientId    = '59bffc04-c429-4580-9833-8ce88c088877'
 
 // ── Optional ─────────────────────────────────────────────────
 param location = 'eastus2'

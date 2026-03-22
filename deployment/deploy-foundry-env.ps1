@@ -19,7 +19,9 @@ param(
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
     [string]$SelectedAiModel,   # Non-interactive model selection (bypasses PromptForChoice)
     [string]$RequestedBy,
-    [string]$RequestedByObjectId
+    [string]$RequestedByObjectId,
+    [string]$LawResourceGroup = 'Sentinel',
+    [string]$LawWorkspaceName = 'DIBSecCom'
 )
 
 $ErrorActionPreference = "Stop"
@@ -274,9 +276,28 @@ function Get-AzureRoleNamesForAssignee {
     }
 
     try {
-        @($roleNamesJson | ConvertFrom-Json)
+        $roleNames = @($roleNamesJson | ConvertFrom-Json)
+        if ($roleNames.Count -gt 0) {
+            return $roleNames
+        }
     } catch {
-        @()
+        # Fall through to Az PowerShell lookup below.
+    }
+
+    try {
+        $azRoleAssignments = if ($Assignee -match '@') {
+            Get-AzRoleAssignment -Scope $Scope -SignInName $Assignee -ErrorAction Stop
+        } else {
+            Get-AzRoleAssignment -Scope $Scope -ObjectId $Assignee -ErrorAction Stop
+        }
+
+        return @(
+            $azRoleAssignments |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_.RoleDefinitionName) } |
+                Select-Object -ExpandProperty RoleDefinitionName -Unique
+        )
+    } catch {
+        return @()
     }
 }
 
@@ -311,9 +332,11 @@ function Assert-FoundryDeploymentAuthorization {
         [Parameter(Mandatory)]
         [string]$SecuritySubscriptionId,
 
-        [string]$LawResourceGroup = 'Sentinel',
+        [Parameter(Mandatory)]
+        [string]$LawResourceGroup,
 
-        [string]$LawWorkspaceName = 'DIBSecCom'
+        [Parameter(Mandatory)]
+        [string]$LawWorkspaceName
     )
 
     $assignee = Get-CurrentAzureRoleCheckAssignee
@@ -337,7 +360,7 @@ function Assert-FoundryDeploymentAuthorization {
 
     if (-not (Test-AzureRoleAssignmentWriteAccess -Assignee $assignee -Scopes @($lawWorkspaceScope, $securitySubscriptionScope))) {
         throw (@(
-            "Azure principal '$assignee' does not have permission to manage RBAC on the DIBSecCom Log Analytics workspace in the Security subscription."
+            "Azure principal '$assignee' does not have permission to manage RBAC on the $LawWorkspaceName Log Analytics workspace in the Security subscription."
             "The deployment later assigns 'Log Analytics Reader' to the zolab-ai-dev group on $lawWorkspaceScope."
             "Grant 'User Access Administrator' or 'Owner' on the workspace scope or Security subscription and retry."
         ) -join ' ')
@@ -1569,6 +1592,12 @@ function Get-FoundryBuildStatusLines {
         [Parameter(Mandatory)]
         [string]$SecuritySubscriptionId,
 
+        [Parameter(Mandatory)]
+        [string]$LawResourceGroup,
+
+        [Parameter(Mandatory)]
+        [string]$LawWorkspaceName,
+
         [string]$CurrentUserAccount
     )
 
@@ -1641,7 +1670,7 @@ function Get-FoundryBuildStatusLines {
             'Reader missing on resource group ❌'
         }
 
-        $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
+        $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
         Set-AzContext -SubscriptionId $SecuritySubscriptionId | Out-Null
         try {
             $lawAssignments = Get-AzRoleAssignment -ObjectId $group.Id -Scope $lawScope -ErrorAction SilentlyContinue
@@ -1650,9 +1679,9 @@ function Get-FoundryBuildStatusLines {
         }
 
         $lawRbacStatus = if ($lawAssignments) {
-            'Log Analytics Reader on DIBSecCom ✅'
+            "Log Analytics Reader on $LawWorkspaceName ✅"
         } else {
-            'Log Analytics Reader missing on DIBSecCom ❌'
+            "Log Analytics Reader missing on $LawWorkspaceName ❌"
         }
     }
 
@@ -1710,10 +1739,16 @@ function Remove-FoundryLawWorkspaceAccess {
         [Parameter(Mandatory)]
         [string]$GroupObjectId,
 
+        [Parameter(Mandatory)]
+        [string]$LawResourceGroup,
+
+        [Parameter(Mandatory)]
+        [string]$LawWorkspaceName,
+
         [switch]$PreviewOnly
     )
 
-    $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
+    $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
     Write-Host "Cleaning up LAW RBAC in Security subscription..."
     Set-AzContext -SubscriptionId $SecuritySubscriptionId | Out-Null
 
@@ -1893,7 +1928,7 @@ if ($UseTeamsChatFlow) {
 }
 
 if (-not $ListBuilds -and -not $BuildStatusResourceGroup) {
-    Assert-FoundryDeploymentAuthorization -WorkloadSubscriptionId $subscriptionId -SecuritySubscriptionId $securitySubscriptionId
+    Assert-FoundryDeploymentAuthorization -WorkloadSubscriptionId $subscriptionId -SecuritySubscriptionId $securitySubscriptionId -LawResourceGroup $LawResourceGroup -LawWorkspaceName $LawWorkspaceName
 }
 
 # ════════════════════════════════════════════════════════════════
@@ -2009,6 +2044,8 @@ if ($Cleanup) {
                             -SecuritySubscriptionId $securitySubscriptionId `
                             -WorkloadSubscriptionId $subscriptionId `
                             -GroupObjectId $groupObjectId `
+                            -LawResourceGroup $LawResourceGroup `
+                            -LawWorkspaceName $LawWorkspaceName `
                             -PreviewOnly:$PreviewCleanup
                         $securityStatus = $lawCleanupResult.Status
                     }
@@ -2129,7 +2166,9 @@ if ($Cleanup) {
                     $lawCleanupResult = Remove-FoundryLawWorkspaceAccess `
                         -SecuritySubscriptionId $securitySubscriptionId `
                         -WorkloadSubscriptionId $subscriptionId `
-                        -GroupObjectId $groupObjectId
+                        -GroupObjectId $groupObjectId `
+                        -LawResourceGroup $LawResourceGroup `
+                        -LawWorkspaceName $LawWorkspaceName
                     $securityStatus = $lawCleanupResult.Status
                 }
 
@@ -2224,6 +2263,8 @@ if ($BuildStatusResourceGroup) {
             GroupDisplayName       = $groupDisplayName
             SubscriptionId         = $subscriptionId
             SecuritySubscriptionId = $securitySubscriptionId
+            LawResourceGroup       = $LawResourceGroup
+            LawWorkspaceName       = $LawWorkspaceName
         }
         if ($currentUser.Account) {
             $buildStatusParams.CurrentUserAccount = $currentUser.Account
@@ -2396,6 +2437,8 @@ try {
             --parameters `
                 aiDevGroupObjectId=$groupObjectId `
                 securitySubscriptionId=$securitySubscriptionId `
+                lawResourceGroup=$LawResourceGroup `
+                lawWorkspaceName=$LawWorkspaceName `
                 suffix=$suffix `
                 aiModelDeploymentName=$($selectedAiModelSpec.DeploymentName) `
                 aiModelName=$($selectedAiModelSpec.ModelName) `
@@ -2438,7 +2481,7 @@ try {
 
         # ── Deploy LAW RBAC to Security subscription (Log Analytics Reader on DIBSecCom) ──
         $securitySubId = $securitySubscriptionId
-        $lawScope = "/subscriptions/$securitySubId/resourceGroups/Sentinel/providers/Microsoft.OperationalInsights/workspaces/DIBSecCom"
+        $lawScope = "/subscriptions/$securitySubId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
         Write-Host ""
         Write-Host "Deploying Log Analytics Reader RBAC to Security subscription..."
         az account set --subscription $securitySubId 2>&1 | Out-Null
@@ -2452,12 +2495,12 @@ try {
         $existingLawAssignmentExitCode = $LASTEXITCODE
         if ($existingLawAssignmentExitCode -ne 0) {
             az account set --subscription $subscriptionId 2>&1 | Out-Null
-            throw "Failed to verify existing Log Analytics Reader RBAC on DIBSecCom.`n$($existingLawAssignmentCount -join "`n")"
+            throw "Failed to verify existing Log Analytics Reader RBAC on $LawWorkspaceName.`n$($existingLawAssignmentCount -join "`n")"
         }
 
         if ((($existingLawAssignmentCount -join '').Trim()) -eq '1') {
             az account set --subscription $subscriptionId 2>&1 | Out-Null
-            Write-Host "  Log Analytics Reader is already assigned to '$groupDisplayName' on DIBSecCom workspace."
+            Write-Host "  Log Analytics Reader is already assigned to '$groupDisplayName' on $LawWorkspaceName workspace."
         } else {
 
             $lawOutput = az role assignment create `
@@ -2480,7 +2523,7 @@ try {
                 throw "LAW RBAC deployment failed.`n$($lawOutput -join "`n")"
             }
 
-            Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on DIBSecCom workspace."
+            Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on $LawWorkspaceName workspace."
         }
 
         $connectionId = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/providers/Microsoft.CognitiveServices/accounts/$($result.properties.outputs.aiFoundryName.value)/projects/$($result.properties.outputs.aiProjectName.value)/connections/$($result.properties.outputs.aiFoundryName.value)-appinsights"
@@ -2541,7 +2584,7 @@ try {
             -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
             -AppInsightsConnectionStatus $appInsightsConnectionStatus `
             -AppInsightsAccessStatus $appInsightsAccessStatus `
-            -LawRbacStatus 'Log Analytics Reader on DIBSecCom ✅' `
+            -LawRbacStatus "Log Analytics Reader on $LawWorkspaceName ✅" `
             -UserStatus "$requesterAccount added to $groupDisplayName ✅"
         $buildStatusLines | ForEach-Object { Write-Host $_ }
 

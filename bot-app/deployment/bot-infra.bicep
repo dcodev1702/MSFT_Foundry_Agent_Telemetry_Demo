@@ -29,7 +29,7 @@ param location string = 'eastus2'
 param suffix string
 
 @description('Entra Tenant ID')
-param tenantId string
+param tenantId string = tenant().tenantId
 
 @description('Resource group name for bot infrastructure')
 param botResourceGroupName string = 'zolab-bot-${suffix}'
@@ -74,11 +74,33 @@ param containerAppName string = ''
 @description('Heartbeat broadcast interval for the bot web app in seconds')
 param heartbeatIntervalSeconds int = 7200
 
+@description('Subscription ID that hosts the worker VNet used by the bot Container Apps environment')
+param workerSubscriptionId string = subscription().subscriptionId
+
+@description('Resource group that hosts the worker VNet used by the bot Container Apps environment')
+param workerResourceGroupName string = 'zolab-worker-${suffix}'
+
+@description('Worker VNet name used by the bot Container Apps environment')
+param workerVirtualNetworkName string = 'zolab-worker-vnet-${suffix}'
+
+@description('Delegated infrastructure subnet name for the bot Container Apps environment')
+param containerAppsInfrastructureSubnetName string = 'snet-containerapps'
+
 @description('Enable custom VNet integration for the Container Apps environment')
 param enablePrivateContainerAppsNetworking bool = false
 
 @description('Resource ID of the delegated infrastructure subnet for the Container Apps environment')
 param containerAppsInfrastructureSubnetResourceId string = ''
+
+var resolvedContainerAppsInfrastructureSubnetResourceId = empty(containerAppsInfrastructureSubnetResourceId)
+  ? resourceId(
+      workerSubscriptionId,
+      workerResourceGroupName,
+      'Microsoft.Network/virtualNetworks/subnets',
+      workerVirtualNetworkName,
+      containerAppsInfrastructureSubnetName
+    )
+  : containerAppsInfrastructureSubnetResourceId
 
 // ── Resource Group ────────────────────────────────────────────
 
@@ -110,7 +132,7 @@ module botResources 'modules/bot-resources.bicep' = {
     containerAppName: containerAppName
     heartbeatIntervalSeconds: heartbeatIntervalSeconds
     enablePrivateContainerAppsNetworking: enablePrivateContainerAppsNetworking
-    containerAppsInfrastructureSubnetResourceId: containerAppsInfrastructureSubnetResourceId
+    containerAppsInfrastructureSubnetResourceId: resolvedContainerAppsInfrastructureSubnetResourceId
   }
 }
 

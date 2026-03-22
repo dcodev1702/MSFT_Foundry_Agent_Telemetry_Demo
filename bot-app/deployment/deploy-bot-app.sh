@@ -22,7 +22,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ── Configuration ────────────────────────────────────────────────
 SUFFIX="botprd"
 TEAMS_APP_ID="${TEAMS_APP_ID:-ed77d99f-074b-4ef6-9fbc-55bfeb7b5aef}"
-TENANT_ID="b22dee98-83da-4207-b9ab-5ba931866f44"
 LOCATION="eastus2"
 
 RG_BOT="zolab-bot-${SUFFIX}"
@@ -34,10 +33,9 @@ BOT_ACR_NAME="zolabbotacr${SUFFIX}"
 WORKER_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 WORKER_RG="zolab-worker-${SUFFIX}"
 WORKER_ACI_NAME="zolab-worker-aci-${SUFFIX}"
+BOT_MANAGED_IDENTITY_NAME="${BOT_MANAGED_IDENTITY_NAME:-zolab-bot-mi-${SUFFIX}}"
 ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING:-true}"
 CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID:-}"
-
-UAMI_PRINCIPAL_ID="e9a17b6f-74e3-44f4-ae3e-14dd48d5c251"
 
 # DIBSecCom LAW in Security subscription — all logs go here
 SECURITY_SUB="192ad012-896e-4f14-8525-c37a2a9640f9"
@@ -68,6 +66,10 @@ if ! az account show &>/dev/null; then
     echo "ERROR: Not logged in. Run 'az login' first." >&2
     exit 1
 fi
+
+TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv)}"
+UAMI_PRINCIPAL_ID="${UAMI_PRINCIPAL_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query principalId -o tsv)}"
+UAMI_CLIENT_ID="${UAMI_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query clientId -o tsv)}"
 
 if [[ -z "${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID}" ]]; then
   SUBSCRIPTION_ID=$(az account show --query id -o tsv)
@@ -246,11 +248,7 @@ if [[ -n "${CURRENT_WORKER_IMAGE}" ]]; then
     --template-file deployment/worker-infra.bicep \
     --parameters \
       suffix="${SUFFIX}" \
-      botClientId="59bffc04-c429-4580-9833-8ce88c088877" \
-      tenantId="${TENANT_ID}" \
-      managedIdentityResourceId="/subscriptions/08fdc492-f5aa-4601-84ae-03a37449c2ba/resourcegroups/zolab-bot-botprd/providers/Microsoft.ManagedIdentity/userAssignedIdentities/zolab-bot-mi-botprd" \
-      managedIdentityPrincipalId="${UAMI_PRINCIPAL_ID}" \
-      managedIdentityClientId="59bffc04-c429-4580-9833-8ce88c088877" \
+      botClientId="${UAMI_CLIENT_ID}" \
       workerCpu=2 \
       workerMemoryInGb=4 \
       workerImageTag="${CURRENT_WORKER_IMAGE_TAG}" \

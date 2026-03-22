@@ -32,7 +32,6 @@ param resourceGroupPrefix   = 'zolab-ai'
 param namePrefix            = 'zolabai'
 
 // ── Log Analytics Workspace (cross-subscription) ──
-param lawResourceGroup      = 'Sentinel'
 param lawWorkspaceName      = 'DIBSecCom'
 
 // ── Storage Account ──

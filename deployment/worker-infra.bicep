@@ -28,22 +28,22 @@ param location string = 'eastus2'
 param suffix string
 
 @description('Bot client ID used for proactive messaging (UAMI client ID after MI cutover)')
-param botClientId string
+param botClientId string = ''
 
 @description('Entra Tenant ID')
-param tenantId string
+param tenantId string = tenant().tenantId
 
 @description('Resource group name for worker infrastructure')
 param workerResourceGroupName string = 'zolab-worker-${suffix}'
 
-@description('Resource ID of the existing User-Assigned Managed Identity')
-param managedIdentityResourceId string
+@description('Subscription ID that hosts the existing bot User-Assigned Managed Identity')
+param managedIdentitySubscriptionId string = subscription().subscriptionId
 
-@description('Principal ID of the existing User-Assigned Managed Identity')
-param managedIdentityPrincipalId string
+@description('Resource group that hosts the existing bot User-Assigned Managed Identity')
+param managedIdentityResourceGroupName string = 'zolab-bot-${suffix}'
 
-@description('Client ID of the existing User-Assigned Managed Identity')
-param managedIdentityClientId string
+@description('Name of the existing bot User-Assigned Managed Identity')
+param managedIdentityName string = 'zolab-bot-mi-${suffix}'
 
 @description('CPU requested for the worker container instance')
 param workerCpu int = 2
@@ -72,6 +72,16 @@ param workerSubnetAddressPrefix string = '10.42.0.32/28'
 @description('Subnet prefix reserved for storage private endpoints')
 param privateEndpointSubnetAddressPrefix string = '10.42.0.48/28'
 
+resource botManagedIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
+  scope: resourceGroup(managedIdentitySubscriptionId, managedIdentityResourceGroupName)
+  name: managedIdentityName
+}
+
+var resolvedBotClientId = empty(botClientId) ? botManagedIdentity.properties.clientId : botClientId
+var resolvedManagedIdentityResourceId = botManagedIdentity.id
+var resolvedManagedIdentityPrincipalId = botManagedIdentity.properties.principalId
+var resolvedManagedIdentityClientId = botManagedIdentity.properties.clientId
+
 // ── Resource Group ────────────────────────────────────────────
 
 resource workerRg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
@@ -87,11 +97,11 @@ module workerResources 'modules/worker-resources.bicep' = {
   params: {
     location: location
     suffix: suffix
-    botClientId: botClientId
+    botClientId: resolvedBotClientId
     tenantId: tenantId
-    managedIdentityResourceId: managedIdentityResourceId
-    managedIdentityPrincipalId: managedIdentityPrincipalId
-    managedIdentityClientId: managedIdentityClientId
+    managedIdentityResourceId: resolvedManagedIdentityResourceId
+    managedIdentityPrincipalId: resolvedManagedIdentityPrincipalId
+    managedIdentityClientId: resolvedManagedIdentityClientId
     workerCpu: workerCpu
     workerMemoryInGb: workerMemoryInGb
     workerImageTag: workerImageTag
