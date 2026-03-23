@@ -91,6 +91,8 @@ The script performs four steps:
 3. Grants Storage Queue and Blob RBAC to the bot UAMI on the worker storage account
 4. Regenerates the Teams manifest and refreshes the in-repo Teams app zip with the live bot identity and domain
 
+After the script finishes, the upload-ready Teams package is available at `bot-app/teams-app/Bot-The-Builder.zip`.
+
 ---
 
 ## 🔄 Update Flow

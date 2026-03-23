@@ -51,7 +51,7 @@ Container Apps Environment on delegated subnet (`zolab-bot-env-botprd-vnet`)
 | Shared UAMI | Handles Azure auth for ACR pulls, Storage access, and automation operations |
 | Shared worker VNet | Carries the Container Apps infrastructure subnet, worker subnet, and storage private endpoint subnet |
 
-### A365 Agents SDK vs Bot Framework Imports
+### M365 Agents SDK vs Bot Framework Imports
 
 This bot is built on the Microsoft 365 Agents SDK, not the older Bot Framework SDK. The practical difference in Python is that imports move from the `botbuilder.*` namespace to the `microsoft_agents.*` namespace, and the app model becomes more host-oriented and decorator-based.
 
@@ -62,7 +62,7 @@ from botbuilder.core import BotFrameworkAdapter, TurnContext, MemoryStorage, Mes
 from botbuilder.schema import Activity
 ```
 
-In this repo, the A365 Agents SDK imports look like:
+In this repo, the M365 Agents SDK imports look like:
 
 ```python
 from microsoft_agents.activity import load_configuration_from_env, Activity, ConversationReference
@@ -74,7 +74,7 @@ from microsoft_agents.hosting.core import AgentApplication, Authorization, Memor
 What changed conceptually:
 
 - Bot Framework centered on `BotFrameworkAdapter` plus `ActivityHandler`-style classes and the `botbuilder.core` / `botbuilder.schema` packages.
-- A365 Agents SDK centers on `CloudAdapter`, `AgentApplication`, and the `microsoft_agents.hosting.*` packages.
+- M365 Agents SDK centers on `CloudAdapter`, `AgentApplication`, and the `microsoft_agents.hosting.*` packages.
 - Authentication wiring is more explicit with `MsalConnectionManager` plus `Authorization`, instead of just adapter settings and app credentials.
 - The aiohttp host integration is first-class: `start_agent_process(...)` handles inbound activity processing for the local and deployed web app.
 - Proactive messaging also moved namespaces; in this repo it uses `ConversationReference`, `TurnContext`, and `ClaimsIdentity` from the `microsoft_agents` packages.
@@ -95,6 +95,8 @@ The user-facing command surface includes:
 
 - `build it`
 - `build it <model>`
+- `weather <city>`
+- `msft_docs <question>`
 - `list builds`
 - `build status <resource-group>`
 - `teardown`
@@ -206,7 +208,7 @@ See [deployment/README.md](deployment/README.md) for the bot infrastructure depl
 
 ### Sideload the Teams app
 
-Zip the contents of `bot-app/teams-app/` and upload that package in Teams as a custom app.
+Upload the generated `bot-app/teams-app/Bot-The-Builder.zip` package in Teams as a custom app. The deploy script refreshes that archive in place each time it runs. If you are updating the manifest manually outside the deploy flow, re-zip `manifest.json`, `color.png`, and `outline.png` from `bot-app/teams-app/` before uploading.
 
 If Teams keeps showing a stale custom app package after uninstalling it in the client, run `pwsh ./deployment/remove-teams-app.ps1` from the repo root to remove the current-user installation and the tenant app-catalog entry for this bot's manifest ID.
 

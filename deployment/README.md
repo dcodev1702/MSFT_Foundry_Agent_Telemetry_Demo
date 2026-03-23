@@ -1,6 +1,6 @@
 # 🚀 Microsoft Foundry — Bicep Deployment
 
-Infrastructure-as-Code deployment for an Microsoft Foundry environment with full RBAC, diagnostic settings, and cross-subscription Log Analytics integration.
+Infrastructure-as-Code deployment for a Microsoft Foundry environment with full RBAC, diagnostic settings, and cross-subscription Log Analytics integration.
 
 ---
 
@@ -58,7 +58,7 @@ The deployment script requires an AI model selection and only allows these optio
 |---|---|---|---|---|
 | 🧠 `gpt-4.1-mini` | `gpt-4.1-mini` | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
 | 🧠 `gpt-5.3` | `gpt-5.3*` (for example `gpt-5.3-chat`) | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
-| 🧠 `gpt-5.4` | `gpt-5.4*` (if available in target region) | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
+| 🧠 `gpt-5.4` | `gpt-5.4*` (for example `gpt-5.4-mini`) | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
 | 🧠 `grok-4-1-fast-reasoning` | `grok-4-1-fast-reasoning` | Latest available in target region | Prefer `GlobalStandard`, otherwise next deployable SKU | Up to 250 |
 
 ### RBAC Role Assignments
@@ -116,18 +116,18 @@ bot-app/
 │   └── modules/
 │       └── bot-resources.bicep      # Container App + ACR + Bot Service + UAMI
 └── runtime/
-  ├── src/
-  │   ├── app.py                   # aiohttp host + M365 Agents SDK adapter
-  │   ├── bot.py                   # Teams message/event handlers
-  │   ├── worker.py                # Background queue worker
-  │   ├── worker_standalone.py     # Standalone worker entry point
-  │   ├── proactive.py             # Proactive messaging service
-  │   ├── heartbeat.py             # Periodic heartbeat broadcaster
-  │   ├── command_parser.py        # Command parser
-  │   └── conversation_store.py    # Azure Blob conversation store
-    ├── job_dispatcher.py            # Azure Queue job dispatcher
-    ├── storage_config.py            # Shared Azure credential config
-    ├── models.py                    # Data models
+    ├── src/
+    │   ├── app.py                   # aiohttp host + M365 Agents SDK adapter
+    │   ├── bot.py                   # Teams message/event handlers
+    │   ├── worker.py                # Background queue worker
+    │   ├── worker_standalone.py     # Standalone worker entry point
+    │   ├── proactive.py             # Proactive messaging service
+    │   ├── heartbeat.py             # Periodic heartbeat broadcaster
+    │   ├── command_parser.py        # Command parser
+    │   ├── conversation_store.py    # Azure Blob conversation store
+    │   ├── job_dispatcher.py        # Azure Queue job dispatcher
+    │   ├── storage_config.py        # Shared Azure credential config
+    │   └── models.py                # Data models
     └── requirements.txt             # Python dependencies
 ```
 
@@ -138,6 +138,13 @@ bot-app/
 ```powershell
 cd deployment
 pwsh ./deploy-foundry-env.ps1
+```
+
+Optional non-interactive model selection:
+
+```powershell
+cd deployment
+pwsh ./deploy-foundry-env.ps1 -SelectedAiModel gpt-5.4
 ```
 
 Optional Teams-driven flow:
@@ -270,7 +277,7 @@ That script verifies the live bot revision, worker runtime, and current worker b
 
 Upon completion, the script outputs all resource names and writes `build_info-<suffix>.json` at the repo root for notebook configuration.
 
-- 🌐 **Foundry Project Endpoint** — stored in `build_info-<suffix>.json` as `foundry_project_endpoint` and loaded by the Win11 notebook into `foundry_proj_ep`
+- 🌐 **Foundry Project Endpoint** — stored in `build_info-<suffix>.json` as `foundry_project_endpoint` and loaded by the demo notebooks into `foundry_proj_ep`
 - 🤖 **Model Endpoint** — stored in `build_info-<suffix>.json` as `azure_openai_endpoint`
 - 🧠 **Model Name** — stored in `build_info-<suffix>.json` as `genai_model` and used by the notebook when creating the agent
 
@@ -315,9 +322,10 @@ Cleanup will:
 1. 🗑️ Delete the requested `zolab-ai-<suffix>` resource group (or all managed Foundry resource groups when `-CleanupResourceGroup` is omitted)
 2. 🧼 Purge soft-deleted Cognitive Services accounts (prevents redeploy conflicts)
 3. 📋 Remove the matching subscription deployment records
-4. 🔐 Keep shared LAW Reader RBAC in place while any other managed build still exists
-5. 👤 Keep the current user in `zolab-ai-dev` while any other managed build still exists
-6. ✅ Preserve the `zolab-ai-dev` Entra group itself (not deleted)
+4. 🪣 Remove matching local and blob-backed `build_info-<suffix>.json` records when storage metadata is available
+5. 🔐 Keep shared LAW Reader RBAC in place while any other managed build still exists
+6. 👤 Keep the current user in `zolab-ai-dev` while any other managed build still exists
+7. ✅ Preserve the `zolab-ai-dev` Entra group itself (not deleted)
 
 `-PreviewCleanup` is limited to targeted teardown. It reports which of the six managed RG role assignments would be removed, which non-managed RG assignments would be preserved, whether shared LAW RBAC would be retained or removed, and whether the current user would stay in or be removed from `zolab-ai-dev`.
 
@@ -347,7 +355,7 @@ The `bot-app/` directory contains a separate deployment for **Bot-The-Builder**,
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./images/foundry-bot-arch-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="./images/foundry-bot-arch-light.png">
-  <img alt="Architecture Diagram" src="./images/architecture-dark.png">
+  <img alt="Architecture Diagram" src="./images/foundry-bot-arch-light.png">
 </picture>
 
 

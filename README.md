@@ -1,6 +1,6 @@
 # 🤖 Microsoft Foundry — AI Agent Observability PoC
 
-A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI agent with **end-to-end observability** — tracing agent creation, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
+Jupyter notebooks for Python 3.13+ that create and query a Microsoft Foundry AI agent with **end-to-end observability** — tracing agent creation, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
@@ -27,7 +27,7 @@ A Jupyter Notebook (Python 3.13) that creates and queries a Microsoft Foundry AI
 3. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
 4. Switch to the **AI Agent Demo (.venv)** kernel
 5. Run sections **1 → 5** in order
-7. Observe telemetry in the Azure Portal:
+6. Run **Section 6** and inspect telemetry in the Azure Portal:
    - 📊 **Application Insights** — request/dependency traces
    - 🔍 **Microsoft Foundry** — agent execution traces
    - 📡 **Log Analytics** — `AppDependencies` table queries
@@ -57,7 +57,7 @@ For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](
 
 ### Build-Time Notebook Configuration
 
-The deployment script writes a repo-local `build_info-<suffix>.json` file at build time. The Win11 notebook reads the latest matching file in the **Confirm Existing Deployment** section and reuses it in **Section 3** to populate:
+The deployment script writes a repo-local `build_info-<suffix>.json` file at build time. The notebooks read the latest matching file in the **Confirm Existing Deployment** section and reuse it in **Section 3** to populate:
 
 - `foundry_proj_ep` → the Microsoft Foundry project endpoint
 - `genai_model` → the model name used when creating the agent
@@ -69,6 +69,7 @@ This removes the need to hardcode the Foundry project endpoint in the notebook o
 These **must** be set before calling `instrument()`:
 
 ```python
+import os
 from uuid import uuid4
 
 from azure.core.settings import settings
@@ -154,7 +155,7 @@ The notebook produces traces across three observability surfaces:
 
 ![Application Insights telemetry view for traced operations](https://github.com/user-attachments/assets/37387f46-cc48-462a-9bb6-b42abc5f259d)
 
-**Application Insights**
+**Log Analytics**
 
 ![Application Insights results for AppDependencies telemetry](https://github.com/user-attachments/assets/51c1a6ce-3216-49ed-9454-d6825e9076bc)
 

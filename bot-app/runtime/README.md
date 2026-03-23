@@ -30,7 +30,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
   │  - M365 Agents SDK handlers      │
   │  - JWT auth middleware            │
   │  - Proactive messaging           │
-     │  - Heartbeat service (2 hours)   │
+  │  - Heartbeat service (2 hours)   │
   │                                  │
   │  Identity: UAMI (zolab-bot-mi)   │
   └──────────┬───────────────────────┘
@@ -77,7 +77,8 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `msft_docs <question>` | Search Microsoft Learn docs through a configured MCP server |
 | `list builds` | List all active Foundry deployments |
 | `build status <rg>` | Check a specific deployment |
-| `teardown <rg>` | Remove a Foundry deployment |
+| `teardown` | Prompt for which active build to remove |
+| `teardown <rg>` | Remove a specific deployment |
 | `heartbeat` | Bot health, uptime, memory, queue depth |
 | `listener status` | Worker and queue status |
 | `help` | Show command list |
@@ -145,6 +146,7 @@ export TEAMS_APP_ID="<teams-app-manifest-id>"
 export AZURE_STORAGE_ACCOUNT="zolabworkerst${SUFFIX}"
 export AZURE_QUEUE_NAME="botjobs"
 export AZURE_BLOB_CONTAINER="botstate"
+export AZURE_SUBSCRIPTION_ID="<zolab-subscription-id>"
 export HEARTBEAT_INTERVAL_SECONDS="7200"
 export MSFT_LEARN_MCP_URL="https://learn.microsoft.com/api/mcp"
 export MSFT_LEARN_MCP_TIMEOUT_SECONDS="20"
@@ -156,7 +158,7 @@ cd src
 python app.py
 ```
 
-The bot listens on `http://localhost:8000/api/messages`. `DefaultAzureCredential` falls through to `az login` locally.
+The bot listens on `http://localhost:8000/api/messages`. `DefaultAzureCredential` falls through to `az login` locally, and `AZURE_STORAGE_ACCOUNT` is required because the runtime no longer falls back to a hard-coded storage account name.
 
 When `WEATHER_LLM_AZURE_OPENAI_ENDPOINT` is set, the bot fetches live current conditions first and then asks the stable bot-owned `gpt-5.3-chat` deployment, or whatever `WEATHER_LLM_MODEL` overrides it with, to summarize only those supplied facts. This endpoint should belong to long-lived bot infrastructure, not to an ephemeral `build it` environment. If the model path is unavailable, the command falls back to the deterministic weather formatter.
 
