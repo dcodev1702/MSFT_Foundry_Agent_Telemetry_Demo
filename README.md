@@ -151,11 +151,11 @@ The notebook produces traces across three observability surfaces:
 
 ![Microsoft Foundry traces view for agent execution](https://github.com/user-attachments/assets/1b655116-fb69-429e-a1e5-13a12c6d070f)
 
-**Application Insights**
+**Microsoft Foundry Traces (Preview)**
 
 ![Application Insights telemetry view for traced operations](https://github.com/user-attachments/assets/37387f46-cc48-462a-9bb6-b42abc5f259d)
 
-**Log Analytics**
+**Application Insights**
 
 ![Application Insights results for AppDependencies telemetry](https://github.com/user-attachments/assets/51c1a6ce-3216-49ed-9454-d6825e9076bc)
 
