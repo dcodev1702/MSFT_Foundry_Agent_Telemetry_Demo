@@ -72,7 +72,7 @@ param containerEnvName string = ''
 param containerAppName string = ''
 
 @description('Heartbeat broadcast interval for the bot web app in seconds')
-param heartbeatIntervalSeconds int = 7200
+param heartbeatIntervalSeconds int = 14400
 
 @description('Subscription ID that hosts the worker VNet used by the bot Container Apps environment')
 param workerSubscriptionId string = subscription().subscriptionId

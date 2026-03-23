@@ -1,7 +1,7 @@
 # ════════════════════════════════════════════════════════════════
 # heartbeat.py — Automatic heartbeat service
 # Broadcasts bot health metrics to all stored conversations
-# every 2 hours by default, and provides on-demand heartbeat text.
+# every 4 hours by default, and provides on-demand heartbeat text.
 # ════════════════════════════════════════════════════════════════
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 
 class HeartbeatService:
-    """Broadcasts live bot health metrics every 2 hours by default."""
+    """Broadcasts live bot health metrics every 4 hours by default."""
 
-    INTERVAL = 7200  # 2 hours in seconds
+    INTERVAL = 14400  # 4 hours in seconds
     DEFAULT_LLM_MODEL = "gpt-5.3-chat"
 
     @classmethod
