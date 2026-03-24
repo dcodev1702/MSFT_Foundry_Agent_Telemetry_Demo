@@ -36,6 +36,7 @@ WORKER_ACI_NAME="zolab-worker-aci-${SUFFIX}"
 BOT_MANAGED_IDENTITY_NAME="${BOT_MANAGED_IDENTITY_NAME:-zolab-bot-mi-${SUFFIX}}"
 ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING:-true}"
 CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID:-}"
+PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-false}"
 
 # DIBSecCom LAW in Security subscription — all logs go here
 SECURITY_SUB="${SECURITY_SUB:-}"
@@ -59,6 +60,13 @@ WEATHER_LLM_SKU_NAME="${WEATHER_LLM_SKU_NAME:-GlobalStandard}"
 WEATHER_LLM_SKU_CAPACITY="${WEATHER_LLM_SKU_CAPACITY:-50}"
 HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-21600}"
 
+fail_access_preflight() {
+  local message="$1"
+  echo "ERROR: ${message}" >&2
+  echo "Resume after you have the required Azure permissions or PIM elevation, then rerun bash bot-app/deployment/deploy-bot-app.sh." >&2
+  exit 1
+}
+
 resolve_law_subscription_id() {
   local subscription_id
 
@@ -78,21 +86,118 @@ resolve_law_subscription_id() {
   return 1
 }
 
+get_current_azure_role_check_assignee() {
+  if [[ -n "${AZURE_CLIENT_ID:-}" ]]; then
+    printf '%s\n' "${AZURE_CLIENT_ID}"
+    return 0
+  fi
+
+  az account show --query 'user.name' -o tsv 2>/dev/null || true
+}
+
+get_azure_role_names_for_assignee() {
+  local assignee="$1"
+  local scope="$2"
+
+  az role assignment list \
+    --assignee "${assignee}" \
+    --scope "${scope}" \
+    --query '[].roleDefinitionName' \
+    -o tsv 2>/dev/null || true
+}
+
+test_azure_role_assignment_write_access() {
+  local assignee="$1"
+  shift
+
+  local scope
+  local role_name
+  for scope in "$@"; do
+    [[ -z "${scope}" ]] && continue
+    while IFS= read -r role_name; do
+      [[ -z "${role_name}" ]] && continue
+      if [[ "${role_name}" == "Owner" || "${role_name}" == "User Access Administrator" ]]; then
+        return 0
+      fi
+    done < <(get_azure_role_names_for_assignee "${assignee}" "${scope}")
+  done
+
+  return 1
+}
+
+assert_bot_deployment_authorization() {
+  local assignee
+  assignee="$(get_current_azure_role_check_assignee)"
+
+  if [[ -z "${assignee}" ]]; then
+    fail_access_preflight "Unable to resolve the current Azure principal for deployment authorization preflight. Sign in with the deployment identity and retry."
+  fi
+
+  local subscription_scope="/subscriptions/${SUBSCRIPTION_ID}"
+  local bot_resource_group_scope="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RG_BOT}"
+  local worker_resource_group_scope="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}"
+  local storage_scope="${STORAGE_SCOPE}"
+
+  if ! test_azure_role_assignment_write_access "${assignee}" "${storage_scope}" "${worker_resource_group_scope}" "${bot_resource_group_scope}" "${subscription_scope}"; then
+    fail_access_preflight "Azure principal '${assignee}' does not have permission to create the RBAC role assignments required by this rollout. Grant 'Owner' or 'User Access Administrator' on ${storage_scope}, ${worker_resource_group_scope}, ${bot_resource_group_scope}, or ${subscription_scope}."
+  fi
+
+  local validation_output
+  set +e
+  validation_output=$(az deployment sub validate \
+    --location "${LOCATION}" \
+    --template-file bot-app/deployment/bot-infra.bicep \
+    --parameters \
+      suffix="${SUFFIX}" \
+      tenantId="${TENANT_ID}" \
+      logAnalyticsCustomerId="${LAW_CUSTOMER_ID}" \
+      logAnalyticsSharedKey="${LAW_SHARED_KEY}" \
+      botImageTag="${BOT_IMAGE_TAG}" \
+      weatherLlmModel="${WEATHER_LLM_MODEL}" \
+      weatherLlmApiVersion="${WEATHER_LLM_API_VERSION}" \
+      weatherLlmModelName="${WEATHER_LLM_MODEL_NAME}" \
+      weatherLlmModelVersion="${WEATHER_LLM_MODEL_VERSION}" \
+      weatherLlmModelFormat="${WEATHER_LLM_MODEL_FORMAT}" \
+      weatherLlmSkuName="${WEATHER_LLM_SKU_NAME}" \
+      weatherLlmSkuCapacity="${WEATHER_LLM_SKU_CAPACITY}" \
+      heartbeatIntervalSeconds="${HEARTBEAT_INTERVAL_SECONDS}" \
+      containerEnvName="${CONTAINER_ENV_NAME}" \
+      containerAppName="${CONTAINER_APP_NAME}" \
+      enablePrivateContainerAppsNetworking="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING}" \
+      containerAppsInfrastructureSubnetResourceId="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID}" \
+    --output none 2>&1)
+  local validation_exit=$?
+  set -e
+
+  if (( validation_exit != 0 )); then
+    if grep -Eqi 'AuthorizationFailed|LinkedAuthorizationFailed|does not have authorization|insufficient privileges|permission' <<<"${validation_output}"; then
+      fail_access_preflight "Azure principal '${assignee}' does not have the required deployment access for bot-app/deployment/bot-infra.bicep at ${subscription_scope}. Validation failed before deployment with: ${validation_output}"
+    fi
+
+    echo "ERROR: Subscription deployment preflight validation failed." >&2
+    echo "${validation_output}" >&2
+    exit "${validation_exit}"
+  fi
+
+  echo "  ✓ Deployment authorization preflight passed for ${assignee}"
+}
+
 # ── Validate prerequisites ──────────────────────────────────────
 if ! az account show &>/dev/null; then
     echo "ERROR: Not logged in. Run 'az login' first." >&2
     exit 1
 fi
 
+SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+
+STORAGE_SCOPE="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}/providers/Microsoft.Storage/storageAccounts/${WORKER_STORAGE_ACCOUNT}"
+
 TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv)}"
-UAMI_PRINCIPAL_ID="${UAMI_PRINCIPAL_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query principalId -o tsv)}"
-UAMI_CLIENT_ID="${UAMI_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query clientId -o tsv)}"
 if [[ -z "${SECURITY_SUB}" ]]; then
   SECURITY_SUB="$(resolve_law_subscription_id || true)"
 fi
 
 if [[ -z "${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID}" ]]; then
-  SUBSCRIPTION_ID=$(az account show --query id -o tsv)
   CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}/providers/Microsoft.Network/virtualNetworks/zolab-worker-vnet-${SUFFIX}/subnets/snet-containerapps"
 fi
 
@@ -118,6 +223,21 @@ if [[ -n "${LAW_CUSTOMER_ID}" && -n "${LAW_SHARED_KEY}" ]]; then
   echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
 else
   echo "  ! DIBSecCom LAW shared key not available; deploying without explicit Container Apps log wiring"
+fi
+
+echo "┌──────────────────────────────────────────────────────────────┐"
+echo "│ Preflight: Validating environment and deployment access     │"
+echo "└──────────────────────────────────────────────────────────────┘"
+
+bash deployment/run-worker-private-dns-preflight.sh
+assert_bot_deployment_authorization
+
+UAMI_PRINCIPAL_ID="${UAMI_PRINCIPAL_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query principalId -o tsv)}"
+UAMI_CLIENT_ID="${UAMI_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query clientId -o tsv)}"
+
+if [[ "${PREFLIGHT_ONLY}" == "true" ]]; then
+  echo "  ✓ Preflight checks completed successfully. No deployment actions were performed."
+  exit 0
 fi
 
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -190,8 +310,6 @@ echo ""
 echo "┌──────────────────────────────────────────────────────────────┐"
 echo "│ Step 3/4: Granting Storage RBAC to bot UAMI                 │"
 echo "└──────────────────────────────────────────────────────────────┘"
-
-STORAGE_SCOPE="/subscriptions/$(az account show --query id -o tsv)/resourceGroups/${WORKER_RG}/providers/Microsoft.Storage/storageAccounts/${WORKER_STORAGE_ACCOUNT}"
 
 # Storage Queue Data Contributor
 az role assignment create \

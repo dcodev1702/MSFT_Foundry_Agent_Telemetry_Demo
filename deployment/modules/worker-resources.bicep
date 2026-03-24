@@ -65,8 +65,9 @@ var workerVnetName     = 'zolab-worker-vnet-${suffix}'
 var containerAppsSubnetName = 'snet-containerapps'
 var workerSubnetName = 'snet-worker-aci'
 var privateEndpointSubnetName = 'snet-storage-private-endpoints'
-var blobPrivateDnsZoneName = 'privatelink.blob.core.windows.net'
-var queuePrivateDnsZoneName = 'privatelink.queue.core.windows.net'
+var storageEndpointSuffix = environment().suffixes.storage
+var blobPrivateDnsZoneName = 'privatelink.blob.${storageEndpointSuffix}'
+var queuePrivateDnsZoneName = 'privatelink.queue.${storageEndpointSuffix}'
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
 var roles = {
