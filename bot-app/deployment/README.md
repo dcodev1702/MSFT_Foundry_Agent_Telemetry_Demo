@@ -13,7 +13,7 @@ This deployment is separate from the root Foundry environment deployment in [../
 | Azure CLI | Installed and authenticated with access to the `zolab` subscription |
 | Docker | Local Docker daemon available for clean local image builds and pushes |
 | Bot identity | User-assigned managed identity is the only supported bot auth model |
-| Security subscription access | Optional for reading the DIBSecCom Log Analytics workspace keys in `Sentinel`; deployment can proceed without them |
+| Security subscription access | Required for reading the DIBSecCom Log Analytics workspace keys in `Sentinel`; the deploy script resolves the subscription named `Security` first and fails by default unless it can retrieve the shared key |
 | ACR push permissions | Required to log in and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
 | RBAC assignment permissions | `Owner` or `User Access Administrator` on the worker storage scope, worker RG, bot RG, or subscription so the rollout can create role assignments |
@@ -48,7 +48,7 @@ Azure Container Apps also creates a separate infrastructure resource group for e
 
 | Capability | Implementation |
 |---|---|
-| Log destination | Cross-subscription DIBSecCom Log Analytics workspace when workspace keys are accessible at deploy time |
+| Log destination | Cross-subscription DIBSecCom Log Analytics workspace in `Security`, required at deploy time |
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
 | Bot Azure access | UAMI attached to the Container App and used by Azure Bot Service as `UserAssignedMSI` |
 | Worker storage access | RBAC plus private endpoint routing through the worker-owned VNet |
@@ -206,6 +206,10 @@ pwsh -NoProfile -File deployment/remove-teams-app.ps1
 ### View Logs In Log Analytics
 
 The bot Container App logs are sent to the `DIBSecCom` Log Analytics workspace in the Security subscription, resource group `Sentinel`.
+
+The deployment script resolves the subscription named `Security` first before attempting any broader lookup for that workspace.
+
+The deployment now fails by default unless it can read the workspace shared key. The narrow workspace-scoped built-in role confirmed to satisfy that requirement is `Monitoring Contributor` on `DIBSecCom`.
 
 Portal path:
 

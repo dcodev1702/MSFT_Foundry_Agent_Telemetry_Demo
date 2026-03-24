@@ -37,9 +37,11 @@ BOT_MANAGED_IDENTITY_NAME="${BOT_MANAGED_IDENTITY_NAME:-zolab-bot-mi-${SUFFIX}}"
 ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING="${ENABLE_PRIVATE_CONTAINER_APPS_NETWORKING:-true}"
 CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID="${CONTAINER_APPS_INFRASTRUCTURE_SUBNET_RESOURCE_ID:-}"
 PREFLIGHT_ONLY="${PREFLIGHT_ONLY:-false}"
+REQUIRE_LAW_SHARED_KEY="${REQUIRE_LAW_SHARED_KEY:-true}"
 
 # DIBSecCom LAW in Security subscription — all logs go here
 SECURITY_SUB="${SECURITY_SUB:-}"
+SECURITY_SUB_NAME="${SECURITY_SUB_NAME:-Security}"
 LAW_RG="Sentinel"
 LAW_NAME="DIBSecCom"
 
@@ -69,6 +71,12 @@ fail_access_preflight() {
 
 resolve_law_subscription_id() {
   local subscription_id
+
+  subscription_id="$(az account list --all --query "[?name=='${SECURITY_SUB_NAME}'].id | [0]" -o tsv 2>/dev/null || true)"
+  if [[ -n "${subscription_id}" ]]; then
+    echo "${subscription_id}"
+    return 0
+  fi
 
   while IFS=$'\t' read -r subscription_id _; do
     [[ -z "${subscription_id}" ]] && continue
@@ -222,6 +230,12 @@ fi
 if [[ -n "${LAW_CUSTOMER_ID}" && -n "${LAW_SHARED_KEY}" ]]; then
   echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
 else
+  if [[ "${REQUIRE_LAW_SHARED_KEY}" == "true" ]]; then
+    echo "ERROR: Required DIBSecCom LAW shared key could not be retrieved from subscription ${SECURITY_SUB:-${SECURITY_SUB_NAME}}." >&2
+    echo "Grant a role such as Monitoring Contributor on the DIBSecCom workspace, Sentinel resource group, or Security subscription, refresh Azure credentials, and rerun the deployment." >&2
+    exit 1
+  fi
+
   echo "  ! DIBSecCom LAW shared key not available; deploying without explicit Container Apps log wiring"
 fi
 
