@@ -171,7 +171,7 @@ The `deployment/` directory contains Bicep IaC to provision the full AI Foundry 
 
 ### Bot-The-Builder (Teams Bot)
 
-The `bot-app/` directory contains **Bot-The-Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status`, `teardown`, `heartbeat`).
+The `bot-app/` directory contains **Bot-The-Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status <rg>`, `teardown`, `heartbeat`).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./images/bot-overview-dark.svg">
