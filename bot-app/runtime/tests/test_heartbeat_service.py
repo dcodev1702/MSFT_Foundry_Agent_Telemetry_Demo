@@ -17,16 +17,16 @@ from service_lifecycle import start_background_services, stop_background_service
 
 
 class HeartbeatServiceTests(unittest.IsolatedAsyncioTestCase):
-    def test_resolve_interval_seconds_uses_four_hour_default(self) -> None:
-        self.assertEqual(HeartbeatService.resolve_interval_seconds(None), 14400)
-        self.assertEqual(HeartbeatService.resolve_interval_seconds(""), 14400)
+    def test_resolve_interval_seconds_uses_six_hour_default(self) -> None:
+        self.assertEqual(HeartbeatService.resolve_interval_seconds(None), 21600)
+        self.assertEqual(HeartbeatService.resolve_interval_seconds(""), 21600)
 
     def test_resolve_interval_seconds_accepts_positive_override(self) -> None:
         self.assertEqual(HeartbeatService.resolve_interval_seconds("3600"), 3600)
 
     def test_resolve_interval_seconds_rejects_invalid_values(self) -> None:
-        self.assertEqual(HeartbeatService.resolve_interval_seconds("abc"), 14400)
-        self.assertEqual(HeartbeatService.resolve_interval_seconds("0"), 14400)
+        self.assertEqual(HeartbeatService.resolve_interval_seconds("abc"), 21600)
+        self.assertEqual(HeartbeatService.resolve_interval_seconds("0"), 21600)
 
     async def test_run_broadcasts_to_all_stored_conversations_each_interval(self) -> None:
         proactive = SimpleNamespace(broadcast=AsyncMock(return_value=2))

@@ -53,7 +53,7 @@ param containerEnvName string = ''
 param containerAppName string = ''
 
 @description('Heartbeat broadcast interval for the bot web app in seconds')
-param heartbeatIntervalSeconds int = 14400
+param heartbeatIntervalSeconds int = 21600
 
 @description('Enable custom VNet integration for the Container Apps environment')
 param enablePrivateContainerAppsNetworking bool = false
