@@ -63,8 +63,11 @@ WEATHER_LLM_SKU_CAPACITY="${WEATHER_LLM_SKU_CAPACITY:-50}"
 HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-21600}"
 WORKER_SYNC_MAX_ATTEMPTS="${WORKER_SYNC_MAX_ATTEMPTS:-6}"
 WORKER_SYNC_RETRY_DELAY_SECONDS="${WORKER_SYNC_RETRY_DELAY_SECONDS:-20}"
+WORKER_SYNC_MAX_RETRY_DELAY_SECONDS="${WORKER_SYNC_MAX_RETRY_DELAY_SECONDS:-90}"
 WORKER_SYNC_DEPLOYMENT_NAME="${WORKER_SYNC_DEPLOYMENT_NAME:-worker-infra}"
 WORKER_SYNC_RESOURCE_GROUP_DEPLOYMENT_NAME="${WORKER_SYNC_RESOURCE_GROUP_DEPLOYMENT_NAME:-worker-resources-${SUFFIX}}"
+WORKER_SYNC_VERIFY_MAX_ATTEMPTS="${WORKER_SYNC_VERIFY_MAX_ATTEMPTS:-12}"
+WORKER_SYNC_VERIFY_DELAY_SECONDS="${WORKER_SYNC_VERIFY_DELAY_SECONDS:-10}"
 
 fail_access_preflight() {
   local message="$1"
@@ -222,7 +225,9 @@ sync_worker_download_host() {
   local worker_image_tag="$1"
   local bot_fqdn="$2"
   local attempt
+  local retry_delay="${WORKER_SYNC_RETRY_DELAY_SECONDS}"
   local sync_output
+  local synced_worker_bot_fqdn
 
   for (( attempt = 1; attempt <= WORKER_SYNC_MAX_ATTEMPTS; attempt++ )); do
     if sync_output="$(az deployment sub create \
@@ -238,15 +243,27 @@ sync_worker_download_host() {
         botFqdn="${bot_fqdn}" \
         enablePrivateStorageAccess=true \
       --output none 2>&1)"; then
-      echo "  ✓ Worker download host synced to ${bot_fqdn}"
-      return 0
+      synced_worker_bot_fqdn="$(get_worker_bot_fqdn)"
+      if verify_worker_bot_fqdn "${bot_fqdn}"; then
+        echo "  ✓ Worker download host synced to ${bot_fqdn}"
+        return 0
+      fi
+
+      echo "ERROR: Worker download-host sync deployment succeeded, but live BOT_FQDN is '${synced_worker_bot_fqdn:-<empty>}' instead of '${bot_fqdn}'." >&2
+      return 1
     fi
 
     if [[ "${sync_output}" == *"AnotherOperationInProgress"* ]] && (( attempt < WORKER_SYNC_MAX_ATTEMPTS )); then
       echo "  ! Worker sync attempt ${attempt}/${WORKER_SYNC_MAX_ATTEMPTS} hit Azure network reconciliation in progress."
       show_worker_sync_deployment_diagnostics
-      echo "  ! Retrying worker download-host sync in ${WORKER_SYNC_RETRY_DELAY_SECONDS}s"
-      sleep "${WORKER_SYNC_RETRY_DELAY_SECONDS}"
+      echo "  ! Retrying worker download-host sync in ${retry_delay}s"
+      sleep "${retry_delay}"
+      if (( retry_delay < WORKER_SYNC_MAX_RETRY_DELAY_SECONDS )); then
+        retry_delay=$(( retry_delay * 2 ))
+        if (( retry_delay > WORKER_SYNC_MAX_RETRY_DELAY_SECONDS )); then
+          retry_delay="${WORKER_SYNC_MAX_RETRY_DELAY_SECONDS}"
+        fi
+      fi
       continue
     fi
 
@@ -258,6 +275,34 @@ sync_worker_download_host() {
 
   echo "ERROR: Worker download-host sync did not complete after ${WORKER_SYNC_MAX_ATTEMPTS} attempts." >&2
   show_worker_sync_deployment_diagnostics >&2
+  return 1
+}
+
+get_worker_bot_fqdn() {
+  az container show \
+    --name "${WORKER_ACI_NAME}" \
+    --resource-group "${WORKER_RG}" \
+    --query "containers[0].environmentVariables[?name=='BOT_FQDN'].value | [0]" \
+    -o tsv 2>/dev/null || true
+}
+
+verify_worker_bot_fqdn() {
+  local expected_bot_fqdn="$1"
+  local observed_bot_fqdn
+  local attempt
+
+  for (( attempt = 1; attempt <= WORKER_SYNC_VERIFY_MAX_ATTEMPTS; attempt++ )); do
+    observed_bot_fqdn="$(get_worker_bot_fqdn)"
+    if [[ "${observed_bot_fqdn}" == "${expected_bot_fqdn}" ]]; then
+      return 0
+    fi
+
+    if (( attempt < WORKER_SYNC_VERIFY_MAX_ATTEMPTS )); then
+      echo "  ! Worker BOT_FQDN verification attempt ${attempt}/${WORKER_SYNC_VERIFY_MAX_ATTEMPTS} saw '${observed_bot_fqdn:-<empty>}' instead of '${expected_bot_fqdn}'."
+      sleep "${WORKER_SYNC_VERIFY_DELAY_SECONDS}"
+    fi
+  done
+
   return 1
 }
 
