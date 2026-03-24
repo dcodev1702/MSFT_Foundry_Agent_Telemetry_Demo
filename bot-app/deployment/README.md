@@ -182,6 +182,7 @@ After deployment, confirm:
 - The bot app is attached to the VNet-backed environment and the worker is attached to the delegated worker subnet
 - The Container Apps Environment is forwarding logs to DIBSecCom LAW when workspace keys were available during deploy
 - The bot Container App environment variable `HEARTBEAT_INTERVAL_SECONDS` resolves to `21600` unless explicitly overridden
+- The worker download-host sync can ride through transient `AnotherOperationInProgress` Azure network reconciliations because the deploy script now retries that deployment step and reports deployment-operation failures instead of relying on the raw async-operation URL
 
 Useful preflight command:
 

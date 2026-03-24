@@ -61,6 +61,10 @@ WEATHER_LLM_MODEL_FORMAT="${WEATHER_LLM_MODEL_FORMAT:-OpenAI}"
 WEATHER_LLM_SKU_NAME="${WEATHER_LLM_SKU_NAME:-GlobalStandard}"
 WEATHER_LLM_SKU_CAPACITY="${WEATHER_LLM_SKU_CAPACITY:-50}"
 HEARTBEAT_INTERVAL_SECONDS="${HEARTBEAT_INTERVAL_SECONDS:-21600}"
+WORKER_SYNC_MAX_ATTEMPTS="${WORKER_SYNC_MAX_ATTEMPTS:-6}"
+WORKER_SYNC_RETRY_DELAY_SECONDS="${WORKER_SYNC_RETRY_DELAY_SECONDS:-20}"
+WORKER_SYNC_DEPLOYMENT_NAME="${WORKER_SYNC_DEPLOYMENT_NAME:-worker-infra}"
+WORKER_SYNC_RESOURCE_GROUP_DEPLOYMENT_NAME="${WORKER_SYNC_RESOURCE_GROUP_DEPLOYMENT_NAME:-worker-resources-${SUFFIX}}"
 
 fail_access_preflight() {
   local message="$1"
@@ -188,6 +192,73 @@ assert_bot_deployment_authorization() {
   fi
 
   echo "  ✓ Deployment authorization preflight passed for ${assignee}"
+}
+
+show_worker_sync_deployment_diagnostics() {
+  local subscription_failures
+  local resource_group_failures
+
+  subscription_failures="$(az deployment sub operation list \
+    --name "${WORKER_SYNC_DEPLOYMENT_NAME}" \
+    --query "[?properties.provisioningState=='Failed'].{code:properties.statusMessage.error.code,message:properties.statusMessage.error.message}" \
+    -o json 2>/dev/null || true)"
+
+  resource_group_failures="$(az deployment group operation list \
+    --resource-group "${WORKER_RG}" \
+    --name "${WORKER_SYNC_RESOURCE_GROUP_DEPLOYMENT_NAME}" \
+    --query "[?properties.provisioningState=='Failed'].{code:properties.statusMessage.error.code,message:properties.statusMessage.error.message}" \
+    -o json 2>/dev/null || true)"
+
+  if [[ -n "${subscription_failures}" && "${subscription_failures}" != "[]" ]]; then
+    echo "  ! Worker sync subscription deployment failures: ${subscription_failures}"
+  fi
+
+  if [[ -n "${resource_group_failures}" && "${resource_group_failures}" != "[]" ]]; then
+    echo "  ! Worker sync resource-group deployment failures: ${resource_group_failures}"
+  fi
+}
+
+sync_worker_download_host() {
+  local worker_image_tag="$1"
+  local bot_fqdn="$2"
+  local attempt
+  local sync_output
+
+  for (( attempt = 1; attempt <= WORKER_SYNC_MAX_ATTEMPTS; attempt++ )); do
+    if sync_output="$(az deployment sub create \
+      --location "${LOCATION}" \
+      --name "${WORKER_SYNC_DEPLOYMENT_NAME}" \
+      --template-file deployment/worker-infra.bicep \
+      --parameters \
+        suffix="${SUFFIX}" \
+        botClientId="${UAMI_CLIENT_ID}" \
+        workerCpu=2 \
+        workerMemoryInGb=4 \
+        workerImageTag="${worker_image_tag}" \
+        botFqdn="${bot_fqdn}" \
+        enablePrivateStorageAccess=true \
+      --output none 2>&1)"; then
+      echo "  ✓ Worker download host synced to ${bot_fqdn}"
+      return 0
+    fi
+
+    if [[ "${sync_output}" == *"AnotherOperationInProgress"* ]] && (( attempt < WORKER_SYNC_MAX_ATTEMPTS )); then
+      echo "  ! Worker sync attempt ${attempt}/${WORKER_SYNC_MAX_ATTEMPTS} hit Azure network reconciliation in progress."
+      show_worker_sync_deployment_diagnostics
+      echo "  ! Retrying worker download-host sync in ${WORKER_SYNC_RETRY_DELAY_SECONDS}s"
+      sleep "${WORKER_SYNC_RETRY_DELAY_SECONDS}"
+      continue
+    fi
+
+    echo "ERROR: Worker download-host sync failed." >&2
+    echo "${sync_output}" >&2
+    show_worker_sync_deployment_diagnostics >&2
+    return 1
+  done
+
+  echo "ERROR: Worker download-host sync did not complete after ${WORKER_SYNC_MAX_ATTEMPTS} attempts." >&2
+  show_worker_sync_deployment_diagnostics >&2
+  return 1
 }
 
 # ── Validate prerequisites ──────────────────────────────────────
@@ -399,19 +470,7 @@ CURRENT_WORKER_IMAGE="$(az container show \
 
 if [[ -n "${CURRENT_WORKER_IMAGE}" ]]; then
   CURRENT_WORKER_IMAGE_TAG="${CURRENT_WORKER_IMAGE##*:}"
-  az deployment sub create \
-    --location "${LOCATION}" \
-    --template-file deployment/worker-infra.bicep \
-    --parameters \
-      suffix="${SUFFIX}" \
-      botClientId="${UAMI_CLIENT_ID}" \
-      workerCpu=2 \
-      workerMemoryInGb=4 \
-      workerImageTag="${CURRENT_WORKER_IMAGE_TAG}" \
-      botFqdn="${CA_FQDN}" \
-      enablePrivateStorageAccess=true \
-    --output none
-  echo "  ✓ Worker download host synced to ${CA_FQDN}"
+  sync_worker_download_host "${CURRENT_WORKER_IMAGE_TAG}" "${CA_FQDN}"
 else
   echo "  ! Worker container not found; skipped worker download-host sync"
 fi
