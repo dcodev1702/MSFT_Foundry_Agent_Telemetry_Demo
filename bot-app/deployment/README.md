@@ -16,6 +16,7 @@ This deployment is separate from the root Foundry environment deployment in [../
 | Security subscription access | Optional for reading the DIBSecCom Log Analytics workspace keys in `Sentinel`; deployment can proceed without them |
 | ACR push permissions | Required to log in and push bot images into the bot ACR |
 | Subscription deployment permissions | Required for `az deployment sub create` against bot infrastructure |
+| RBAC assignment permissions | `Owner` or `User Access Administrator` on the worker storage scope, worker RG, bot RG, or subscription so the rollout can create role assignments |
 | Existing worker resources | The bot deployment expects the worker storage account, worker resource group, and shared worker VNet/subnet path to exist for storage access |
 
 ---
@@ -52,6 +53,15 @@ Azure Container Apps also creates a separate infrastructure resource group for e
 | Bot Azure access | UAMI attached to the Container App and used by Azure Bot Service as `UserAssignedMSI` |
 | Worker storage access | RBAC plus private endpoint routing through the worker-owned VNet |
 
+### Deployment Guardrails
+
+| Guardrail | Implementation |
+|---|---|
+| Heartbeat default | Bot runtime and deployment defaults now use a 6-hour heartbeat cadence (`HEARTBEAT_INTERVAL_SECONDS=21600`) |
+| Private DNS suffix resolution | Worker private DNS zones are derived from `environment().suffixes.storage`, not hardcoded `core.windows.net` hosts |
+| Safe preflight mode | `PREFLIGHT_ONLY=true bash bot-app/deployment/deploy-bot-app.sh` runs the checks without building or deploying |
+| Access gate | The deploy script validates RBAC/deployment access up front and stops with a remediation message when the operator lacks required permissions |
+
 ---
 
 ## 📂 Files
@@ -84,8 +94,15 @@ From the repo root:
 bash bot-app/deployment/deploy-bot-app.sh
 ```
 
+Preflight only, with no build or deployment actions:
+
+```bash
+PREFLIGHT_ONLY=true bash bot-app/deployment/deploy-bot-app.sh
+```
+
 The script performs four steps:
 
+0. Runs preflight checks for worker private DNS suffix resolution and deployment authorization before any build or Azure write action starts
 1. Builds the bot image locally with Docker using a clean `--no-cache` build, then pushes `zolabbotacrbotprd.azurecr.io/zolab-bot:<immutable-tag>` and refreshes `:latest`
 2. Deploys the bot infrastructure Bicep template into the VNet-backed Container Apps environment by default
 3. Grants Storage Queue and Blob RBAC to the bot UAMI on the worker storage account
@@ -107,6 +124,19 @@ That rebuilds the bot image and refreshes the VNet-backed Container App deployme
 
 The deploy script now generates an immutable bot image tag from the current UTC timestamp and Git commit, builds locally with Docker using `--no-cache --pull`, and passes that tag into Bicep so Azure Container Apps creates a new revision for each rollout. This avoids both stale revisions and flaky remote build-task failures.
 
+The same script now supports a deployment-safe preflight mode:
+
+```bash
+PREFLIGHT_ONLY=true bash bot-app/deployment/deploy-bot-app.sh
+```
+
+That mode checks two things before any container build or deployment starts:
+
+1. The worker private DNS zone names resolve from `environment().suffixes.storage` for the current Azure cloud.
+2. The current operator has enough RBAC and deployment access to create the required role assignments and run the subscription-scoped bot deployment.
+
+If the operator does not have the required access, the script stops immediately and tells them to resume after meeting the required permissions or PIM elevation.
+
 ---
 
 ## 🔐 Required Inputs
@@ -118,6 +148,8 @@ The deploy script resolves these values at runtime:
 - DIBSecCom Log Analytics customer ID and shared key from the Security subscription when available
 - Worker storage scope for RBAC assignment
 - Worker-owned Container Apps infrastructure subnet resource ID when not explicitly supplied
+
+The bot deployment depends on the worker private storage topology from [../../deployment/modules/worker-resources.bicep](../../deployment/modules/worker-resources.bicep). The storage private DNS zone names in that module now derive from `environment().suffixes.storage`, which keeps the deployment compatible with the active Azure cloud instead of assuming `core.windows.net`.
 
 The standalone parameter file in [bot-infra.bicepparam](bot-infra.bicepparam) no longer needs hard-coded tenant or subscription-scoped subnet resource IDs for the default `botprd` topology.
 
@@ -149,6 +181,13 @@ After deployment, confirm:
 - The storage account remains `publicNetworkAccess: Disabled`
 - The bot app is attached to the VNet-backed environment and the worker is attached to the delegated worker subnet
 - The Container Apps Environment is forwarding logs to DIBSecCom LAW when workspace keys were available during deploy
+- The bot Container App environment variable `HEARTBEAT_INTERVAL_SECONDS` resolves to `21600` unless explicitly overridden
+
+Useful preflight command:
+
+```bash
+PREFLIGHT_ONLY=true bash bot-app/deployment/deploy-bot-app.sh
+```
 
 Useful commands:
 
