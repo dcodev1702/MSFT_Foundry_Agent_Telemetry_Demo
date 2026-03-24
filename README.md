@@ -169,9 +169,9 @@ The notebook produces traces across three observability surfaces:
 
 The `deployment/` directory contains Bicep IaC to provision the full AI Foundry environment — see [`deployment/README.md`](deployment/README.md) for details.
 
-### Bot the Builder (Teams Bot)
+### Bot-The-Builder (Teams Bot)
 
-The `bot-app/` directory contains **Bot the Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status`, `teardown`, `heartbeat`).
+The `bot-app/` directory contains **Bot-The-Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status`, `teardown`, `heartbeat`).
 
 ```
 Teams ──► Bot Service ──► Public Container App ingress
