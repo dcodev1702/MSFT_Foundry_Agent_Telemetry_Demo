@@ -173,15 +173,11 @@ The `deployment/` directory contains Bicep IaC to provision the full AI Foundry 
 
 The `bot-app/` directory contains **Bot-The-Builder**, a Teams bot that manages Foundry deployments via chat commands (`build it`, `list builds`, `build status`, `teardown`, `heartbeat`).
 
-```
-Teams ──► Bot Service ──► Public Container App ingress
-                         │
-                    VNet-backed Container Apps environment
-                         │
-                 Private Queue/Blob endpoints in shared worker VNet
-                         │
-                     Queue Storage ──► ACI Worker (PowerShell/Bicep)
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./images/bot-overview-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./images/bot-overview-light.svg">
+  <img alt="Bot the Builder overview — Teams → Bot Service → Public Container App Ingress → VNet (Queue PE / Blob PE) → ACI Worker" src="./images/bot-overview-light.svg">
+</picture>
 
 - **Azure Container App** — public Teams ingress is preserved, but the app now runs in a custom VNet-backed Container Apps environment
 - **ACI Worker** — runs inside the shared worker subnet and polls Queue Storage over the private network path

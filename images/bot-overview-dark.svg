@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520" font-family="Segoe UI, -apple-system, sans-serif">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-opacity="0.3"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="10" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 3.5 L 0 7 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="520" rx="12" fill="#0f172a"/>
+
+  <!-- Title -->
+  <text x="360" y="36" text-anchor="middle" font-size="15" font-weight="600" fill="#e2e8f0" letter-spacing="0.5">Bot-The-Builder — Overview</text>
+
+  <!-- ── Row 1: Teams ── -->
+  <rect x="270" y="56" width="180" height="44" rx="22" fill="#1e3a5f" stroke="#3b82f6" stroke-width="1" filter="url(#shadow)"/>
+  <text x="360" y="83" text-anchor="middle" font-size="13.5" font-weight="600" fill="#93c5fd">Microsoft Teams</text>
+
+  <!-- Arrow 1→2 -->
+  <line x1="360" y1="100" x2="360" y2="128" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ── Row 2: Bot Service ── -->
+  <rect x="245" y="132" width="230" height="44" rx="10" fill="#431407" stroke="#ea580c" stroke-width="1" filter="url(#shadow)"/>
+  <text x="360" y="155" text-anchor="middle" font-size="13" font-weight="600" fill="#fdba74">Azure Bot Service</text>
+  <text x="360" y="170" text-anchor="middle" font-size="10" fill="#fb923c">F0 · UserAssigned MSI</text>
+
+  <!-- Arrow 2→3 -->
+  <line x1="360" y1="176" x2="360" y2="204" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ── Row 3: Container App ingress ── -->
+  <rect x="220" y="208" width="280" height="44" rx="10" fill="#052e16" stroke="#22c55e" stroke-width="1" filter="url(#shadow)"/>
+  <text x="360" y="231" text-anchor="middle" font-size="13" font-weight="600" fill="#86efac">Public Container App Ingress</text>
+  <text x="360" y="246" text-anchor="middle" font-size="10" fill="#4ade80">M365 Agents SDK · aiohttp :8000</text>
+
+  <!-- ── VNet boundary ── -->
+  <rect x="60" y="272" width="600" height="232" rx="10" fill="none" stroke="#334155" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="80" y="292" font-size="11" font-weight="600" fill="#94a3b8">Shared Worker VNet</text>
+
+  <!-- Arrow 3→VNet zone -->
+  <line x1="360" y1="252" x2="360" y2="310" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="368" y="286" font-size="9.5" fill="#64748b" font-style="italic">VNet-backed environment</text>
+
+  <!-- ── Row 4: Queue / Blob private endpoints ── -->
+  <rect x="170" y="314" width="175" height="48" rx="10" fill="#2e1065" stroke="#8b5cf6" stroke-width="1" filter="url(#shadow)"/>
+  <text x="257" y="338" text-anchor="middle" font-size="13" font-weight="600" fill="#c4b5fd">Queue PE</text>
+  <text x="257" y="353" text-anchor="middle" font-size="10" fill="#a78bfa">botjobs</text>
+
+  <rect x="375" y="314" width="175" height="48" rx="10" fill="#2e1065" stroke="#8b5cf6" stroke-width="1" filter="url(#shadow)"/>
+  <text x="462" y="338" text-anchor="middle" font-size="13" font-weight="600" fill="#c4b5fd">Blob PE</text>
+  <text x="462" y="353" text-anchor="middle" font-size="10" fill="#a78bfa">botstate</text>
+
+  <text x="360" y="308" text-anchor="middle" font-size="10" fill="#64748b">Private Endpoints · no public access</text>
+
+  <!-- Arrows from endpoints down to worker -->
+  <line x1="257" y1="362" x2="257" y2="388" stroke="#64748b" stroke-width="1.5"/>
+  <line x1="462" y1="362" x2="462" y2="388" stroke="#64748b" stroke-width="1.5"/>
+  <!-- Horizontal connector -->
+  <line x1="257" y1="388" x2="462" y2="388" stroke="#64748b" stroke-width="1.5"/>
+  <!-- Vertical down to worker -->
+  <line x1="360" y1="388" x2="360" y2="420" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Labels on arrows -->
+  <text x="230" y="404" font-size="9" fill="#818cf8" font-style="italic">Polls queue</text>
+  <text x="430" y="404" font-size="9" fill="#818cf8" font-style="italic">Results</text>
+
+  <!-- ── Row 5: ACI Worker ── -->
+  <rect x="220" y="424" width="280" height="56" rx="10" fill="#450a0a" stroke="#ef4444" stroke-width="1" filter="url(#shadow)"/>
+  <text x="360" y="449" text-anchor="middle" font-size="13" font-weight="600" fill="#fca5a5">ACI Worker</text>
+  <text x="360" y="465" text-anchor="middle" font-size="10" fill="#f87171">PowerShell 7.6 · Az CLI · Bicep</text>
+  <text x="360" y="477" text-anchor="middle" font-size="9.5" fill="#fb7185">Deploy / Teardown</text>
+</svg>
