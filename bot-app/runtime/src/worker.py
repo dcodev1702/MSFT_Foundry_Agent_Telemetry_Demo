@@ -23,7 +23,10 @@ if TYPE_CHECKING:
     from proactive import ProactiveMessenger
 
 logger = logging.getLogger(__name__)
-WORKER_BUILD_INFO_PATH = Path(__file__).resolve().parents[2] / "worker-build-info.json"
+WORKER_BUILD_INFO_PATHS = (
+    Path(__file__).resolve().parents[3] / "worker-build-info.json",
+    Path(__file__).resolve().parents[2] / "worker-build-info.json",
+)
 RESULT_MESSAGE_CHUNK_SIZE = 12000
 FOUNDRY_RESOURCE_GROUP_PATTERN = re.compile(r"^zolab-ai-.{4,}$")
 FOUNDRY_RESOURCE_GROUP_SUFFIX_PATTERN = re.compile(r"^zolab-ai-(.+)$")
@@ -34,8 +37,13 @@ def _utc_now() -> str:
 
 
 def _load_worker_build_info() -> dict[str, str]:
+    build_info_path = next(
+        (path for path in WORKER_BUILD_INFO_PATHS if path.exists()),
+        WORKER_BUILD_INFO_PATHS[0],
+    )
+
     try:
-        payload = json.loads(WORKER_BUILD_INFO_PATH.read_text(encoding="utf-8"))
+        payload = json.loads(build_info_path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return {
             "build_utc": "unknown",

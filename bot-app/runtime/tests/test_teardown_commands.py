@@ -28,7 +28,7 @@ azure_module.storage = storage_module
 
 from command_parser import parse_command
 from models import TeardownSession
-from worker import BackgroundWorker, _get_bot_download_base_url
+from worker import BackgroundWorker, _get_bot_download_base_url, _load_worker_build_info
 
 
 class TeardownCommandTests(unittest.TestCase):
@@ -200,6 +200,36 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("No active managed resource groups found ℹ️", result)
             self.assertNotIn("Orphaned build info files:", result)
             self.assertFalse(orphan_path.exists())
+
+
+class WorkerBuildInfoTests(unittest.TestCase):
+    def test_load_worker_build_info_prefers_top_level_image_metadata_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            top_level_path = temp_root / "worker-build-info.json"
+            nested_path = temp_root / "bot-app" / "worker-build-info.json"
+            nested_path.parent.mkdir(parents=True)
+
+            top_level_path.write_text(
+                '{"build_utc":"2026-03-28T22:01:51Z","build_commit":"abc123","build_source":"local-docker"}',
+                encoding="utf-8",
+            )
+            nested_path.write_text(
+                '{"build_utc":"wrong","build_commit":"wrong","build_source":"wrong"}',
+                encoding="utf-8",
+            )
+
+            with patch("worker.WORKER_BUILD_INFO_PATHS", (top_level_path, nested_path)):
+                result = _load_worker_build_info()
+
+            self.assertEqual(
+                result,
+                {
+                    "build_utc": "2026-03-28T22:01:51Z",
+                    "build_commit": "abc123",
+                    "build_source": "local-docker",
+                },
+            )
 
 
 class WorkerDownloadUrlTests(unittest.TestCase):
