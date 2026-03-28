@@ -24,6 +24,8 @@ param(
     [string]$LawWorkspaceName = 'DIBSecCom',
     [ValidateRange(5, 1440)]
     [int]$OrphanedBuildThresholdMinutes = 30,
+    [ValidateRange(60, 7200)]
+    [int]$DeploymentAzCliTimeoutSeconds = 1800,
     [ValidateRange(10, 900)]
     [int]$PostDeployAzCliTimeoutSeconds = 120
 )
@@ -2782,37 +2784,51 @@ try {
         # ── Deploy Bicep (subscription-scoped via az cli) ──
         Write-Host ""
         Write-Host "Deploying AI Foundry environment..."
-        $deployOutput = az deployment sub create `
-            --location $location `
-            --template-file (Join-Path $PSScriptRoot 'main.bicep') `
-            --name "foundry-ai-env-$suffix" `
-            --parameters `
-                aiDevGroupObjectId=$groupObjectId `
-                securitySubscriptionId=$securitySubscriptionId `
-                lawResourceGroup=$LawResourceGroup `
-                lawWorkspaceName=$LawWorkspaceName `
-                suffix=$suffix `
-                aiModelDeploymentName=$($selectedAiModelSpec.DeploymentName) `
-                aiModelName=$($selectedAiModelSpec.ModelName) `
-                aiModelFormat=$($selectedAiModelSpec.ModelFormat) `
-                aiModelVersion=$($selectedAiModelSpec.ModelVersion) `
-                aiModelSkuName=$($selectedAiModelSpec.SkuName) `
-                aiModelSkuCapacity=$($selectedAiModelSpec.SkuCapacity) `
-            --output json 2>&1
+        $deployResult = Invoke-AzCliCommand -Arguments @(
+            'deployment', 'sub', 'create',
+            '--location', $location,
+            '--template-file', (Join-Path $PSScriptRoot 'main.bicep'),
+            '--name', "foundry-ai-env-$suffix",
+            '--parameters',
+            "aiDevGroupObjectId=$groupObjectId",
+            "securitySubscriptionId=$securitySubscriptionId",
+            "lawResourceGroup=$LawResourceGroup",
+            "lawWorkspaceName=$LawWorkspaceName",
+            "suffix=$suffix",
+            "aiModelDeploymentName=$($selectedAiModelSpec.DeploymentName)",
+            "aiModelName=$($selectedAiModelSpec.ModelName)",
+            "aiModelFormat=$($selectedAiModelSpec.ModelFormat)",
+            "aiModelVersion=$($selectedAiModelSpec.ModelVersion)",
+            "aiModelSkuName=$($selectedAiModelSpec.SkuName)",
+            "aiModelSkuCapacity=$($selectedAiModelSpec.SkuCapacity)",
+            '--only-show-errors',
+            '--output', 'json'
+        ) -TimeoutSeconds $DeploymentAzCliTimeoutSeconds
 
-        $rawOutput = $deployOutput -join "`n"
-        $jsonStart = $rawOutput.IndexOf('{')
-        $jsonEnd = $rawOutput.LastIndexOf('}')
-        if ($jsonStart -lt 0 -or $jsonEnd -le $jsonStart) {
-            throw "No JSON found in deployment output.`n$rawOutput"
+        if ($deployResult.ExitCode -ne 0) {
+            $errorText = if ([string]::IsNullOrWhiteSpace($deployResult.OutputText)) {
+                'Deployment failed with no output.'
+            } else {
+                $deployResult.OutputText
+            }
+            throw "Deployment failed.`n$errorText"
         }
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "Deployment failed.`n$rawOutput"
+        $jsonString = $deployResult.StdOut.Trim()
+        if ([string]::IsNullOrWhiteSpace($jsonString)) {
+            $outputText = if ([string]::IsNullOrWhiteSpace($deployResult.OutputText)) {
+                'Deployment returned no output.'
+            } else {
+                $deployResult.OutputText
+            }
+            throw "Deployment returned no JSON output.`n$outputText"
         }
 
-        $jsonString = $rawOutput.Substring($jsonStart, $jsonEnd - $jsonStart + 1)
-        $result = $jsonString | ConvertFrom-Json
+        try {
+            $result = $jsonString | ConvertFrom-Json
+        } catch {
+            throw "Deployment output was not valid JSON.`n$jsonString"
+        }
 
         Write-Host ""
         Write-Host "=== Deployment Result ==="

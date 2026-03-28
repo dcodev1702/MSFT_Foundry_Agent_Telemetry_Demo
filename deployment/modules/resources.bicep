@@ -168,7 +168,6 @@ resource aiFoundryProject 'Microsoft.CognitiveServices/accounts/projects@2025-06
   parent: aiFoundry
   name: aiProjectName
   location: location
-  kind: 'AIServices'
   identity: {
     type: 'SystemAssigned'
   }
