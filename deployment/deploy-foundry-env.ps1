@@ -21,7 +21,11 @@ param(
     [string]$RequestedBy,
     [string]$RequestedByObjectId,
     [string]$LawResourceGroup = 'Sentinel',
-    [string]$LawWorkspaceName = 'DIBSecCom'
+    [string]$LawWorkspaceName = 'DIBSecCom',
+    [ValidateRange(5, 1440)]
+    [int]$OrphanedBuildThresholdMinutes = 30,
+    [ValidateRange(10, 900)]
+    [int]$PostDeployAzCliTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
@@ -744,6 +748,99 @@ function Get-LegacyBuildInfoPath {
     Join-Path (Get-BuildInfoDirectory) 'build_info.json'
 }
 
+function Get-AzCliExecutablePath {
+    if ($script:AzCliExecutablePath) {
+        return $script:AzCliExecutablePath
+    }
+
+    $candidate = Get-Command az.cmd -ErrorAction SilentlyContinue
+    if (-not $candidate) {
+        $candidate = Get-Command az -ErrorAction SilentlyContinue
+    }
+
+    if (-not $candidate) {
+        throw 'Azure CLI executable was not found on PATH.'
+    }
+
+    $script:AzCliExecutablePath = $candidate.Source
+    $script:AzCliExecutablePath
+}
+
+function Invoke-AzCliCommand {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Arguments,
+
+        [int]$TimeoutSeconds = 120
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = Get-AzCliExecutablePath
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add([string]$argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+
+    if (-not $process.Start()) {
+        throw 'Failed to start Azure CLI process.'
+    }
+
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        try {
+            $process.Kill()
+        } catch {
+        }
+
+        $commandText = "az $($Arguments -join ' ')"
+        throw "Azure CLI command timed out after $TimeoutSeconds seconds: $commandText"
+    }
+
+    $stdout = $process.StandardOutput.ReadToEnd()
+    $stderr = $process.StandardError.ReadToEnd()
+    $null = $process.WaitForExit()
+
+    $combinedOutput = @($stdout, $stderr) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
+    [pscustomobject]@{
+        ExitCode   = $process.ExitCode
+        StdOut     = $stdout
+        StdErr     = $stderr
+        OutputText = ($combinedOutput -join [Environment]::NewLine).Trim()
+    }
+}
+
+function Invoke-PostDeployStep {
+    param(
+        [Parameter(Mandatory)]
+        [string]$StepName,
+
+        [Parameter(Mandatory)]
+        [scriptblock]$Action
+    )
+
+    $startedAt = Get-Date
+    Write-Host "[post-deploy] START $StepName"
+
+    try {
+        $result = & $Action
+        $elapsedSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+        Write-Host "[post-deploy] OK $StepName (${elapsedSeconds}s)"
+        return $result
+    } catch {
+        $elapsedSeconds = [Math]::Round(((Get-Date) - $startedAt).TotalSeconds, 1)
+        $message = $_.Exception.Message
+        Write-Warning "[post-deploy] FAIL $StepName after ${elapsedSeconds}s: $message"
+        throw "Post-deploy step '$StepName' failed after ${elapsedSeconds}s: $message"
+    }
+}
+
 function Get-BuildInfoPathForSuffix {
     param(
         [Parameter(Mandatory)]
@@ -794,7 +891,9 @@ function Sync-BuildInfoFromBlobIfAvailable {
 function Sync-BuildInfoToBlobIfAvailable {
     param(
         [Parameter(Mandatory)]
-        [string]$BuildInfoPath
+        [string]$BuildInfoPath,
+
+        [int]$TimeoutSeconds = 120
     )
 
     $storageAccountName = $env:AZURE_STORAGE_ACCOUNT
@@ -809,17 +908,19 @@ function Sync-BuildInfoToBlobIfAvailable {
 
     $blobName = "builds/$(Split-Path -Leaf $BuildInfoPath)"
 
-    $uploadOutput = & az storage blob upload `
-        --auth-mode login `
-        --account-name $storageAccountName `
-        --container-name $blobContainerName `
-        --name $blobName `
-        --file $BuildInfoPath `
-        --overwrite true `
-        --only-show-errors 2>&1
+    $uploadResult = Invoke-AzCliCommand -Arguments @(
+        'storage', 'blob', 'upload',
+        '--auth-mode', 'login',
+        '--account-name', $storageAccountName,
+        '--container-name', $blobContainerName,
+        '--name', $blobName,
+        '--file', $BuildInfoPath,
+        '--overwrite', 'true',
+        '--only-show-errors'
+    ) -TimeoutSeconds $TimeoutSeconds
 
-    if ($LASTEXITCODE -ne 0) {
-        $message = (($uploadOutput -join ' ').Trim())
+    if ($uploadResult.ExitCode -ne 0) {
+        $message = $uploadResult.OutputText
         if ([string]::IsNullOrWhiteSpace($message)) {
             $message = 'upload failed'
         }
@@ -931,13 +1032,64 @@ function Import-BuildInfoFile {
     Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
 }
 
+function Get-FoundryBuildMetadataStatus {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ResourceGroupName,
+
+        [int]$OrphanedThresholdMinutes = 30
+    )
+
+    $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $ResourceGroupName
+    $deploymentName = $null
+    $deploymentTimestampUtc = $null
+    $deploymentAgeMinutes = $null
+    $orphanedCandidate = $false
+
+    try {
+        $suffix = Get-FoundryDeploymentSuffixFromResourceGroupName -ResourceGroupName $ResourceGroupName
+        $deploymentName = "foundry-ai-env-$suffix"
+        $deploymentRecord = Get-AzSubscriptionDeployment -Name $deploymentName -ErrorAction SilentlyContinue
+        if ($deploymentRecord -and $deploymentRecord.Timestamp) {
+            $deploymentTimestampUtc = ([datetimeoffset]$deploymentRecord.Timestamp).UtcDateTime
+            $deploymentAgeMinutes = [Math]::Round(((Get-Date).ToUniversalTime() - $deploymentTimestampUtc).TotalMinutes, 1)
+        }
+    } catch {
+    }
+
+    if ($buildInfoRecord) {
+        $statusLine = "build info: $(Split-Path -Leaf $buildInfoRecord.Path) ✅"
+    } elseif ($null -ne $deploymentAgeMinutes) {
+        if ($deploymentAgeMinutes -ge $OrphanedThresholdMinutes) {
+            $orphanedCandidate = $true
+            $statusLine = "build info missing for $deploymentAgeMinutes min (threshold: $OrphanedThresholdMinutes) — orphaned candidate ⚠️"
+        } else {
+            $statusLine = "build info file missing (${deploymentAgeMinutes} min old) ❌"
+        }
+    } else {
+        $orphanedCandidate = $true
+        $statusLine = 'build info file missing; deployment record unavailable — orphaned candidate ⚠️'
+    }
+
+    [pscustomobject]@{
+        BuildInfoRecord       = $buildInfoRecord
+        DeploymentName        = $deploymentName
+        DeploymentTimestampUtc = $deploymentTimestampUtc
+        DeploymentAgeMinutes  = $deploymentAgeMinutes
+        OrphanedCandidate     = $orphanedCandidate
+        StatusLine            = $statusLine
+    }
+}
+
 function Get-FoundryManagedResourceGroups {
     Get-AzResourceGroup | Where-Object { $_.ResourceGroupName -match '^zolab-ai-.{4,}$' } | Sort-Object ResourceGroupName
 }
 
 function Get-FoundryBuildInventory {
     param(
-        [string]$ExcludeResourceGroupName
+        [string]$ExcludeResourceGroupName,
+
+        [int]$OrphanedThresholdMinutes = 30
     )
 
     $inventory = foreach ($resourceGroup in Get-FoundryManagedResourceGroups) {
@@ -945,7 +1097,10 @@ function Get-FoundryBuildInventory {
             continue
         }
 
-        $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $resourceGroup.ResourceGroupName
+        $buildMetadataStatus = Get-FoundryBuildMetadataStatus `
+            -ResourceGroupName $resourceGroup.ResourceGroupName `
+            -OrphanedThresholdMinutes $OrphanedThresholdMinutes
+        $buildInfoRecord = $buildMetadataStatus.BuildInfoRecord
         $requestedBy = $null
         if ($buildInfoRecord -and $buildInfoRecord.Data.PSObject.Properties.Name -contains 'requested_by') {
             $requestedBy = [string]$buildInfoRecord.Data.requested_by
@@ -957,6 +1112,11 @@ function Get-FoundryBuildInventory {
         [pscustomobject]@{
             ResourceGroupName = $resourceGroup.ResourceGroupName
             BuildInfoPath     = if ($buildInfoRecord) { $buildInfoRecord.Path } else { $null }
+            BuildInfoStatus   = $buildMetadataStatus.StatusLine
+            ModelName         = if ($buildInfoRecord) { [string]$buildInfoRecord.Data.genai_model } else { $null }
+            DeploymentName    = $buildMetadataStatus.DeploymentName
+            DeploymentAgeMinutes = $buildMetadataStatus.DeploymentAgeMinutes
+            OrphanedCandidate = $buildMetadataStatus.OrphanedCandidate
             RequestedBy       = $requestedBy
             OwnershipKnown    = -not [string]::IsNullOrWhiteSpace($requestedBy)
         }
@@ -1077,12 +1237,14 @@ function Get-BuildInfoRemovalPreview {
 function Get-FoundryBuildListLines {
     param(
         [Parameter(Mandatory)]
-        [string]$SubscriptionId
+        [string]$SubscriptionId,
+
+        [int]$OrphanedThresholdMinutes = 30
     )
 
     Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
 
-    $resourceGroups = @(Get-FoundryManagedResourceGroups)
+    $inventory = @(Get-FoundryBuildInventory -OrphanedThresholdMinutes $OrphanedThresholdMinutes)
     $buildInfoPaths = @(Get-BuildInfoPaths)
     $matchedBuildInfoPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
@@ -1092,19 +1254,35 @@ function Get-FoundryBuildListLines {
         ''
     )
 
-    if ($resourceGroups.Count -eq 0) {
+    if ($inventory.Count -eq 0) {
         $lines += 'No active managed resource groups found ℹ️'
     } else {
         $lines += 'Active resource groups:'
-        for ($i = 0; $i -lt $resourceGroups.Count; $i++) {
-            $resourceGroupName = $resourceGroups[$i].ResourceGroupName
-            $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $resourceGroupName
-            if ($buildInfoRecord) {
-                [void]$matchedBuildInfoPaths.Add($buildInfoRecord.Path)
-                $lines += "$($i + 1). $resourceGroupName — model: $($buildInfoRecord.Data.genai_model) — build info: $(Split-Path -Leaf $buildInfoRecord.Path) ✅"
-            } else {
-                $lines += "$($i + 1). $resourceGroupName — build info file missing ❌"
+        for ($i = 0; $i -lt $inventory.Count; $i++) {
+            $build = $inventory[$i]
+            if ($build.BuildInfoPath) {
+                [void]$matchedBuildInfoPaths.Add($build.BuildInfoPath)
             }
+
+            if (-not [string]::IsNullOrWhiteSpace($build.ModelName)) {
+                $lines += "$($i + 1). $($build.ResourceGroupName) — model: $($build.ModelName) — $($build.BuildInfoStatus)"
+            } else {
+                $lines += "$($i + 1). $($build.ResourceGroupName) — $($build.BuildInfoStatus)"
+            }
+        }
+    }
+
+    $orphanedBuilds = @($inventory | Where-Object { $_.OrphanedCandidate })
+    if ($orphanedBuilds.Count -gt 0) {
+        $lines += ''
+        $lines += "Orphaned build candidates (threshold: ${OrphanedThresholdMinutes} min):"
+        foreach ($build in $orphanedBuilds) {
+            $ageText = if ($null -ne $build.DeploymentAgeMinutes) {
+                "$($build.DeploymentAgeMinutes) min old"
+            } else {
+                'deployment age unavailable'
+            }
+            $lines += "- $($build.ResourceGroupName) — $ageText — consider targeted cleanup ⚠️"
         }
     }
 
@@ -1598,7 +1776,9 @@ function Get-FoundryBuildStatusLines {
         [Parameter(Mandatory)]
         [string]$LawWorkspaceName,
 
-        [string]$CurrentUserAccount
+        [string]$CurrentUserAccount,
+
+        [int]$OrphanedThresholdMinutes = 30
     )
 
     $resourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction SilentlyContinue
@@ -1606,9 +1786,20 @@ function Get-FoundryBuildStatusLines {
         throw "Resource group '$ResourceGroupName' was not found in subscription '$SubscriptionId'."
     }
 
-    $buildInfoRecord = Get-BuildInfoRecordForResourceGroup -ResourceGroupName $ResourceGroupName
+    $buildMetadataStatus = Get-FoundryBuildMetadataStatus `
+        -ResourceGroupName $ResourceGroupName `
+        -OrphanedThresholdMinutes $OrphanedThresholdMinutes
+    $buildInfoRecord = $buildMetadataStatus.BuildInfoRecord
     if (-not $buildInfoRecord) {
-        throw "No build_info-<suffix>.json file was found for '$ResourceGroupName'."
+        $hint = if ($buildMetadataStatus.OrphanedCandidate) {
+            " The deployment is flagged as an orphaned candidate. Consider targeted cleanup for '$ResourceGroupName'."
+        } elseif ($null -ne $buildMetadataStatus.DeploymentAgeMinutes) {
+            " Build metadata is still missing $($buildMetadataStatus.DeploymentAgeMinutes) minutes after deployment creation."
+        } else {
+            ''
+        }
+
+        throw "No build_info-<suffix>.json file was found for '$ResourceGroupName'.$hint"
     }
 
     $buildInfo = $buildInfoRecord.Data
@@ -2387,7 +2578,9 @@ if ($Cleanup) {
 # ════════════════════════════════════════════════════════════════
 if ($ListBuilds) {
     try {
-        $buildListLines = Get-FoundryBuildListLines -SubscriptionId $subscriptionId
+        $buildListLines = Get-FoundryBuildListLines `
+            -SubscriptionId $subscriptionId `
+            -OrphanedThresholdMinutes $OrphanedBuildThresholdMinutes
         $buildListLines | ForEach-Object { Write-Host $_ }
 
         if ($UseTeamsChatFlow -and $teamsChatId) {
@@ -2423,6 +2616,7 @@ if ($BuildStatusResourceGroup) {
             SecuritySubscriptionId = $securitySubscriptionId
             LawResourceGroup       = $LawResourceGroup
             LawWorkspaceName       = $LawWorkspaceName
+            OrphanedThresholdMinutes = $OrphanedBuildThresholdMinutes
         }
         if ($currentUser.Account) {
             $buildStatusParams.CurrentUserAccount = $currentUser.Account
@@ -2637,94 +2831,115 @@ try {
         Write-Host "Portal link:"
         Write-Host "https://portal.azure.com/#@/resource/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/overview"
 
-        # ── Deploy LAW RBAC to Security subscription (Log Analytics Reader on DIBSecCom) ──
         $securitySubId = $securitySubscriptionId
         $lawScope = "/subscriptions/$securitySubId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
-        Write-Host ""
-        Write-Host "Deploying Log Analytics Reader RBAC to Security subscription..."
-        az account set --subscription $securitySubId 2>&1 | Out-Null
 
-        $existingLawAssignmentCount = az role assignment list `
-            --assignee-object-id $groupObjectId `
-            --scope $lawScope `
-            --query "[?roleDefinitionName=='Log Analytics Reader'] | length(@)" `
-            --output tsv 2>&1
-
-        $existingLawAssignmentExitCode = $LASTEXITCODE
-        if ($existingLawAssignmentExitCode -ne 0) {
-            az account set --subscription $subscriptionId 2>&1 | Out-Null
-            throw "Failed to verify existing Log Analytics Reader RBAC on $LawWorkspaceName.`n$($existingLawAssignmentCount -join "`n")"
-        }
-
-        if ((($existingLawAssignmentCount -join '').Trim()) -eq '1') {
-            az account set --subscription $subscriptionId 2>&1 | Out-Null
-            Write-Host "  Log Analytics Reader is already assigned to '$groupDisplayName' on $LawWorkspaceName workspace."
-        } else {
-
-            $lawOutput = az role assignment create `
-                --assignee-object-id $groupObjectId `
-                --assignee-principal-type Group `
-                --role "Log Analytics Reader" `
-                --scope $lawScope `
-                --subscription $securitySubId `
-                --output json 2>&1
-
-            $lawExitCode = $LASTEXITCODE
-            $lawWarnings = $lawOutput | Where-Object { $_ -match '^WARNING:|^BCP\d|\.bicep\(' }
-            if ($lawWarnings) {
-                $lawWarnings | ForEach-Object { Write-Host $_ }
+        Invoke-PostDeployStep -StepName "Ensure LAW RBAC on $LawWorkspaceName" -Action {
+            Write-Host ""
+            Write-Host "Deploying Log Analytics Reader RBAC to Security subscription..."
+            $setSecuritySubscription = Invoke-AzCliCommand -Arguments @('account', 'set', '--subscription', $securitySubId, '--output', 'none') -TimeoutSeconds $PostDeployAzCliTimeoutSeconds
+            if ($setSecuritySubscription.ExitCode -ne 0) {
+                throw "Failed to switch Azure CLI context to security subscription: $($setSecuritySubscription.OutputText)"
             }
 
-            az account set --subscription $subscriptionId 2>&1 | Out-Null
+            try {
+                $existingLawAssignmentResult = Invoke-AzCliCommand -Arguments @(
+                    'role', 'assignment', 'list',
+                    '--assignee-object-id', $groupObjectId,
+                    '--scope', $lawScope,
+                    '--query', "[?roleDefinitionName=='Log Analytics Reader'] | length(@)",
+                    '--output', 'tsv'
+                ) -TimeoutSeconds $PostDeployAzCliTimeoutSeconds
 
-            if ($lawExitCode -ne 0) {
-                throw "LAW RBAC deployment failed.`n$($lawOutput -join "`n")"
+                if ($existingLawAssignmentResult.ExitCode -ne 0) {
+                    throw "Failed to verify existing Log Analytics Reader RBAC on $LawWorkspaceName. $($existingLawAssignmentResult.OutputText)"
+                }
+
+                if ($existingLawAssignmentResult.OutputText.Trim() -eq '1') {
+                    Write-Host "  Log Analytics Reader is already assigned to '$groupDisplayName' on $LawWorkspaceName workspace."
+                } else {
+                    $lawAssignmentResult = Invoke-AzCliCommand -Arguments @(
+                        'role', 'assignment', 'create',
+                        '--assignee-object-id', $groupObjectId,
+                        '--assignee-principal-type', 'Group',
+                        '--role', 'Log Analytics Reader',
+                        '--scope', $lawScope,
+                        '--subscription', $securitySubId,
+                        '--output', 'json'
+                    ) -TimeoutSeconds $PostDeployAzCliTimeoutSeconds
+
+                    if ($lawAssignmentResult.ExitCode -ne 0) {
+                        throw "LAW RBAC deployment failed. $($lawAssignmentResult.OutputText)"
+                    }
+
+                    $lawWarnings = ($lawAssignmentResult.OutputText -split "`r?`n") | Where-Object { $_ -match '^WARNING:|^BCP\d|\.bicep\(' }
+                    if ($lawWarnings) {
+                        $lawWarnings | ForEach-Object { Write-Host $_ }
+                    }
+
+                    Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on $LawWorkspaceName workspace."
+                }
+            } finally {
+                $resetSubscription = Invoke-AzCliCommand -Arguments @('account', 'set', '--subscription', $subscriptionId, '--output', 'none') -TimeoutSeconds $PostDeployAzCliTimeoutSeconds
+                if ($resetSubscription.ExitCode -ne 0) {
+                    Write-Warning "Failed to switch Azure CLI context back to workload subscription: $($resetSubscription.OutputText)"
+                }
             }
-
-            Write-Host "  Log Analytics Reader assigned to '$groupDisplayName' on $LawWorkspaceName workspace."
         }
 
         $connectionId = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)/providers/Microsoft.CognitiveServices/accounts/$($result.properties.outputs.aiFoundryName.value)/projects/$($result.properties.outputs.aiProjectName.value)/connections/$($result.properties.outputs.aiFoundryName.value)-appinsights"
-        $connectionSharedToAll = az resource show `
-            --ids $connectionId `
-            --api-version 2025-06-01 `
-            --query properties.isSharedToAll `
-            --output tsv 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to resolve App Insights connection scope.`n$($connectionSharedToAll -join "`n")"
-        }
+        $appInsightsConnectionStatus = Invoke-PostDeployStep -StepName 'Resolve App Insights connection scope' -Action {
+            $connectionResult = Invoke-AzCliCommand -Arguments @(
+                'resource', 'show',
+                '--ids', $connectionId,
+                '--api-version', '2025-06-01',
+                '--query', 'properties.isSharedToAll',
+                '--output', 'tsv'
+            ) -TimeoutSeconds $PostDeployAzCliTimeoutSeconds
 
-        $appInsightsConnectionStatus = if (($connectionSharedToAll -join '').Trim().ToLowerInvariant() -eq 'true') {
-            'Shared to all projects ✅'
-        } else {
-            'This project only ✅'
+            if ($connectionResult.ExitCode -ne 0) {
+                throw "Failed to resolve App Insights connection scope. $($connectionResult.OutputText)"
+            }
+
+            if ($connectionResult.OutputText.Trim().ToLowerInvariant() -eq 'true') {
+                'Shared to all projects ✅'
+            } else {
+                'This project only ✅'
+            }
         }
 
         $resourceGroupScope = "/subscriptions/$subscriptionId/resourceGroups/$($result.properties.outputs.resourceGroupName.value)"
-        $rgReaderAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -RoleDefinitionName 'Reader' -ErrorAction SilentlyContinue
-        $appInsightsAccessStatus = if ($rgReaderAssignments) {
-            'Reader on resource group ✅'
-        } else {
-            'Reader missing on resource group ❌'
+        $appInsightsAccessStatus = Invoke-PostDeployStep -StepName 'Verify Reader access on deployment resource group' -Action {
+            $rgReaderAssignments = Get-AzRoleAssignment -ObjectId $groupObjectId -Scope $resourceGroupScope -RoleDefinitionName 'Reader' -ErrorAction SilentlyContinue
+            if ($rgReaderAssignments) {
+                'Reader on resource group ✅'
+            } else {
+                'Reader missing on resource group ❌'
+            }
         }
 
-        $buildInfoPath = Get-BuildInfoPathForSuffix -Suffix $suffix
-        Write-BuildInfoJson `
-            -OutputPath $buildInfoPath `
-            -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
-            -AppInsightsName $result.properties.outputs.appInsightsName.value `
-            -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
-            -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
-            -StorageAccountName $result.properties.outputs.storageAccountName.value `
-            -KeyVaultName $result.properties.outputs.keyVaultName.value `
-            -GenAiModel $selectedAiModelSpec.DeploymentName `
-            -AiFoundryName $result.properties.outputs.aiFoundryName.value `
-            -AiProjectName $result.properties.outputs.aiProjectName.value `
-            -RequestedBy $requesterAccount `
-            -RequestedByObjectId $requesterContext.RequestedByObjectId
+        $buildInfoPath = Invoke-PostDeployStep -StepName 'Persist build info locally' -Action {
+            $outputPath = Get-BuildInfoPathForSuffix -Suffix $suffix
+            Write-BuildInfoJson `
+                -OutputPath $outputPath `
+                -ResourceGroupName $result.properties.outputs.resourceGroupName.value `
+                -AppInsightsName $result.properties.outputs.appInsightsName.value `
+                -FoundryProjectEndpoint $result.properties.outputs.foundryProjectEndpoint.value `
+                -AzureOpenAIEndpoint $result.properties.outputs.azureOpenAIEndpoint.value `
+                -StorageAccountName $result.properties.outputs.storageAccountName.value `
+                -KeyVaultName $result.properties.outputs.keyVaultName.value `
+                -GenAiModel $selectedAiModelSpec.DeploymentName `
+                -AiFoundryName $result.properties.outputs.aiFoundryName.value `
+                -AiProjectName $result.properties.outputs.aiProjectName.value `
+                -RequestedBy $requesterAccount `
+                -RequestedByObjectId $requesterContext.RequestedByObjectId
+            $outputPath
+        }
         Write-Host "📝 Build info written to $buildInfoPath"
 
-        $buildInfoBlob = Sync-BuildInfoToBlobIfAvailable -BuildInfoPath $buildInfoPath
+        $buildInfoBlob = Invoke-PostDeployStep -StepName 'Upload build info to blob storage' -Action {
+            Sync-BuildInfoToBlobIfAvailable -BuildInfoPath $buildInfoPath -TimeoutSeconds $PostDeployAzCliTimeoutSeconds
+        }
         if ($buildInfoBlob) {
             Write-Host "☁️ Build info uploaded to blob: $($buildInfoBlob.ContainerName)/$($buildInfoBlob.BlobName)"
         }

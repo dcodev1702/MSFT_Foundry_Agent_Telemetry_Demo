@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -85,7 +86,7 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
                 "-NoProfile",
                 "-NonInteractive",
                 "-File",
-                "/tmp/deploy-foundry-env.ps1",
+                str(Path("/tmp/deploy-foundry-env.ps1")),
                 "-Cleanup",
                 "-CleanupResourceGroup",
                 "zolab-ai-abc123",
@@ -159,6 +160,7 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
         worker._get_build_info_record_for_resource_group = AsyncMock(
             return_value=(active_path, {"genai_model": "gpt-5.4", "rg": "zolab-ai-abc123"})
         )
+        worker._prune_orphaned_build_info_paths = lambda paths: ([], paths)
         worker._load_build_info_file = lambda path: {
             "rg": "zolab-ai-orphan1" if path == orphan_path else "zolab-ai-abc123"
         }
@@ -174,6 +176,30 @@ class WorkerTeardownRoutingTests(unittest.IsolatedAsyncioTestCase):
             "- build_info-orphan.json — resource group: zolab-ai-orphan1 ⚠️",
             result,
         )
+
+    async def test_run_list_builds_prunes_stale_local_build_info_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            deploy_dir = temp_root / "deployment"
+            deploy_dir.mkdir()
+            deploy_script = deploy_dir / "deploy-foundry-env.ps1"
+            deploy_script.write_text("", encoding="utf-8")
+
+            orphan_path = temp_root / "build_info-oqzgcu.json"
+            orphan_path.write_text('{"rg": "zolab-ai-oqzgcu"}', encoding="utf-8")
+
+            worker = BackgroundWorker(
+                queue_client=object(),
+                proactive=object(),
+                deploy_script=deploy_script,
+            )
+            worker._get_foundry_resource_group_names = lambda: []
+
+            result = await worker._run_list_builds()
+
+            self.assertIn("No active managed resource groups found ℹ️", result)
+            self.assertNotIn("Orphaned build info files:", result)
+            self.assertFalse(orphan_path.exists())
 
 
 class WorkerDownloadUrlTests(unittest.TestCase):

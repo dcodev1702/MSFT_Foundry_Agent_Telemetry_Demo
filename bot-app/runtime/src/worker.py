@@ -354,6 +354,9 @@ class BackgroundWorker:
         orphaned_build_info_paths = [
             path for path in build_info_paths if path not in matched_build_info_paths
         ]
+        _, orphaned_build_info_paths = self._prune_orphaned_build_info_paths(
+            orphaned_build_info_paths
+        )
         if orphaned_build_info_paths:
             lines.extend([
                 "",
@@ -482,6 +485,30 @@ class BackgroundWorker:
             paths.append(legacy_path)
 
         return paths
+
+    def _prune_orphaned_build_info_paths(
+        self,
+        orphaned_paths: list[Path],
+    ) -> tuple[list[Path], list[Path]]:
+        deleted_paths: list[Path] = []
+        remaining_paths: list[Path] = []
+
+        for path in orphaned_paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("Failed to remove stale build_info cache '%s': %s", path, exc)
+                remaining_paths.append(path)
+                continue
+
+            if path.exists():
+                remaining_paths.append(path)
+                continue
+
+            logger.info("Removed stale build_info cache '%s'", path)
+            deleted_paths.append(path)
+
+        return deleted_paths, remaining_paths
 
     @staticmethod
     def _load_build_info_file(path: Path) -> dict:
