@@ -22,17 +22,36 @@ expected_suffix_line="var storageEndpointSuffix = environment().suffixes.storage
 expected_blob_line="var blobPrivateDnsZoneName = 'privatelink.blob.\${storageEndpointSuffix}'"
 expected_queue_line="var queuePrivateDnsZoneName = 'privatelink.queue.\${storageEndpointSuffix}'"
 
-if ! rg -Fqx "${expected_suffix_line}" "${SOURCE_FILE}"; then
+contains_exact_line() {
+  local source_file="$1"
+  local expected_line="$2"
+
+  python3 - "$source_file" "$expected_line" <<'PY'
+from pathlib import Path
+import sys
+
+source_path = Path(sys.argv[1])
+expected_line = sys.argv[2]
+
+for raw_line in source_path.read_text(encoding='utf-8').splitlines():
+    if raw_line == expected_line:
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+if ! contains_exact_line "${SOURCE_FILE}" "${expected_suffix_line}"; then
   echo "ERROR: Storage endpoint suffix is not derived from environment().suffixes.storage in ${SOURCE_FILE}." >&2
   exit 1
 fi
 
-if ! rg -Fqx "${expected_blob_line}" "${SOURCE_FILE}"; then
+if ! contains_exact_line "${SOURCE_FILE}" "${expected_blob_line}"; then
   echo "ERROR: Blob private DNS zone is not derived from environment().suffixes.storage in ${SOURCE_FILE}." >&2
   exit 1
 fi
 
-if ! rg -Fqx "${expected_queue_line}" "${SOURCE_FILE}"; then
+if ! contains_exact_line "${SOURCE_FILE}" "${expected_queue_line}"; then
   echo "ERROR: Queue private DNS zone is not derived from environment().suffixes.storage in ${SOURCE_FILE}." >&2
   exit 1
 fi

@@ -40,6 +40,7 @@ from storage_config import get_blob_service_client, get_queue_client, BLOB_CONTA
 from worker import BackgroundWorker
 from heartbeat import HeartbeatService
 from public_routes import is_anonymous_route
+from auth_retry import authorize_with_retry
 from service_lifecycle import start_background_services, stop_background_services
 from msft_docs_service import MicrosoftLearnMcpService
 from weather_service import WeatherService
@@ -181,7 +182,12 @@ async def selective_jwt_authorization_middleware(request: web.Request, handler):
     if is_anonymous_route(request.method, request.path):
         return await handler(request)
 
-    return await jwt_authorization_middleware(request, handler)
+    return await authorize_with_retry(
+        request,
+        handler,
+        authorize=jwt_authorization_middleware,
+        logger=logger,
+    )
 
 
 # ── Lifecycle Hooks ────────────────────────────────────────────
