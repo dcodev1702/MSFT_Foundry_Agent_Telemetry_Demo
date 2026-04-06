@@ -44,7 +44,7 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 | **1** | Install Dependencies | Installs the latest Agent Framework, Foundry, Azure identity, and OpenTelemetry packages used by the notebook |
 | **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `OpenAIChatClient`, and Agent Framework observability helpers |
 | **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures both the Foundry project client and the Azure OpenAI-backed Agent Framework chat client |
-| **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry and enables Agent Framework instrumentation |
+| **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry, Foundry client-side tracing, HTTP dependency telemetry, and trace propagation controls |
 | **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a remote MCP tool for the Agent Framework agent |
 | **3.3** | Configure Microsoft Sentinel MCP Tool | Preserves the existing Foundry project-connection dependency for the Sentinel MCP tool |
 | **4** | Create the Agent | Creates the main Agent Framework agent and prepares the Sentinel-specific project agent when available |
@@ -66,52 +66,17 @@ The deployment script writes a repo-local `build_info-<suffix>.json` file at bui
 
 This removes the need to hardcode the Foundry project endpoint in the notebook or store it in source control.
 
-### Telemetry Environment Variables
+### Observability
 
-These **must** be set before calling `instrument()`:
+Section **3.1** configures the notebook's observability path end to end:
 
-```python
-import os
-from uuid import uuid4
+- **Azure Monitor + Application Insights** receive exported OpenTelemetry traces.
+- **Microsoft Foundry client-side tracing** is enabled for project-backed agent and Responses API activity.
+- **HTTPX dependency tracing** and explicit notebook-side client spans make outbound agent calls visible in Application Insights and Log Analytics.
+- **Trace context and baggage propagation** are enabled so notebook correlation identifiers flow with downstream requests.
+- **GenAI semantic conventions** are pinned to the latest experimental profile, while **message content recording stays off by default** unless explicitly enabled for debugging.
 
-from agent_framework.observability import create_resource, enable_instrumentation
-from azure.core.settings import settings
-from azure.monitor.opentelemetry import configure_azure_monitor
-from opentelemetry import baggage, context as otel_context, trace
-
-settings.tracing_implementation = "opentelemetry"
-
-project_name = foundry_proj_ep.rstrip("/").split("/")[-1] if "foundry_proj_ep" in globals() else "unknown-project"
-os.environ["OTEL_SERVICE_NAME"] = "foundry-agent-framework-demo"
-os.environ["OTEL_SERVICE_VERSION"] = "2026.04.05"
-
-if "telemetry_session_id" not in globals():
-    telemetry_session_id = str(uuid4())
-
-os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
-    f"service.namespace=foundry-agent-demo,"
-    f"service.instance.id={telemetry_session_id},"
-    f"deployment.environment=demo,"
-    f"foundry.project.name={project_name}"
-)
-
-# -----------------------------------------------------------------------------
-# Phase 2: Backend setup (Microsoft Foundry -> Application Insights connection)
-# -----------------------------------------------------------------------------
-application_insights_connection_string = project_client.telemetry.get_application_insights_connection_string()
-
-configure_azure_monitor(
-    connection_string=application_insights_connection_string,
-    resource=create_resource(),
-    sampling_ratio=1.0,
-)
-enable_instrumentation(enable_sensitive_data=True)
-
-# -----------------------------------------------------------------------------
-# Phase 3: Tracer handle for custom spans in later sections
-# -----------------------------------------------------------------------------
-tracer = trace.get_tracer(__name__)
-```
+See [observability.md](observability.md) for the full environment variable reference, version posture, and design notes.
 
 ### MCP Tool Setup
 
