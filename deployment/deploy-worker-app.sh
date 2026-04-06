@@ -12,7 +12,50 @@
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+if command -v az.cmd >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+  az() {
+    cmd.exe /c az.cmd "$@"
+  }
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+normalize_azure_cli_config_dir() {
+  if [[ -n "${AZURE_CONFIG_DIR:-}" ]]; then
+    return 0
+  fi
+
+  local windows_profile=""
+  local unix_profile=""
+
+  if command -v powershell.exe >/dev/null 2>&1; then
+    windows_profile="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("UserProfile")' 2>/dev/null | tr -d '\r')"
+  elif command -v cmd.exe >/dev/null 2>&1; then
+    windows_profile="$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
+  fi
+
+  if [[ -z "${windows_profile}" ]]; then
+    return 0
+  fi
+
+  if command -v wslpath >/dev/null 2>&1; then
+    unix_profile="$(wslpath -u "${windows_profile}")"
+  elif command -v cygpath >/dev/null 2>&1; then
+    unix_profile="$(cygpath "${windows_profile}")"
+  else
+    unix_profile="$(printf '%s' "${windows_profile}" | sed -E 's#^([A-Za-z]):#/\L\1#; s#\\#/#g')"
+  fi
+
+  if [[ -n "${unix_profile}" && -d "${unix_profile}/.azure" ]]; then
+    export AZURE_CONFIG_DIR="${unix_profile}/.azure"
+  fi
+}
+
+normalize_azure_cli_config_dir
+
+trim_cr() {
+  tr -d '\r'
+}
 
 SUFFIX="botprd"
 LOCATION="eastus2"
@@ -36,7 +79,7 @@ if ! az account show &>/dev/null; then
     exit 1
 fi
 
-MANAGED_IDENTITY_CLIENT_ID="${MANAGED_IDENTITY_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${BOT_RG}" --query clientId -o tsv)}"
+MANAGED_IDENTITY_CLIENT_ID="${MANAGED_IDENTITY_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${BOT_RG}" --query clientId -o tsv | trim_cr)}"
 
 if ! docker version &>/dev/null; then
     echo "ERROR: Docker is not available. Start Docker Desktop and retry." >&2
@@ -55,7 +98,7 @@ resolve_bot_fqdn() {
           --name "${explicit_container_app_name}" \
           --resource-group "${BOT_RG}" \
           --query 'properties.configuration.ingress.fqdn' \
-          -o tsv
+          -o tsv | trim_cr
         return 0
     fi
 
@@ -63,7 +106,7 @@ resolve_bot_fqdn() {
     fqdn="$(az containerapp list \
       --resource-group "${BOT_RG}" \
       --query "[?name=='zolab-bot-ca-${SUFFIX}-vnet'].properties.configuration.ingress.fqdn | [0]" \
-      -o tsv 2>/dev/null || true)"
+      -o tsv 2>/dev/null | trim_cr || true)"
     if [[ -n "${fqdn}" ]]; then
         printf '%s\n' "${fqdn}"
         return 0
@@ -72,7 +115,7 @@ resolve_bot_fqdn() {
     fqdn="$(az containerapp list \
       --resource-group "${BOT_RG}" \
       --query "[?name=='zolab-bot-ca-${SUFFIX}'].properties.configuration.ingress.fqdn | [0]" \
-      -o tsv 2>/dev/null || true)"
+      -o tsv 2>/dev/null | trim_cr || true)"
     if [[ -n "${fqdn}" ]]; then
         printf '%s\n' "${fqdn}"
         return 0
@@ -81,7 +124,7 @@ resolve_bot_fqdn() {
     az containerapp list \
       --resource-group "${BOT_RG}" \
       --query "[?starts_with(name, 'zolab-bot-ca-${SUFFIX}')].properties.configuration.ingress.fqdn | [0]" \
-      -o tsv
+      -o tsv | trim_cr
 }
 
 BOT_FQDN_RESOLVED="$(resolve_bot_fqdn)"
@@ -138,7 +181,7 @@ if [[ "${ENABLE_PRIVATE_STORAGE_ACCESS}" == "true" ]]; then
       --name "${WORKER_ACI_NAME}" \
       --resource-group "${WORKER_RG}" \
       --query 'subnetIds[0].id' \
-      -o tsv 2>/dev/null || true)
+      -o tsv 2>/dev/null | trim_cr || true)
 
     if [[ -z "${CURRENT_WORKER_SUBNET_ID}" ]]; then
         echo "  ! Existing worker container group is not subnet-integrated; recreating it for the private network move"

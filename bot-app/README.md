@@ -4,6 +4,8 @@ The `bot-app/` workspace contains the Teams-facing automation layer for this rep
 
 This is the chat-first control plane for the Foundry environment described in [../deployment/README.md](../deployment/README.md) and the notebook flow described in [../README.md](../README.md).
 
+The Teams host remains on the Microsoft 365 Agents SDK. Microsoft Agent Framework is now used only as an internal orchestration layer behind selected bot handlers, not as a replacement for the Teams transport boundary.
+
 ---
 
 ## 📋 What Lives Here
@@ -230,6 +232,8 @@ If Teams keeps showing a stale custom app package after uninstalling it in the c
 
 - The bot infrastructure and the Foundry environment deployment are separate concerns. The bot lives under `bot-app/`; the Foundry environment lives under `deployment/` at the repo root.
 - The bot Container App and the worker container are intentionally split so long-running PowerShell work does not block Teams request handling.
+- The M365 Agents SDK still owns Teams ingress, auth, and activity processing; Agent Framework is only used behind selected handlers such as `msft_docs` and build-guidance prompts.
 - The bot now defaults to the VNet-backed app and environment names `zolab-bot-ca-botprd-vnet` and `zolab-bot-env-botprd-vnet` so public Teams ingress stays up while storage access stays private.
 - The deploy script in `bot-app/deployment/` performs a local Docker `--no-cache --pull` rebuild, pushes the bot image to the bot ACR, and redeploys the bot infrastructure into that VNet-backed environment by default.
 - The worker image is defined in [../deployment/Dockerfile.worker](../deployment/Dockerfile.worker) because it shares the same PowerShell/Bicep automation code used by the root deployment flow. Use [../deployment/deploy-worker-app.sh](../deployment/deploy-worker-app.sh) for normal worker rollouts, and [../deployment/deploy-private-storage-rollout.sh](../deployment/deploy-private-storage-rollout.sh) for the staged bot+worker private-storage migration flow.
+- The worker container now uses Microsoft's Debian-packaged Azure CLI so managed-identity `az login --identity` works reliably inside ACI during `build it` and `teardown`.

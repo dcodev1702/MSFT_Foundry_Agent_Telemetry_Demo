@@ -31,6 +31,15 @@ param weatherLlmModel string = 'gpt-5.3-chat'
 @description('Azure OpenAI API version for grounded weather narration')
 param weatherLlmApiVersion string = '2024-10-21'
 
+@description('Enable the internal Agent Framework orchestration layer behind Teams handlers')
+param botAgentFrameworkEnabled bool = true
+
+@description('Azure OpenAI deployment name used by the internal Agent Framework orchestration layer')
+param botAgentFrameworkDeploymentName string = ''
+
+@description('Azure OpenAI API version used by the internal Agent Framework orchestration layer')
+param botAgentFrameworkApiVersion string = ''
+
 @description('Stable Azure OpenAI model name for the bot-owned weather deployment')
 param weatherLlmModelName string = 'gpt-5.3-chat'
 
@@ -69,6 +78,8 @@ var workerStorageAccountName = 'zolabworkerst${suffix}'
 var resolvedContainerEnvName = empty(containerEnvName) ? 'zolab-bot-env-${suffix}' : containerEnvName
 var resolvedContainerAppName = empty(containerAppName) ? 'zolab-bot-ca-${suffix}' : containerAppName
 var botLlmAccountName   = 'zolab-bot-llm-${suffix}'
+var resolvedBotAgentFrameworkDeploymentName = empty(botAgentFrameworkDeploymentName) ? weatherLlmModel : botAgentFrameworkDeploymentName
+var resolvedBotAgentFrameworkApiVersion = empty(botAgentFrameworkApiVersion) ? weatherLlmApiVersion : botAgentFrameworkApiVersion
 
 // ── Built-in RBAC Role Definition IDs ─────────────────────────
 var roles = {
@@ -282,12 +293,40 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
                 value: botLlmAccount.properties.endpoint
               }
               {
+                name: 'AZURE_OPENAI_ENDPOINT'
+                value: botLlmAccount.properties.endpoint
+              }
+              {
                 name: 'WEATHER_LLM_MODEL'
                 value: weatherLlmModel
               }
               {
+                name: 'AZURE_OPENAI_RESPONSES_DEPLOYMENT_NAME'
+                value: resolvedBotAgentFrameworkDeploymentName
+              }
+              {
                 name: 'WEATHER_LLM_API_VERSION'
                 value: weatherLlmApiVersion
+              }
+              {
+                name: 'AZURE_OPENAI_API_VERSION'
+                value: resolvedBotAgentFrameworkApiVersion
+              }
+              {
+                name: 'BOT_AGENT_FRAMEWORK_ENABLED'
+                value: botAgentFrameworkEnabled ? 'true' : 'false'
+              }
+              {
+                name: 'BOT_AGENT_FRAMEWORK_ENDPOINT'
+                value: botLlmAccount.properties.endpoint
+              }
+              {
+                name: 'BOT_AGENT_FRAMEWORK_DEPLOYMENT_NAME'
+                value: resolvedBotAgentFrameworkDeploymentName
+              }
+              {
+                name: 'BOT_AGENT_FRAMEWORK_API_VERSION'
+                value: resolvedBotAgentFrameworkApiVersion
               }
             ]
           )

@@ -50,6 +50,15 @@ param weatherLlmModel string = 'gpt-5.3-chat'
 @description('Azure OpenAI API version for grounded weather narration')
 param weatherLlmApiVersion string = '2024-10-21'
 
+@description('Enable the internal Agent Framework orchestration layer behind Teams handlers')
+param botAgentFrameworkEnabled bool = true
+
+@description('Azure OpenAI deployment name used by the internal Agent Framework orchestration layer')
+param botAgentFrameworkDeploymentName string = ''
+
+@description('Azure OpenAI API version used by the internal Agent Framework orchestration layer')
+param botAgentFrameworkApiVersion string = ''
+
 @description('Stable Azure OpenAI model name for the bot-owned weather deployment')
 param weatherLlmModelName string = 'gpt-5.3-chat'
 
@@ -123,6 +132,9 @@ module botResources 'modules/bot-resources.bicep' = {
     botImageTag: botImageTag
     weatherLlmModel: weatherLlmModel
     weatherLlmApiVersion: weatherLlmApiVersion
+    botAgentFrameworkEnabled: botAgentFrameworkEnabled
+    botAgentFrameworkDeploymentName: botAgentFrameworkDeploymentName
+    botAgentFrameworkApiVersion: botAgentFrameworkApiVersion
     weatherLlmModelName: weatherLlmModelName
     weatherLlmModelVersion: weatherLlmModelVersion
     weatherLlmModelFormat: weatherLlmModelFormat

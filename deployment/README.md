@@ -91,6 +91,9 @@ The deployment script requires an AI model selection and only allows these optio
 ```
 deployment/
 ├── deploy-foundry-env.ps1           # Orchestration script (deploy + cleanup)
+├── foundry-azure-auth.helpers.ps1   # Shared Az/Azure CLI managed-identity auth helpers
+├── foundry-identity.helpers.ps1     # Identity and Teams-flow helper functions
+├── foundry-teardown.helpers.ps1     # Targeted teardown helper functions
 ├── teams-command-dispatch.ps1       # Teams chat command listener for build/teardown
 ├── teams-chat.ps1                   # Teams chat helpers for Graph-based selection/notifications
 ├── main.bicep                       # Subscription-scoped entry point (Foundry env)
@@ -101,6 +104,10 @@ deployment/
 │   ├── resources.bicep              # Foundry resources, diagnostics, and RBAC
 │   ├── law-rbac.bicep               # LAW role assignment module
 │   └── worker-resources.bicep       # ACI worker + Storage (Queue + Blob)
+├── tests/
+│   ├── foundry-azure-auth.helpers.Tests.ps1
+│   ├── foundry-identity.helpers.Tests.ps1
+│   └── foundry-teardown.helpers.Tests.ps1
 ├── worker-infra.bicep               # Worker infrastructure entry point
 └── README.md                        # You are here
 
@@ -176,6 +183,8 @@ When this deployment runs under the worker managed identity, that identity must 
 
 For worker rollouts, avoid relying on a retagged `latest` image if you need deterministic pickup in Azure Container Instances. `worker-infra.bicep` now accepts `workerImageTag`, and `deployment/deploy-worker-app.sh` performs a local Docker `--no-cache --pull` build, pushes both an immutable tag and `latest`, and then deploys ACI pinned to the immutable tag.
 
+The worker image now installs Azure CLI from Microsoft's supported Debian package feed instead of `pip install azure-cli`. That change was required because the pip-installed CLI inside ACI could fail managed-identity `az login --identity` during `build it` and `teardown`, even when the container identity and Az PowerShell authentication were healthy.
+
 Worker local deployment:
 
 ```bash
@@ -213,6 +222,7 @@ Helpful notes:
 - Treat the local `pwsh ./deploy-foundry-env.ps1` path and the bot or worker managed identity path as two different operator modes. When you run the script from your Mac or Windows workstation, Azure CLI and Az PowerShell evaluate your desktop identity, not the Azure managed identity attached to the live worker. That means local runs are sensitive to stale PIM state, stale `az login` tokens, and mismatched Az PowerShell context even when the Azure-hosted automation is healthy.
 - Prefer Teams-triggered or queue-driven builds for normal operations. Those flows run under the Azure-hosted managed identity and are the most reliable path for production-like build and teardown work.
 - Reserve direct local deployment for development, debugging, or break-glass administration. After PIM elevation or any RBAC change, refresh both auth stacks before rerunning the script: reconnect Azure CLI, reconnect Az PowerShell, and then retry the deployment so the local session picks up the new role assignments.
+- Worker-side automation now retries Azure CLI managed-identity bootstrap through `foundry-azure-auth.helpers.ps1` before failing a Teams-triggered build or teardown job.
 - The scripts default to `Connect-MgGraph -ContextScope CurrentUser` on every platform so auth state can be reused consistently. If a macOS/Linux shell cannot write the Graph auth cache, either fix the cache directory permissions or override the session with `FOUNDRY_GRAPH_CONTEXT_SCOPE=Process`.
 - Admin consent is persistent, but the signed-in Graph token is not. After PIM elevation, new consent, or any role/scope change, reconnect with `Connect-MgGraph` and restart the listener so it picks up a fresh token.
 - If the chat scopes are missing, or the token was issued before the latest consent/PIM state, Teams commands can appear to arrive but the listener can fail to respond. The most common symptom is `403 Forbidden` / `InsufficientPrivileges` from `New-MgChatMessage`, followed by a missing heartbeat/build-status/build reply in the chat.

@@ -1,6 +1,6 @@
-# 🤖 Microsoft Foundry — AI Agent Observability PoC
+# 🤖 Microsoft Foundry — Agent Framework Observability PoC
 
-Jupyter notebooks for Python 3.13+ that create and query a Microsoft Foundry AI agent with **end-to-end observability** — tracing agent creation, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
+Jupyter notebooks for Python 3.13+ that configure and query a Microsoft Agent Framework agent backed by Microsoft Foundry with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
@@ -41,13 +41,15 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 | # | Section | What It Does |
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
-| **1** | Install Dependencies | Installs Azure AI, OpenTelemetry, and Azure Monitor packages with compatibility safeguards |
-| **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `PromptAgentDefinition`, `AIProjectInstrumentor` |
-| **3** | Configure the Project Client | Reuses the deployment values loaded from `build_info-<suffix>.json`, then tries `DefaultAzureCredential` with CLI fallback if needed |
-| **3.1** | Enable Telemetry | Configures OpenTelemetry + Azure Monitor tracing pipeline and instruments the SDK |
-| **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a tool for the agent |
-| **4** | Create the Agent | Defines a versioned agent with storytelling persona and MCP tool access |
-| **5** | Query the Agent | Two passes — fiction story generation + MCP-powered Foundry guidance; results saved to `stories.json` |
+| **1** | Install Dependencies | Installs the latest Agent Framework, Foundry, Azure identity, and OpenTelemetry packages used by the notebook |
+| **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `OpenAIChatClient`, and Agent Framework observability helpers |
+| **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures both the Foundry project client and the Azure OpenAI-backed Agent Framework chat client |
+| **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry and enables Agent Framework instrumentation |
+| **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a remote MCP tool for the Agent Framework agent |
+| **3.3** | Configure Microsoft Sentinel MCP Tool | Preserves the existing Foundry project-connection dependency for the Sentinel MCP tool |
+| **4** | Create the Agent | Creates the main Agent Framework agent and prepares the Sentinel-specific project agent when available |
+| **5** | Query the Agent | Runs storytelling and Microsoft Learn grounded queries through Agent Framework and saves the results to `stories.json` |
+| **5.1** | Query Microsoft Sentinel | Keeps the Sentinel MCP dependency path and runs the Sentinel-specific interaction separately |
 
 For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](deployment/run-smoke-checks.sh) and then exercise the manual Teams smoke sequence from [deployment/OPERATIONS-RUNBOOK.md](deployment/OPERATIONS-RUNBOOK.md).
 
@@ -72,60 +74,41 @@ These **must** be set before calling `instrument()`:
 import os
 from uuid import uuid4
 
+from agent_framework.observability import create_resource, enable_instrumentation
 from azure.core.settings import settings
-from opentelemetry import baggage, context as otel_context, trace
-from opentelemetry.sdk.resources import Resource
 from azure.monitor.opentelemetry import configure_azure_monitor
+from opentelemetry import baggage, context as otel_context, trace
 
 settings.tracing_implementation = "opentelemetry"
 
-# ---------------------------------------------------------------------------
-# Phase 1: Trace settings (must be set before instrumentation)
-# ---------------------------------------------------------------------------
-os.environ["AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING"] = "true"
-os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = "gen_ai_latest_experimental"
-os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
-os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
-os.environ["AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION"] = "true"
-os.environ["AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE"] = "true"
-
 project_name = foundry_proj_ep.rstrip("/").split("/")[-1] if "foundry_proj_ep" in globals() else "unknown-project"
-os.environ["OTEL_SERVICE_NAME"] = f"foundry-ai-agent-1702"
-os.environ["OTEL_TRACES_SAMPLER"] = "microsoft.fixed_percentage"
-os.environ["OTEL_TRACES_SAMPLER_ARG"] = "1.0"
+os.environ["OTEL_SERVICE_NAME"] = "foundry-agent-framework-demo"
+os.environ["OTEL_SERVICE_VERSION"] = "2026.04.05"
 
 if "telemetry_session_id" not in globals():
     telemetry_session_id = str(uuid4())
+
+os.environ["OTEL_RESOURCE_ATTRIBUTES"] = (
+    f"service.namespace=foundry-agent-demo,"
+    f"service.instance.id={telemetry_session_id},"
+    f"deployment.environment=demo,"
+    f"foundry.project.name={project_name}"
+)
 
 # -----------------------------------------------------------------------------
 # Phase 2: Backend setup (Microsoft Foundry -> Application Insights connection)
 # -----------------------------------------------------------------------------
 application_insights_connection_string = project_client.telemetry.get_application_insights_connection_string()
 
-resource = Resource.create(
-    {
-        "service.name": os.environ["OTEL_SERVICE_NAME"],
-        "service.namespace": "foundry-agent-1702",
-        "service.instance.id": telemetry_session_id,
-        "deployment.environment": "demo",
-        "foundry.project.name": project_name,
-    }
-)
-
-# Configure Azure Monitor as the tracing backend.
 configure_azure_monitor(
     connection_string=application_insights_connection_string,
-    resource=resource,
+    resource=create_resource(),
     sampling_ratio=1.0,
 )
+enable_instrumentation(enable_sensitive_data=True)
 
 # -----------------------------------------------------------------------------
-# Phase 3: SDK instrumentation
-# -----------------------------------------------------------------------------
-AIProjectInstrumentor().instrument(enable_content_recording=True)
-
-# -----------------------------------------------------------------------------
-# Phase 4: Tracer handle for custom spans in later sections
+# Phase 3: Tracer handle for custom spans in later sections
 # -----------------------------------------------------------------------------
 tracer = trace.get_tracer(__name__)
 ```
@@ -133,13 +116,15 @@ tracer = trace.get_tracer(__name__)
 ### MCP Tool Setup
 
 ```python
-from azure.ai.projects.models import MCPTool
-
-mcp_tool_spec = MCPTool(
-    server_label="msft-learn",
-    server_url="https://learn.microsoft.com/api/mcp",
-)
+mcp_tool_spec = {
+    "type": "mcp",
+    "server_label": "msft-learn",
+    "server_url": "https://learn.microsoft.com/api/mcp",
+    "require_approval": "never",
+}
 ```
+
+The notebook keeps the Microsoft Sentinel MCP dependency on the Foundry project-connection path by design. That Sentinel-specific tool setup remains separate from the Agent Framework remote MCP configuration used for Microsoft Learn.
 
 ---
 
@@ -193,9 +178,10 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 
 | Issue | Fix |
 |---|---|
-| `ImportError: cannot import name 'LogData'` | Rerun **Section 1 — Install Dependencies** to resolve exporter compatibility |
+| Agent Framework or Azure Monitor import errors | Rerun **Section 1 — Install Dependencies** so the notebook upgrades the pre-release Agent Framework packages in the active kernel |
 | Signed-in account shows as unavailable | Rerun **Section 3 — Configure the Project Client** (uses `az.cmd` on Windows) |
 | Telemetry cell fails after dependency changes | Restart kernel, rerun from **Section 1** through **Section 3.1** |
+| Sentinel cell cannot resolve a project connection | Verify the Foundry project still contains the Sentinel MCP connection and rerun **Section 3.3** |
 
 ---
 
@@ -203,17 +189,18 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 
 - [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
 - [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)
-- [ ] **Section 4** creates or versions the agent successfully
+- [ ] **Section 3.3** resolves or prints the Sentinel MCP project connection details
+- [ ] **Section 4** configures the main Agent Framework agent successfully
 - [ ] **Section 5** returns a response and appends to `stories.json`
+- [ ] **Section 5.1** returns a Sentinel response when the Foundry project connection is available
 - [ ] **Section 6** returns data for end-to-end and trend KQL queries
 
 ---
 
 ## 📚 References
 
+- [Microsoft Agent Framework (Python)](https://github.com/microsoft/agent-framework)
+- [Microsoft Agent Framework Observability Samples](https://github.com/microsoft/agent-framework/tree/main/python/samples/02-agents/observability)
 - [Microsoft Foundry SDK Overview (Python)](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview?pivots=programming-language-python#foundry-tools-sdks)
-- [Microsoft Foundry Observability: Trace Agent Setup](https://learn.microsoft.com/en-us/azure/foundry/observability/how-to/trace-agent-setup?view=foundry)
 - [OpenTelemetry for Python: Instrumentation Guide](https://opentelemetry.io/docs/languages/python/instrumentation/)
-- [Azure AI Projects SDK Tracing (GitHub)](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects#tracing)
-- [Azure AI Projects Agent Telemetry Samples (GitHub)](https://github.com/Azure/azure-sdk-for-python/tree/main/sdk/ai/azure-ai-projects/samples/agents/telemetry)
 - [Azure MCP Server Documentation](https://learn.microsoft.com/azure/developer/azure-mcp-server/)

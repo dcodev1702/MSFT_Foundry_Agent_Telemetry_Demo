@@ -33,6 +33,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 . (Join-Path $PSScriptRoot 'teams-chat.ps1')
+. (Join-Path $PSScriptRoot 'foundry-azure-auth.helpers.ps1')
 . (Join-Path $PSScriptRoot 'foundry-identity.helpers.ps1')
 . (Join-Path $PSScriptRoot 'foundry-teardown.helpers.ps1')
 
@@ -56,73 +57,6 @@ if ($PreviewCleanup -and -not $CleanupResourceGroup) {
     throw "Preview cleanup mode currently supports only targeted cleanup. Specify -CleanupResourceGroup."
 }
 
-function Test-ManagedIdentityBootstrapAvailable {
-    if ([string]::IsNullOrWhiteSpace($env:AZURE_CLIENT_ID)) {
-        return $false
-    }
-
-    if (Test-Path '/.dockerenv') {
-        return $true
-    }
-
-    $managedIdentitySignals = @(
-        'IDENTITY_ENDPOINT',
-        'IDENTITY_API_VERSION',
-        'IDENTITY_HEADER',
-        'MSI_ENDPOINT',
-        'IMDS_ENDPOINT',
-        'Fabric_ApplicationName',
-        'Fabric_ServiceName',
-        'CONTAINER_APP_NAME',
-        'CONTAINER_APP_REVISION',
-        'CONTAINER_GROUP_NAME',
-        'WEBSITE_SITE_NAME',
-        'WEBSITE_INSTANCE_ID'
-    )
-
-    foreach ($signal in $managedIdentitySignals) {
-        if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($signal))) {
-            return $true
-        }
-    }
-
-    return $false
-}
-
-function Connect-AzWithManagedIdentityRetry {
-    param(
-        [Parameter(Mandatory)]
-        [string]$ClientId,
-
-        [int]$MaxAttempts = 5,
-
-        [int]$InitialDelaySeconds = 2
-    )
-
-    $attempt = 1
-    $delaySeconds = $InitialDelaySeconds
-    $lastError = $null
-
-    while ($attempt -le $MaxAttempts) {
-        try {
-            Connect-AzAccount -Identity -AccountId $ClientId -ErrorAction Stop -WarningAction SilentlyContinue | Out-Null
-            return
-        } catch {
-            $lastError = $_
-            if ($attempt -ge $MaxAttempts) {
-                break
-            }
-
-            Write-Warning "Managed identity sign-in attempt $attempt/$MaxAttempts failed: $($_.Exception.Message)"
-            Start-Sleep -Seconds $delaySeconds
-            $attempt += 1
-            $delaySeconds = [Math]::Min($delaySeconds * 2, 15)
-        }
-    }
-
-    throw $lastError
-}
-
 # ── Auto-authenticate with Managed Identity when running in ACI/Container Apps ──
 if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
     $miClientId = $env:AZURE_CLIENT_ID
@@ -131,19 +65,11 @@ if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
         Connect-AzWithManagedIdentityRetry -ClientId $miClientId
         Write-Host "Authenticated via managed identity."
 
-        # Also authenticate Azure CLI with managed identity
-        # NOTE: newer az CLI versions require --client-id (--username is deprecated)
-        & az login --identity --client-id $miClientId --output none 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        try {
+            $null = Connect-AzureCliWithManagedIdentityRetry -ClientId $miClientId
             Write-Host "Azure CLI authenticated via managed identity."
-        } else {
-            Write-Host "WARNING: Azure CLI managed identity auth failed — retrying with legacy --username flag..."
-            & az login --identity --username $miClientId --output none 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "Azure CLI authenticated via managed identity (legacy flag)."
-            } else {
-                Write-Host "WARNING: Azure CLI managed identity auth failed (non-fatal for list/status operations)."
-            }
+        } catch {
+            Write-Host "WARNING: Azure CLI managed identity auth failed during bootstrap — $($_.Exception.Message)"
         }
     } elseif ($miClientId) {
         Write-Host "AZURE_CLIENT_ID is set, but no Azure managed-identity host markers were detected. Skipping managed identity bootstrap and using the local operator auth flow instead."
@@ -156,15 +82,6 @@ $securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id
 $location               = "eastus2"
 $groupDisplayName       = "zolab-ai-dev"
 $defaultModelCapacity   = 250
-
-function Get-AzureCliContext {
-    $cliContextJson = & az account show --query "{account:user.name,tenantId:tenantId,subscriptionId:id}" --output json 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $cliContextJson) {
-        return $null
-    }
-
-    $cliContextJson | ConvertFrom-Json
-}
 
 function Set-AzureSession {
     param(
@@ -215,6 +132,16 @@ function Set-AzureSession {
     $cliAccount = $null
     if (-not $SkipAzCliValidation) {
         $cliContext = Get-AzureCliContext
+        if (-not $cliContext -and $env:AZURE_CLIENT_ID -and (Test-ManagedIdentityBootstrapAvailable)) {
+            Write-Host "Azure CLI context missing — retrying managed identity authentication..."
+            try {
+                $cliContext = Connect-AzureCliWithManagedIdentityRetry -ClientId $env:AZURE_CLIENT_ID
+                Write-Host "Azure CLI context restored via managed identity."
+            } catch {
+                throw "Azure CLI is not authenticated, and managed identity Azure CLI bootstrap failed: $($_.Exception.Message)"
+            }
+        }
+
         if (-not $cliContext) {
             throw "Azure CLI is not authenticated. Run 'az login --tenant $($targetSubscription.TenantId)' and restart the Teams listener."
         }
@@ -225,6 +152,18 @@ function Set-AzureSession {
 
         & az account set --subscription $SubscriptionId 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
+            if ($env:AZURE_CLIENT_ID -and (Test-ManagedIdentityBootstrapAvailable)) {
+                Write-Host "Azure CLI subscription context update failed — retrying managed identity authentication..."
+                $null = Connect-AzureCliWithManagedIdentityRetry -ClientId $env:AZURE_CLIENT_ID
+                & az account set --subscription $SubscriptionId 2>&1 | Out-Null
+            }
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to set Azure CLI subscription context to '$SubscriptionId'."
+            }
+        }
+        $cliContext = Get-AzureCliContext
+        if (-not $cliContext) {
             throw "Failed to set Azure CLI subscription context to '$SubscriptionId'."
         }
         $cliAccount = $cliContext.account

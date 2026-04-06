@@ -40,8 +40,20 @@ RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor
     && apt-get update && apt-get install -y --no-install-recommends powershell \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Azure CLI ────────────────────────────────────────────────────
-RUN pip install --no-cache-dir azure-cli
+# ── Azure CLI (supported Debian package) ────────────────────────
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -sLS https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
+    && chmod go+r /etc/apt/keyrings/microsoft.gpg \
+    && printf '%s\n' \
+        'Types: deb' \
+        'URIs: https://packages.microsoft.com/repos/azure-cli/' \
+        'Suites: bookworm' \
+        'Components: main' \
+        'Architectures: amd64' \
+        'Signed-By: /etc/apt/keyrings/microsoft.gpg' > /etc/apt/sources.list.d/azure-cli.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends azure-cli \
+    && rm -rf /var/lib/apt/lists/*
 
 # ── Bicep CLI (extension of Azure CLI) ───────────────────────────
 RUN az bicep install
@@ -84,7 +96,8 @@ COPY deployment/ /app/deployment/
 COPY bot-app/runtime/ /app/bot-app/runtime/
 
 # ── Python dependencies ──────────────────────────────────────────
-RUN pip install --no-cache-dir -r /app/bot-app/runtime/requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --upgrade -r /app/bot-app/runtime/requirements.txt
 
 # ── Startup ──────────────────────────────────────────────────────
 WORKDIR /app/bot-app/runtime/src

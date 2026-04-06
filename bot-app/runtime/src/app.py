@@ -44,6 +44,7 @@ from auth_retry import authorize_with_retry
 from service_lifecycle import start_background_services, stop_background_services
 from msft_docs_service import MicrosoftLearnMcpService
 from weather_service import WeatherService
+from agent_framework_orchestrator import AgentFrameworkCommandOrchestrator
 
 # ── Logging ────────────────────────────────────────────────────
 logging.basicConfig(
@@ -108,6 +109,9 @@ heartbeat_service = HeartbeatService(
 heartbeat_service.INTERVAL = HEARTBEAT_INTERVAL_SECONDS
 weather_service = WeatherService()
 msft_docs_service = MicrosoftLearnMcpService()
+orchestration_service = AgentFrameworkCommandOrchestrator(
+    msft_docs_service=msft_docs_service,
+)
 
 # ── Register Bot Handlers (Phase 1) ───────────────────────────
 from bot import register_handlers  # noqa: E402
@@ -118,6 +122,7 @@ register_handlers(
     store=store,
     weather_service=weather_service,
     msft_docs_service=msft_docs_service,
+    orchestration_service=orchestration_service,
     heartbeat_service=heartbeat_service,
 )
 

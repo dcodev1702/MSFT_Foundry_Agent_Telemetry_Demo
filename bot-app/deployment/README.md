@@ -52,6 +52,7 @@ Azure Container Apps also creates a separate infrastructure resource group for e
 | Container image pull | UAMI with `AcrPull` on the bot ACR |
 | Bot Azure access | UAMI attached to the Container App and used by Azure Bot Service as `UserAssignedMSI` |
 | Worker storage access | RBAC plus private endpoint routing through the worker-owned VNet |
+| Internal orchestration | Optional Agent Framework settings are injected into the bot Container App and resolve to the bot-owned Azure OpenAI deployment |
 
 ### Deployment Guardrails
 
@@ -163,6 +164,7 @@ Grounded weather narration is intentionally separate from the ephemeral Foundry 
 - That account hosts a dedicated `gpt-5.3-chat` deployment for bot-side LLM features.
 - `weather` uses that stable endpoint for narration; it no longer depends on `build_info-*.json` or any user-triggered Foundry build.
 - `msft_docs` is already decoupled from Foundry builds because it queries the Microsoft Learn MCP endpoint directly.
+- When `BOT_AGENT_FRAMEWORK_ENABLED=true`, `msft_docs` and build-guidance prompts route through the internal Agent Framework orchestration layer while the Teams host remains on the M365 Agents SDK.
 - The bot managed identity gets `Azure AI User` on the bot-owned AI Services account from Bicep during deployment.
 
 The deploy script does not use an app registration or Key Vault secret. The bot runtime and Azure Bot Service both use the bot UAMI.

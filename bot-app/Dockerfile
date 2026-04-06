@@ -41,7 +41,8 @@ COPY bot-app/teams-app/color.png /app/bot-app/runtime/src/assets/bot-icon.png
 RUN rm -f /app/bot-app/runtime/.env
 
 # ── Python dependencies ──────────────────────────────────────────
-RUN pip install --no-cache-dir -r /app/bot-app/runtime/requirements.txt
+RUN python -m pip install --no-cache-dir --upgrade pip \
+	&& pip install --no-cache-dir --upgrade -r /app/bot-app/runtime/requirements.txt
 
 # ── Startup ──────────────────────────────────────────────────────
 WORKDIR /app/bot-app/runtime/src

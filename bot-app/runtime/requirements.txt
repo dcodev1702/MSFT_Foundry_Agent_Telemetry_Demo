@@ -22,6 +22,10 @@ psutil>=5.9.0
 msgraph-sdk>=1.0.0
 azure-identity>=1.15.0
 
+# Optional internal orchestration behind Teams handlers
+agent-framework-core>=1.0.0
+agent-framework-openai>=1.0.0
+
 # Azure Storage (Queue + Blob) — Entra ID / RBAC auth
 azure-storage-queue>=12.9.0
 azure-storage-blob>=12.19.0

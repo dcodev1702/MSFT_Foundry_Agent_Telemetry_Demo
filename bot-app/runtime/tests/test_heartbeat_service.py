@@ -41,7 +41,14 @@ class HeartbeatServiceTests(unittest.IsolatedAsyncioTestCase):
         heartbeat.INTERVAL = 0.01
 
         task = __import__("asyncio").create_task(heartbeat.run())
-        await __import__("asyncio").sleep(0.03)
+        deadline = __import__("asyncio").get_running_loop().time() + 0.5
+        while proactive.broadcast.await_count == 0:
+            if __import__("asyncio").get_running_loop().time() >= deadline:
+                heartbeat.stop()
+                await task
+                self.fail("Heartbeat broadcast did not run before the deadline.")
+            await __import__("asyncio").sleep(0.01)
+
         heartbeat.stop()
         await task
 

@@ -9,6 +9,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | [../README.md](../README.md) | Bot workspace overview and folder-level navigation |
 | [../deployment/README.md](../deployment/README.md) | Bot infrastructure deployment, ACR build flow, and verification |
 | [../../deployment/README.md](../../deployment/README.md) | Root Foundry environment deployment and teardown automation |
+| [../docs/agent-framework-migration-plan.md](../docs/agent-framework-migration-plan.md) | Keep/replace package matrix and Agent Framework rollout plan |
 
 ## Architecture
 
@@ -83,6 +84,8 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `listener status` | Worker and queue status |
 | `help` | Show command list |
 
+When `BOT_AGENT_FRAMEWORK_ENABLED=true`, the `msft_docs` and build-guidance command paths execute through the internal Agent Framework orchestration layer. The actual build and teardown operations still run through the queue-backed worker and shared PowerShell automation.
+
 ## Files
 
 | File | Purpose |
@@ -95,6 +98,7 @@ A Microsoft Teams bot built on the M365 Agents SDK that manages Azure AI Foundry
 | `src/models.py` | Command, job, and session models |
 | `src/weather_service.py` | Live weather lookup plus grounded LLM narration fallback |
 | `src/msft_docs_service.py` | Microsoft Learn MCP-backed docs lookup service |
+| `src/agent_framework_orchestrator.py` | Optional Agent Framework orchestration for Microsoft Learn lookup and build-guidance prompts |
 | `src/worker.py` | Background queue worker (used in ACI container) |
 | `src/worker_standalone.py` | Standalone entry point for the worker container |
 | `src/proactive.py` | Proactive messaging via stored conversation references |
@@ -153,12 +157,17 @@ export MSFT_LEARN_MCP_TIMEOUT_SECONDS="20"
 export WEATHER_LLM_AZURE_OPENAI_ENDPOINT="https://<bot-owned-stable-endpoint>.cognitiveservices.azure.com/"
 export WEATHER_LLM_MODEL="gpt-5.3-chat"
 export WEATHER_LLM_API_VERSION="2024-10-21"
+export BOT_AGENT_FRAMEWORK_ENABLED="false"
+export BOT_AGENT_FRAMEWORK_ENDPOINT="https://<bot-owned-stable-endpoint>.cognitiveservices.azure.com/"
+export BOT_AGENT_FRAMEWORK_DEPLOYMENT_NAME="gpt-5.4"
 
 cd src
 python app.py
 ```
 
 The bot listens on `http://localhost:8000/api/messages`. `DefaultAzureCredential` falls through to `az login` locally, and `AZURE_STORAGE_ACCOUNT` is required because the runtime no longer falls back to a hard-coded storage account name.
+
+When `BOT_AGENT_FRAMEWORK_ENABLED=true`, the Teams bot still uses `microsoft_agents.*` for the transport boundary, but `msft_docs` and build-guidance prompts are routed through an internal Agent Framework orchestration layer backed by Azure AI. In Azure, that path authenticates with the same user-assigned managed identity already injected into the bot and worker containers through `AZURE_CLIENT_ID`. If explicit Agent Framework endpoint settings are absent, the runtime falls back to the existing bot-owned Azure OpenAI endpoint and deployment values used by the weather command.
 
 When `WEATHER_LLM_AZURE_OPENAI_ENDPOINT` is set, the bot fetches live current conditions first and then asks the stable bot-owned `gpt-5.3-chat` deployment, or whatever `WEATHER_LLM_MODEL` overrides it with, to summarize only those supplied facts. This endpoint should belong to long-lived bot infrastructure, not to an ephemeral `build it` environment. If the model path is unavailable, the command falls back to the deterministic weather formatter.
 

@@ -25,6 +25,7 @@ from command_parser import parse_command
 from conversation_store import BlobConversationStore
 from job_dispatcher import AzureQueueJobDispatcher
 from msft_docs_service import MicrosoftLearnMcpService
+from agent_framework_orchestrator import AgentFrameworkCommandOrchestrator
 from models import (
     ALLOWED_MODELS,
     BuildSession,
@@ -530,6 +531,7 @@ def register_handlers(
     store: BlobConversationStore,
     weather_service: WeatherService,
     msft_docs_service: MicrosoftLearnMcpService,
+    orchestration_service: AgentFrameworkCommandOrchestrator | None = None,
     heartbeat_service=None,
 ) -> None:
     """Register all bot message and event handlers on the AgentApplication."""
@@ -639,7 +641,10 @@ def register_handlers(
             return
 
         if command.kind == "msft-docs":
-            text = await msft_docs_service.get_docs_text(command.query)
+            if orchestration_service is not None:
+                text = await orchestration_service.get_msft_docs_text(command.query)
+            else:
+                text = await msft_docs_service.get_docs_text(command.query)
             await context.send_activity(MessageFactory.text(text))
             _last_response_utc = _utc_now()
             if heartbeat_service:
@@ -652,8 +657,13 @@ def register_handlers(
         if command.kind == "build":
             if command.model is None:
                 _build_sessions[conversation_id] = BuildSession()
+                guidance = (
+                    await orchestration_service.get_build_guidance(command.raw_text)
+                    if orchestration_service is not None
+                    else _model_selection_prompt()
+                )
                 await context.send_activity(
-                    MessageFactory.text(_model_selection_prompt())
+                    MessageFactory.text(guidance)
                 )
                 _last_response_utc = _utc_now()
                 if heartbeat_service:
@@ -662,11 +672,19 @@ def register_handlers(
 
             if command.model.lower() not in [m.lower() for m in ALLOWED_MODELS]:
                 _build_sessions[conversation_id] = BuildSession()
-                await context.send_activity(
-                    MessageFactory.text(
+                guidance = (
+                    await orchestration_service.get_build_guidance(
+                        command.raw_text,
+                        invalid_model=command.model,
+                    )
+                    if orchestration_service is not None
+                    else (
                         f"Unknown model `{command.model}`.<br><br>"
                         + _model_selection_prompt()
                     )
+                )
+                await context.send_activity(
+                    MessageFactory.text(guidance)
                 )
                 _last_response_utc = _utc_now()
                 if heartbeat_service:

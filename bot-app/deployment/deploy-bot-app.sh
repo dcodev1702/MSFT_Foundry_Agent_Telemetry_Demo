@@ -17,7 +17,50 @@
 # ════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+if command -v az.cmd >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+  az() {
+    cmd.exe /c az.cmd "$@"
+  }
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+normalize_azure_cli_config_dir() {
+  if [[ -n "${AZURE_CONFIG_DIR:-}" ]]; then
+    return 0
+  fi
+
+  local windows_profile=""
+  local unix_profile=""
+
+  if command -v powershell.exe >/dev/null 2>&1; then
+    windows_profile="$(powershell.exe -NoProfile -Command '[Environment]::GetFolderPath("UserProfile")' 2>/dev/null | tr -d '\r')"
+  elif command -v cmd.exe >/dev/null 2>&1; then
+    windows_profile="$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')"
+  fi
+
+  if [[ -z "${windows_profile}" ]]; then
+    return 0
+  fi
+
+  if command -v wslpath >/dev/null 2>&1; then
+    unix_profile="$(wslpath -u "${windows_profile}")"
+  elif command -v cygpath >/dev/null 2>&1; then
+    unix_profile="$(cygpath "${windows_profile}")"
+  else
+    unix_profile="$(printf '%s' "${windows_profile}" | sed -E 's#^([A-Za-z]):#/\L\1#; s#\\#/#g')"
+  fi
+
+  if [[ -n "${unix_profile}" && -d "${unix_profile}/.azure" ]]; then
+    export AZURE_CONFIG_DIR="${unix_profile}/.azure"
+  fi
+}
+
+normalize_azure_cli_config_dir
+
+trim_cr() {
+  tr -d '\r'
+}
 
 # ── Configuration ────────────────────────────────────────────────
 SUFFIX="botprd"
@@ -55,6 +98,9 @@ TEAMS_ZIP_PATH="${TEAMS_APP_DIR}/Bot-The-Builder.zip"
 
 WEATHER_LLM_MODEL="${WEATHER_LLM_MODEL:-gpt-5.3-chat}"
 WEATHER_LLM_API_VERSION="${WEATHER_LLM_API_VERSION:-2024-10-21}"
+BOT_AGENT_FRAMEWORK_ENABLED="${BOT_AGENT_FRAMEWORK_ENABLED:-true}"
+BOT_AGENT_FRAMEWORK_DEPLOYMENT_NAME="${BOT_AGENT_FRAMEWORK_DEPLOYMENT_NAME:-${WEATHER_LLM_MODEL}}"
+BOT_AGENT_FRAMEWORK_API_VERSION="${BOT_AGENT_FRAMEWORK_API_VERSION:-${WEATHER_LLM_API_VERSION}}"
 WEATHER_LLM_MODEL_NAME="${WEATHER_LLM_MODEL_NAME:-gpt-5.3-chat}"
 WEATHER_LLM_MODEL_VERSION="${WEATHER_LLM_MODEL_VERSION:-2026-03-03}"
 WEATHER_LLM_MODEL_FORMAT="${WEATHER_LLM_MODEL_FORMAT:-OpenAI}"
@@ -107,7 +153,7 @@ get_current_azure_role_check_assignee() {
     return 0
   fi
 
-  az account show --query 'user.name' -o tsv 2>/dev/null || true
+  az account show --query 'user.name' -o tsv 2>/dev/null | trim_cr || true
 }
 
 get_azure_role_names_for_assignee() {
@@ -118,7 +164,7 @@ get_azure_role_names_for_assignee() {
     --assignee "${assignee}" \
     --scope "${scope}" \
     --query '[].roleDefinitionName' \
-    -o tsv 2>/dev/null || true
+    -o tsv 2>/dev/null | trim_cr || true
 }
 
 test_azure_role_assignment_write_access() {
@@ -170,6 +216,9 @@ assert_bot_deployment_authorization() {
       botImageTag="${BOT_IMAGE_TAG}" \
       weatherLlmModel="${WEATHER_LLM_MODEL}" \
       weatherLlmApiVersion="${WEATHER_LLM_API_VERSION}" \
+      botAgentFrameworkEnabled="${BOT_AGENT_FRAMEWORK_ENABLED}" \
+      botAgentFrameworkDeploymentName="${BOT_AGENT_FRAMEWORK_DEPLOYMENT_NAME}" \
+      botAgentFrameworkApiVersion="${BOT_AGENT_FRAMEWORK_API_VERSION}" \
       weatherLlmModelName="${WEATHER_LLM_MODEL_NAME}" \
       weatherLlmModelVersion="${WEATHER_LLM_MODEL_VERSION}" \
       weatherLlmModelFormat="${WEATHER_LLM_MODEL_FORMAT}" \
@@ -312,11 +361,11 @@ if ! az account show &>/dev/null; then
     exit 1
 fi
 
-SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+SUBSCRIPTION_ID="$(az account show --query id -o tsv | trim_cr)"
 
 STORAGE_SCOPE="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${WORKER_RG}/providers/Microsoft.Storage/storageAccounts/${WORKER_STORAGE_ACCOUNT}"
 
-TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv)}"
+TENANT_ID="${TENANT_ID:-$(az account show --query tenantId -o tsv | trim_cr)}"
 if [[ -z "${SECURITY_SUB}" ]]; then
   SECURITY_SUB="$(resolve_law_subscription_id || true)"
 fi
@@ -338,10 +387,10 @@ LAW_SHARED_KEY=""
 if [[ -n "${SECURITY_SUB}" ]]; then
   LAW_CUSTOMER_ID=$(az monitor log-analytics workspace show \
     --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
-    --subscription "${SECURITY_SUB}" --query customerId -o tsv 2>/dev/null || true)
+    --subscription "${SECURITY_SUB}" --query customerId -o tsv 2>/dev/null | trim_cr || true)
   LAW_SHARED_KEY=$(az monitor log-analytics workspace get-shared-keys \
     --resource-group "${LAW_RG}" --workspace-name "${LAW_NAME}" \
-    --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv 2>/dev/null || true)
+    --subscription "${SECURITY_SUB}" --query primarySharedKey -o tsv 2>/dev/null | trim_cr || true)
 fi
 if [[ -n "${LAW_CUSTOMER_ID}" && -n "${LAW_SHARED_KEY}" ]]; then
   echo "  ✓ Retrieved DIBSecCom LAW credentials (customer ID: ${LAW_CUSTOMER_ID})"
@@ -362,8 +411,8 @@ echo "└───────────────────────�
 bash deployment/run-worker-private-dns-preflight.sh
 assert_bot_deployment_authorization
 
-UAMI_PRINCIPAL_ID="${UAMI_PRINCIPAL_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query principalId -o tsv)}"
-UAMI_CLIENT_ID="${UAMI_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query clientId -o tsv)}"
+UAMI_PRINCIPAL_ID="${UAMI_PRINCIPAL_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query principalId -o tsv | trim_cr)}"
+UAMI_CLIENT_ID="${UAMI_CLIENT_ID:-$(az identity show --name "${BOT_MANAGED_IDENTITY_NAME}" --resource-group "${RG_BOT}" --query clientId -o tsv | trim_cr)}"
 
 if [[ "${PREFLIGHT_ONLY}" == "true" ]]; then
   echo "  ✓ Preflight checks completed successfully. No deployment actions were performed."
@@ -421,6 +470,9 @@ az deployment sub create \
     botImageTag="${BOT_IMAGE_TAG}" \
     weatherLlmModel="${WEATHER_LLM_MODEL}" \
     weatherLlmApiVersion="${WEATHER_LLM_API_VERSION}" \
+    botAgentFrameworkEnabled="${BOT_AGENT_FRAMEWORK_ENABLED}" \
+    botAgentFrameworkDeploymentName="${BOT_AGENT_FRAMEWORK_DEPLOYMENT_NAME}" \
+    botAgentFrameworkApiVersion="${BOT_AGENT_FRAMEWORK_API_VERSION}" \
     weatherLlmModelName="${WEATHER_LLM_MODEL_NAME}" \
     weatherLlmModelVersion="${WEATHER_LLM_MODEL_VERSION}" \
     weatherLlmModelFormat="${WEATHER_LLM_MODEL_FORMAT}" \
@@ -470,18 +522,18 @@ CA_FQDN=$(az containerapp show \
   --name "${CONTAINER_APP_NAME}" \
   --resource-group "${RG_BOT}" \
   --query "properties.configuration.ingress.fqdn" \
-  -o tsv)
+  -o tsv | trim_cr)
 
 BOT_CLIENT_ID=$(az bot show \
   --name "${BOT_SERVICE_NAME}" \
   --resource-group "${RG_BOT}" \
   --query "properties.msaAppId" \
-  -o tsv)
+  -o tsv | trim_cr)
 
 BOT_LLM_ENDPOINT=$(az deployment sub show \
   --name "bot-resources-${SUFFIX}" \
   --query "properties.outputs.botLlmEndpoint.value" \
-  -o tsv 2>/dev/null || true)
+  -o tsv 2>/dev/null | trim_cr || true)
 
 if [[ ! -f "${TEAMS_MANIFEST_TEMPLATE}" ]]; then
   echo "ERROR: Teams manifest template not found at ${TEAMS_MANIFEST_TEMPLATE}" >&2
