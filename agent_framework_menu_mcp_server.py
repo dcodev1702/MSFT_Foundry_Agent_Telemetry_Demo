@@ -5,18 +5,15 @@ from agent_framework import Agent, tool
 from agent_framework.openai import OpenAIChatClient
 from azure.identity.aio import AzureCliCredential
 
-
 @tool(approval_mode="never_require")
 def get_specials() -> Annotated[str, "Returns the specials from the menu."]:
-    return "Special Soup: Clam Chowder\nSpecial Salad: Cobb Salad\nSpecial Drink: Chai Tea"
-
+    return 'Special Soup: Clam Chowder\nSpecial Salad: Cobb Salad\nSpecial Drink: Chai Tea'
 
 @tool(approval_mode="never_require")
 def get_item_price(
     menu_item: Annotated[str, "The name of the menu item."]
 ) -> Annotated[str, "Returns the price of the menu item."]:
     return "$9.99"
-
 
 async def run() -> None:
     credential = AzureCliCredential()
@@ -38,7 +35,6 @@ async def run() -> None:
 
     async with stdio_server() as (read_stream, write_stream):
         await server.run(read_stream, write_stream, server.create_initialization_options())
-
 
 if __name__ == "__main__":
     anyio.run(run)
