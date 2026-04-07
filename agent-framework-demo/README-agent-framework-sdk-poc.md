@@ -51,13 +51,13 @@ That makes it a useful contrast to the rest of this repo, which includes Foundry
 ## Primary Assets
 
 - Notebook: [zolab-agent-framework-sdk-win11.ipynb](./zolab-agent-framework-sdk-win11.ipynb)
-- Existing repo overview: [README.md](./README.md)
-- Existing observability notes: [observability.md](./observability.md)
-- Foundry deployment guide: [deployment/README.md](./deployment/README.md)
-- Bot workspace guide: [bot-app/README.md](./bot-app/README.md)
-- Bot runtime guide: [bot-app/runtime/README.md](./bot-app/runtime/README.md)
-- Agent Framework migration notes: [bot-app/docs/agent-framework-migration-plan.md](./bot-app/docs/agent-framework-migration-plan.md)
-- Refactor summary: [bot-app/docs/refactor-executive-summary.md](./bot-app/docs/refactor-executive-summary.md)
+- Existing repo overview: [README.md](../README.md)
+- Existing observability notes: [observability.md](../observability.md)
+- Foundry deployment guide: [deployment/README.md](../deployment/README.md)
+- Bot workspace guide: [bot-app/README.md](../bot-app/README.md)
+- Bot runtime guide: [bot-app/runtime/README.md](../bot-app/runtime/README.md)
+- Agent Framework migration notes: [bot-app/docs/agent-framework-migration-plan.md](../bot-app/docs/agent-framework-migration-plan.md)
+- Refactor summary: [bot-app/docs/refactor-executive-summary.md](../bot-app/docs/refactor-executive-summary.md)
 
 ## Architecture
 
@@ -231,10 +231,10 @@ That split is useful because it lets you compare two approaches:
 ## Related References
 
 - Microsoft Agent Framework repo: [https://github.com/microsoft/agent-framework](https://github.com/microsoft/agent-framework)
-- Existing repo overview: [README.md](./README.md)
-- Foundry deployment details: [deployment/README.md](./deployment/README.md)
-- Existing observability notes: [observability.md](./observability.md)
-- Bot runtime architecture: [bot-app/runtime/README.md](./bot-app/runtime/README.md)
+- Existing repo overview: [README.md](../README.md)
+- Foundry deployment details: [deployment/README.md](../deployment/README.md)
+- Existing observability notes: [observability.md](../observability.md)
+- Bot runtime architecture: [bot-app/runtime/README.md](../bot-app/runtime/README.md)
 
 ## Bottom Line
 
