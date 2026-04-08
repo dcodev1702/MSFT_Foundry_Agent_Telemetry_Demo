@@ -71,6 +71,7 @@ RUN pwsh -NoProfile -Command " \
     Install-Module -Name Microsoft.Graph.Authentication -Scope AllUsers -Force; \
     Install-Module -Name Microsoft.Graph.Groups         -Scope AllUsers -Force; \
     Install-Module -Name Microsoft.Graph.Users          -Scope AllUsers -Force; \
+    Update-AzConfig -CheckForUpgrade \$false -Scope CurrentUser -AppliesTo Az -Confirm:\$false | Out-Null; \
     "
 
 # ── Application layout ──────────────────────────────────────────
