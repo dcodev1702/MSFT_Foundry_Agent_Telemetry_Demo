@@ -46,6 +46,10 @@ The telemetry path for this repo is:
 5. Because the Application Insights instance is workspace-based, the same telemetry is queryable in Log Analytics.
 6. Because agent calls use the Foundry Responses API with `agent_reference`, the traces also show up in Microsoft Foundry Traces.
 
+![Pro-code observability stack for the Foundry agent demo](images/foundry-observability-stack.svg)
+
+The diagram above summarizes the same pro-code path visually: notebook orchestration creates explicit spans, Foundry and HTTP client instrumentation enrich the agent and dependency traces, and Azure Monitor exports the resulting telemetry into the operational analysis surfaces.
+
 That gives three useful observability surfaces:
 
 | Surface | Role |

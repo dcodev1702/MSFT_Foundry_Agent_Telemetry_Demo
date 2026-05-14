@@ -1,0 +1,432 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1180" font-family="'Segoe UI', system-ui, sans-serif">
+  <!-- ============== BACKGROUND ============== -->
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a1628"/>
+      <stop offset="100%" stop-color="#0d1b30"/>
+    </linearGradient>
+
+    <!-- Color stops for each layer band -->
+    <linearGradient id="coralGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#c0392b"/>
+      <stop offset="100%" stop-color="#ff6b6b"/>
+    </linearGradient>
+    <linearGradient id="blueGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2c5aa0"/>
+      <stop offset="100%" stop-color="#4a90e2"/>
+    </linearGradient>
+    <linearGradient id="tealGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#138a6e"/>
+      <stop offset="100%" stop-color="#20c997"/>
+    </linearGradient>
+
+    <!-- Arrow marker -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowYellow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#fbbf24"/>
+    </marker>
+    <marker id="arrowRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444"/>
+    </marker>
+
+    <!-- Drop shadow for cards -->
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="3" result="offsetblur"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.4"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1400" height="1180" fill="url(#bgGrad)"/>
+
+  <!-- ============== TITLE ============== -->
+  <text x="700" y="42" text-anchor="middle" font-size="26" font-weight="700" fill="#e2e8f0">
+    Pro-Code Observability Stack
+  </text>
+  <text x="700" y="68" text-anchor="middle" font-size="14" fill="#94a3b8">
+    How the libraries tie together in <tspan font-family="'Cascadia Code', Consolas, monospace" fill="#fbbf24">zolab-ai-agent-demo-win11.ipynb</tspan>
+  </text>
+
+  <!-- Legend pills -->
+  <g transform="translate(700, 88)">
+    <g transform="translate(-280, 0)">
+      <circle cx="0" cy="0" r="6" fill="#ff6b6b"/>
+      <text x="12" y="4" font-size="11" fill="#cbd5e1">Interface / Storage</text>
+    </g>
+    <g transform="translate(-130, 0)">
+      <circle cx="0" cy="0" r="6" fill="#4a90e2"/>
+      <text x="12" y="4" font-size="11" fill="#cbd5e1">Orchestration</text>
+    </g>
+    <g transform="translate(0, 0)">
+      <circle cx="0" cy="0" r="6" fill="#20c997"/>
+      <text x="12" y="4" font-size="11" fill="#cbd5e1">Execution</text>
+    </g>
+    <g transform="translate(120, 0)">
+      <circle cx="0" cy="0" r="6" fill="#fbbf24"/>
+      <text x="12" y="4" font-size="11" fill="#cbd5e1">GenAI emphasis</text>
+    </g>
+    <g transform="translate(260, 0)">
+      <circle cx="0" cy="0" r="6" fill="#ef4444"/>
+      <text x="12" y="4" font-size="11" fill="#cbd5e1">Error path</text>
+    </g>
+  </g>
+
+  <!-- ============== LEFT PANEL: GenAI Environment Switches ============== -->
+  <g transform="translate(30, 130)">
+    <rect x="0" y="0" width="290" height="900" rx="10" fill="#142847" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6 4" opacity="0.95"/>
+    <rect x="0" y="0" width="290" height="38" rx="10" fill="#fbbf24"/>
+    <rect x="0" y="28" width="290" height="10" fill="#fbbf24"/>
+    <text x="145" y="25" text-anchor="middle" font-size="13" font-weight="700" fill="#0a1628">GENAI ENVIRONMENT SWITCHES</text>
+
+    <text x="14" y="60" font-size="11" fill="#94a3b8" font-style="italic">Set before configure_azure_monitor()</text>
+
+    <!-- service metadata -->
+    <text x="14" y="86" font-size="11" font-weight="600" fill="#fbbf24">SERVICE METADATA</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#e2e8f0">
+      <text x="14" y="104">OTEL_SERVICE_NAME=</text>
+      <text x="22" y="118" fill="#fbbf24">foundry-agent-framework-demo</text>
+      <text x="14" y="136">OTEL_SERVICE_VERSION=</text>
+      <text x="22" y="150" fill="#fbbf24">2026.04.06</text>
+    </g>
+
+    <!-- semconv -->
+    <text x="14" y="180" font-size="11" font-weight="600" fill="#fbbf24">SEMANTIC CONVENTIONS</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#e2e8f0">
+      <text x="14" y="198">OTEL_SEMCONV_STABILITY_OPT_IN=</text>
+      <text x="22" y="212" fill="#fbbf24">gen_ai_latest_experimental</text>
+    </g>
+
+    <!-- azure genai -->
+    <text x="14" y="240" font-size="11" font-weight="600" fill="#fbbf24">AZURE GENAI TRACING</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="9.5" fill="#e2e8f0">
+      <text x="14" y="258">AZURE_EXPERIMENTAL_ENABLE_</text>
+      <text x="22" y="270">GENAI_TRACING=<tspan fill="#10b981">true</tspan></text>
+      <text x="14" y="290">AZURE_TRACING_GEN_AI_ENABLE_</text>
+      <text x="22" y="302">TRACE_CONTEXT_PROPAGATION=<tspan fill="#10b981">true</tspan></text>
+      <text x="14" y="322">AZURE_TRACING_GEN_AI_TRACE_</text>
+      <text x="22" y="334">CONTEXT_PROPAGATION_INCLUDE_</text>
+      <text x="22" y="346">BAGGAGE=<tspan fill="#10b981">true</tspan></text>
+      <text x="14" y="366">AZURE_TRACING_GEN_AI_</text>
+      <text x="22" y="378">INSTRUMENT_RESPONSES_API=<tspan fill="#10b981">true</tspan></text>
+    </g>
+
+    <!-- content recording -->
+    <text x="14" y="406" font-size="11" font-weight="600" fill="#fbbf24">CONTENT RECORDING</text>
+    <text x="14" y="420" font-size="9" fill="#94a3b8" font-style="italic">(demo only — privacy decision in prod)</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="9.5" fill="#e2e8f0">
+      <text x="14" y="438">OTEL_INSTRUMENTATION_GENAI_</text>
+      <text x="22" y="450">CAPTURE_MESSAGE_CONTENT=<tspan fill="#10b981">true</tspan></text>
+      <text x="14" y="470">AZURE_TRACING_GEN_AI_CONTENT_</text>
+      <text x="22" y="482">RECORDING_ENABLED=<tspan fill="#10b981">true</tspan></text>
+    </g>
+
+    <!-- divider -->
+    <line x1="14" y1="510" x2="276" y2="510" stroke="#fbbf24" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+
+    <!-- version compatibility -->
+    <text x="14" y="532" font-size="11" font-weight="600" fill="#fbbf24">VERSION COMPATIBILITY</text>
+    <text x="14" y="548" font-size="10" fill="#cbd5e1">Azure Monitor exporter pins:</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10">
+      <text x="14" y="568" fill="#e2e8f0">opentelemetry-api  <tspan fill="#fbbf24">~1.40</tspan></text>
+      <text x="14" y="584" fill="#e2e8f0">opentelemetry-sdk  <tspan fill="#fbbf24">~1.40</tspan></text>
+      <text x="14" y="600" fill="#e2e8f0">httpx instrumentor <tspan fill="#fbbf24">~0.61b</tspan></text>
+    </g>
+
+    <!-- Bootstrap order -->
+    <line x1="14" y1="618" x2="276" y2="618" stroke="#fbbf24" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+    <text x="14" y="640" font-size="11" font-weight="600" fill="#fbbf24">BOOTSTRAP ORDER</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#e2e8f0">
+      <text x="14" y="660"><tspan fill="#94a3b8">1.</tspan> settings.tracing_</text>
+      <text x="22" y="672">  implementation = <tspan fill="#fbbf24">None</tspan></text>
+      <text x="14" y="692"><tspan fill="#94a3b8">2.</tspan> set env switches ↑</text>
+      <text x="14" y="712"><tspan fill="#94a3b8">3.</tspan> get conn string from</text>
+      <text x="22" y="724">  project_client.telemetry</text>
+      <text x="14" y="744"><tspan fill="#94a3b8">4.</tspan> configure_azure_monitor</text>
+      <text x="14" y="764"><tspan fill="#94a3b8">5.</tspan> settings.tracing_</text>
+      <text x="22" y="776">  implementation =</text>
+      <text x="22" y="788">  <tspan fill="#20c997">'opentelemetry'</tspan></text>
+      <text x="14" y="808"><tspan fill="#94a3b8">6.</tspan> AIProjectInstrumentor</text>
+      <text x="22" y="820">  ().instrument()</text>
+      <text x="14" y="840"><tspan fill="#94a3b8">7.</tspan> HTTPXClientInstrumentor</text>
+      <text x="22" y="852">  ().instrument()</text>
+      <text x="14" y="872"><tspan fill="#94a3b8">8.</tspan> get_tracer(<tspan fill="#fbbf24">"foundry_</tspan></text>
+      <text x="22" y="884">  <tspan fill="#fbbf24">agent_framework_notebook"</tspan>)</text>
+    </g>
+  </g>
+
+  <!-- Connector from left panel into pipeline -->
+  <path d="M 320 480 L 360 480" stroke="#fbbf24" stroke-width="2" stroke-dasharray="4 3" fill="none" marker-end="url(#arrowYellow)"/>
+
+  <!-- ============== CENTER PIPELINE ============== -->
+
+  <!-- ===== LAYER 1: APPLICATION CODE (coral) ===== -->
+  <g transform="translate(360, 130)">
+    <rect x="0" y="0" width="720" height="180" rx="12" fill="url(#coralGrad)" filter="url(#shadow)" opacity="0.95"/>
+    <text x="360" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">APPLICATION CODE — Manual Spans</text>
+    <text x="360" y="46" text-anchor="middle" font-size="11" fill="#ffe0e0" font-style="italic">Business operations wrapped in explicit tracer.start_as_current_span()</text>
+
+    <!-- Span cards -->
+    <g font-family="'Cascadia Code', Consolas, monospace">
+      <!-- create_agent -->
+      <rect x="20" y="60" width="160" height="48" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="100" y="78" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">create_agent</text>
+      <text x="100" y="94" text-anchor="middle" font-size="9" fill="#ffe0e0">ZoDEfendersAgent-1702</text>
+      <text x="100" y="104" text-anchor="middle" font-size="8" fill="#ffe0e0">+ Sentinel specialist</text>
+
+      <!-- invoke_agent -->
+      <rect x="195" y="60" width="160" height="48" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="275" y="78" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">invoke_agent</text>
+      <text x="275" y="94" text-anchor="middle" font-size="9" fill="#ffe0e0">storytelling + MSFT Learn</text>
+      <text x="275" y="104" text-anchor="middle" font-size="8" fill="#ffe0e0">approval rounds tracked</text>
+
+      <!-- POST /openai/v1/responses -->
+      <rect x="370" y="60" width="160" height="48" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="450" y="78" text-anchor="middle" font-size="10" font-weight="700" fill="#ffffff">POST /openai/v1/responses</text>
+      <text x="450" y="94" text-anchor="middle" font-size="9" fill="#ffe0e0">HTTP client span</text>
+      <text x="450" y="104" text-anchor="middle" font-size="8" fill="#ffe0e0">→ Service Map edge</text>
+
+      <!-- sentinel-agent-query -->
+      <rect x="545" y="60" width="160" height="48" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ef4444" stroke-width="1.5"/>
+      <text x="625" y="78" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">sentinel-agent-query</text>
+      <text x="625" y="94" text-anchor="middle" font-size="9" fill="#ffe0e0">OAuth passthrough</text>
+      <text x="625" y="104" text-anchor="middle" font-size="8" fill="#ef4444">PIM / RBAC diagnostics ✦</text>
+
+      <!-- persist_story -->
+      <rect x="20" y="118" width="160" height="40" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="100" y="136" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">persist_story</text>
+      <text x="100" y="150" text-anchor="middle" font-size="8" fill="#ffe0e0">stories.json + Marp deck</text>
+
+      <!-- Events -->
+      <rect x="195" y="118" width="510" height="40" rx="6" fill="#0a1628" fill-opacity="0.4" stroke="#ffffff" stroke-opacity="0.35" stroke-dasharray="3 2"/>
+      <text x="205" y="134" font-size="9" font-weight="700" fill="#ffffff">EVENTS:</text>
+      <text x="205" y="150" font-size="9" fill="#ffe0e0">conversation.created · mcp.approval.auto_approved · response.completed · <tspan fill="#ef4444">sentinel.mcp_tool_error</tspan></text>
+    </g>
+  </g>
+
+  <!-- Arrow 1 -->
+  <path d="M 720 312 L 720 348" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="730" y="335" font-size="10" fill="#94a3b8" font-style="italic">emit spans</text>
+
+  <!-- ===== LAYER 2: INSTRUMENTATION (blue) ===== -->
+  <g transform="translate(360, 352)">
+    <rect x="0" y="0" width="720" height="150" rx="12" fill="url(#blueGrad)" filter="url(#shadow)" opacity="0.95"/>
+    <text x="360" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">INSTRUMENTATION LAYER — Auto-Capture</text>
+    <text x="360" y="46" text-anchor="middle" font-size="11" fill="#dbeafe" font-style="italic">Bridges SDK + HTTP + GenAI activity into OpenTelemetry spans</text>
+
+    <!-- AIProjectInstrumentor -->
+    <g transform="translate(20, 60)">
+      <rect x="0" y="0" width="220" height="76" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="110" y="20" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">AIProjectInstrumentor</text>
+      <text x="110" y="34" text-anchor="middle" font-size="9" fill="#fbbf24">azure-ai-projects (preview)</text>
+      <line x1="20" y1="42" x2="200" y2="42" stroke="#ffffff" stroke-opacity="0.25"/>
+      <text x="110" y="56" text-anchor="middle" font-size="9" fill="#dbeafe">Foundry project + Responses API</text>
+      <text x="110" y="68" text-anchor="middle" font-size="9" fill="#dbeafe">GenAI client-side tracing hooks</text>
+    </g>
+
+    <!-- HTTPXClientInstrumentor -->
+    <g transform="translate(250, 60)">
+      <rect x="0" y="0" width="220" height="76" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="110" y="20" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">HTTPXClientInstrumentor</text>
+      <text x="110" y="34" text-anchor="middle" font-size="9" fill="#dbeafe">opentelemetry-instrumentation-httpx</text>
+      <line x1="20" y1="42" x2="200" y2="42" stroke="#ffffff" stroke-opacity="0.25"/>
+      <text x="110" y="56" text-anchor="middle" font-size="9" fill="#dbeafe">Lower-level HTTP dependency</text>
+      <text x="110" y="68" text-anchor="middle" font-size="9" fill="#dbeafe">OpenAI / Responses client path</text>
+    </g>
+
+    <!-- Azure Core Tracing -->
+    <g transform="translate(480, 60)">
+      <rect x="0" y="0" width="220" height="76" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="110" y="20" text-anchor="middle" font-size="12" font-weight="700" fill="#ffffff">Azure Core Tracing</text>
+      <text x="110" y="34" text-anchor="middle" font-size="9" fill="#dbeafe">azure-core-tracing-opentelemetry</text>
+      <line x1="20" y1="42" x2="200" y2="42" stroke="#ffffff" stroke-opacity="0.25"/>
+      <text x="110" y="56" text-anchor="middle" font-size="9" fill="#dbeafe">Bridges Azure SDK operations</text>
+      <text x="110" y="68" text-anchor="middle" font-size="9" fill="#dbeafe">into OpenTelemetry runtime</text>
+    </g>
+  </g>
+
+  <!-- Arrow 2 -->
+  <path d="M 720 504 L 720 540" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="730" y="527" font-size="10" fill="#94a3b8" font-style="italic">register spans</text>
+
+  <!-- ===== LAYER 3: OTEL SDK CORE (teal) ===== -->
+  <g transform="translate(360, 544)">
+    <rect x="0" y="0" width="720" height="270" rx="12" fill="url(#tealGrad)" filter="url(#shadow)" opacity="0.95"/>
+    <text x="360" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">OPENTELEMETRY SDK CORE</text>
+    <text x="360" y="46" text-anchor="middle" font-size="11" fill="#ccfbf1" font-style="italic">opentelemetry-api / opentelemetry-sdk — tracer, spans, context propagation</text>
+
+    <!-- Tracer block -->
+    <g transform="translate(20, 60)">
+      <rect x="0" y="0" width="680" height="48" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="14" y="20" font-size="11" font-weight="700" fill="#fbbf24">TRACER</text>
+      <text x="14" y="38" font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#ffffff">tracer = trace.get_tracer(<tspan fill="#fbbf24">"foundry_agent_framework_notebook"</tspan>)</text>
+    </g>
+
+    <!-- Resource Attributes -->
+    <g transform="translate(20, 118)">
+      <rect x="0" y="0" width="330" height="140" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="14" y="20" font-size="11" font-weight="700" fill="#ffffff">RESOURCE ATTRIBUTES</text>
+      <text x="14" y="34" font-size="9" fill="#ccfbf1" font-style="italic">via create_resource() — describe the service</text>
+      <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#ffffff">
+        <text x="14" y="54">service.name</text>
+        <text x="14" y="70">service.version</text>
+        <text x="14" y="86">service.namespace</text>
+        <text x="14" y="102">service.instance.id</text>
+        <text x="14" y="118">deployment.environment</text>
+        <text x="14" y="134">foundry.project.name</text>
+      </g>
+    </g>
+
+    <!-- Baggage Context -->
+    <g transform="translate(370, 118)">
+      <rect x="0" y="0" width="330" height="140" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="14" y="20" font-size="11" font-weight="700" fill="#ffffff">BAGGAGE CONTEXT</text>
+      <text x="14" y="34" font-size="9" fill="#ccfbf1" font-style="italic">via make_baggage_context() — per-operation correlation</text>
+      <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#ffffff">
+        <text x="14" y="54">run.id · session.id</text>
+        <text x="14" y="70">agent.name · agent.id · agent.version</text>
+        <text x="14" y="86">model · provider</text>
+        <text x="14" y="102">tool.label (msft-learn / sentinel)</text>
+        <text x="14" y="118">conversation.id · response.id</text>
+        <text x="14" y="134">workspace · subscription · target.upn</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Arrow 3 -->
+  <path d="M 720 816 L 720 852" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="730" y="839" font-size="10" fill="#94a3b8" font-style="italic">export pipeline</text>
+
+  <!-- ===== LAYER 4: EXPORTER (blue) ===== -->
+  <g transform="translate(360, 856)">
+    <rect x="0" y="0" width="720" height="110" rx="12" fill="url(#blueGrad)" filter="url(#shadow)" opacity="0.95"/>
+    <text x="360" y="28" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">EXPORT PIPELINE — configure_azure_monitor(…)</text>
+    <text x="360" y="46" text-anchor="middle" font-size="11" fill="#dbeafe" font-style="italic">azure-monitor-opentelemetry · azure-monitor-opentelemetry-exporter</text>
+
+    <g transform="translate(20, 60)">
+      <rect x="0" y="0" width="220" height="40" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="110" y="18" text-anchor="middle" font-size="10" font-weight="700" fill="#ffffff">connection_string</text>
+      <text x="110" y="32" text-anchor="middle" font-size="9" fill="#dbeafe">from project_client.telemetry</text>
+    </g>
+    <g transform="translate(250, 60)">
+      <rect x="0" y="0" width="220" height="40" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="110" y="18" text-anchor="middle" font-size="10" font-weight="700" fill="#fbbf24">sampling_ratio = 1.0</text>
+      <text x="110" y="32" text-anchor="middle" font-size="9" fill="#dbeafe">100% trace sampling</text>
+    </g>
+    <g transform="translate(480, 60)">
+      <rect x="0" y="0" width="220" height="40" rx="6" fill="#0a1628" fill-opacity="0.55" stroke="#ffffff" stroke-opacity="0.5"/>
+      <text x="110" y="18" text-anchor="middle" font-size="10" font-weight="700" fill="#ffffff">traces only</text>
+      <text x="110" y="32" text-anchor="middle" font-size="9" fill="#dbeafe">logs / metrics / perfcounters off</text>
+    </g>
+  </g>
+
+  <!-- Arrow 4 -->
+  <path d="M 720 968 L 720 1004" stroke="#94a3b8" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- ===== LAYER 5: APP INSIGHTS (coral) ===== -->
+  <g transform="translate(360, 1008)">
+    <rect x="0" y="0" width="720" height="90" rx="12" fill="url(#coralGrad)" filter="url(#shadow)" opacity="0.95"/>
+    <text x="360" y="30" text-anchor="middle" font-size="16" font-weight="700" fill="#ffffff">APPLICATION INSIGHTS</text>
+    <text x="360" y="52" text-anchor="middle" font-size="11" fill="#ffe0e0">Service Map · End-to-end transactions · Dependency views · KQL over <tspan font-family="'Cascadia Code', Consolas, monospace" fill="#ffffff">traces</tspan> / <tspan font-family="'Cascadia Code', Consolas, monospace" fill="#ffffff">dependencies</tspan></text>
+    <text x="360" y="72" text-anchor="middle" font-size="10" fill="#ffe0e0" font-style="italic">Bound to the Foundry project via its retrieved connection string — not hardcoded</text>
+  </g>
+
+  <!-- ============== RIGHT PANEL: ERROR DIAGNOSTICS ============== -->
+  <g transform="translate(1110, 130)">
+    <rect x="0" y="0" width="260" height="900" rx="10" fill="#142847" stroke="#ef4444" stroke-width="2" stroke-dasharray="6 4" opacity="0.95"/>
+    <rect x="0" y="0" width="260" height="38" rx="10" fill="#ef4444"/>
+    <rect x="0" y="28" width="260" height="10" fill="#ef4444"/>
+    <text x="130" y="25" text-anchor="middle" font-size="13" font-weight="700" fill="#ffffff">SENTINEL ERROR DIAGNOSTICS</text>
+
+    <text x="14" y="60" font-size="11" fill="#94a3b8" font-style="italic">Turns opaque MCP failures into</text>
+    <text x="14" y="74" font-size="11" fill="#94a3b8" font-style="italic">traceable, actionable signals</text>
+
+    <!-- detection box -->
+    <text x="14" y="100" font-size="11" font-weight="700" fill="#ef4444">DETECTION</text>
+    <text x="14" y="116" font-size="10" fill="#cbd5e1">Scan Responses output for:</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#e2e8f0">
+      <text x="14" y="134">• tool_user_error</text>
+      <text x="14" y="150">• failed status</text>
+      <text x="14" y="166">• error codes</text>
+      <text x="14" y="182">• incomplete_details</text>
+    </g>
+
+    <!-- recording box -->
+    <line x1="14" y1="200" x2="246" y2="200" stroke="#ef4444" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+    <text x="14" y="222" font-size="11" font-weight="700" fill="#ef4444">SPAN ENRICHMENT</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#e2e8f0">
+      <text x="14" y="240">set_attribute(</text>
+      <text x="22" y="254"><tspan fill="#ef4444">"app.sentinel.error.details"</tspan>)</text>
+      <text x="14" y="274">add_event(</text>
+      <text x="22" y="288"><tspan fill="#ef4444">"sentinel.mcp_tool_error"</tspan>)</text>
+      <text x="14" y="308">set_status(StatusCode.ERROR)</text>
+      <text x="14" y="324">record_exception(...)</text>
+    </g>
+
+    <!-- context preserved -->
+    <line x1="14" y1="346" x2="246" y2="346" stroke="#ef4444" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+    <text x="14" y="368" font-size="11" font-weight="700" fill="#ef4444">CONTEXT PRESERVED</text>
+    <text x="14" y="384" font-size="10" fill="#cbd5e1">For triage, the span carries:</text>
+    <g font-size="10" fill="#e2e8f0">
+      <text x="14" y="402">→ target identity (UPN)</text>
+      <text x="14" y="418">→ Sentinel workspace</text>
+      <text x="14" y="434">→ subscription ID</text>
+      <text x="14" y="450">→ workspace ID hint</text>
+      <text x="14" y="466">→ project agent</text>
+      <text x="14" y="482">→ response ID</text>
+      <text x="14" y="498">→ suggested PIM/RBAC checks</text>
+    </g>
+
+    <!-- success events -->
+    <line x1="14" y1="516" x2="246" y2="516" stroke="#ef4444" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+    <text x="14" y="538" font-size="11" font-weight="700" fill="#10b981">HAPPY-PATH EVENTS</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="10" fill="#e2e8f0">
+      <text x="14" y="556"><tspan fill="#10b981">●</tspan> conversation.created</text>
+      <text x="14" y="572"><tspan fill="#10b981">●</tspan> mcp.approval.</text>
+      <text x="22" y="586">auto_approved</text>
+      <text x="14" y="606"><tspan fill="#10b981">●</tspan> response.completed</text>
+      <text x="14" y="622"><tspan fill="#10b981">●</tspan> create_agent.success</text>
+    </g>
+
+    <!-- KQL hint -->
+    <line x1="14" y1="640" x2="246" y2="640" stroke="#ef4444" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+    <text x="14" y="662" font-size="11" font-weight="700" fill="#fbbf24">KQL CORRELATION HINT</text>
+    <g font-family="'Cascadia Code', Consolas, monospace" font-size="9" fill="#e2e8f0">
+      <text x="14" y="680">dependencies</text>
+      <text x="14" y="694">| where name == <tspan fill="#fbbf24">"sentinel-</tspan></text>
+      <text x="22" y="706"><tspan fill="#fbbf24">agent-query"</tspan></text>
+      <text x="14" y="722">| extend errKind =</text>
+      <text x="22" y="734">tostring(customDimensions.</text>
+      <text x="22" y="746"><tspan fill="#ef4444">"app.sentinel.error.</tspan></text>
+      <text x="22" y="758"><tspan fill="#ef4444">details"</tspan>)</text>
+      <text x="14" y="774">| where isnotempty(errKind)</text>
+      <text x="14" y="790">| join kind=inner traces</text>
+      <text x="22" y="802">on operation_Id</text>
+    </g>
+
+    <!-- payoff -->
+    <line x1="14" y1="822" x2="246" y2="822" stroke="#ef4444" stroke-opacity="0.3" stroke-dasharray="3 3"/>
+    <text x="14" y="844" font-size="11" font-weight="700" fill="#ef4444">PAYOFF</text>
+    <text x="14" y="862" font-size="10" fill="#cbd5e1">Telemetry answers:</text>
+    <text x="14" y="878" font-size="10" font-style="italic" fill="#e2e8f0">which identity · which</text>
+    <text x="14" y="892" font-size="10" font-style="italic" fill="#e2e8f0">workspace · which agent ·</text>
+    <text x="14" y="906" font-size="10" font-style="italic" fill="#e2e8f0">what came back?</text>
+  </g>
+
+  <!-- Connector from sentinel span into right panel -->
+  <path d="M 1080 215 L 1110 215" stroke="#ef4444" stroke-width="2" stroke-dasharray="4 3" fill="none" marker-end="url(#arrowRed)"/>
+
+  <!-- ============== FOOTER NOTE ============== -->
+  <text x="700" y="1140" text-anchor="middle" font-size="11" fill="#94a3b8" font-style="italic">
+    Four layers, one trace context: <tspan fill="#ff6b6b" font-weight="600">manual spans</tspan> →
+    <tspan fill="#4a90e2" font-weight="600">auto-instrumentation</tspan> →
+    <tspan fill="#20c997" font-weight="600">OTel SDK + baggage</tspan> →
+    <tspan fill="#4a90e2" font-weight="600">Azure Monitor exporter</tspan> →
+    <tspan fill="#ff6b6b" font-weight="600">Application Insights</tspan>
+  </text>
+  <text x="700" y="1160" text-anchor="middle" font-size="10" fill="#64748b">
+    foundry-agent-framework-demo · v2026.04.06 · companion to talk-track-may-14-2026.md
+  </text>
+</svg>
