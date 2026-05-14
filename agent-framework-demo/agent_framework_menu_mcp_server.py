@@ -5,6 +5,8 @@ from agent_framework import Agent, tool
 from agent_framework.openai import OpenAIChatClient
 from azure.identity.aio import AzureCliCredential
 
+AGENT_SPEC_REVISION = '8c3f786ba963'
+
 @tool(approval_mode="never_require")
 def get_specials() -> Annotated[str, "Returns the specials from the menu."]:
     return 'Special Soup: Clam Chowder\nSpecial Salad: Cobb Salad\nSpecial Drink: Chai Tea'
@@ -23,12 +25,13 @@ async def run() -> None:
             azure_endpoint='https://zolabai-foundry-u49gco.cognitiveservices.azure.com/',
             credential=credential,
         ),
-        name="RestaurantAgent",
+        name='RestaurantAgent',
         description="Answer questions about the menu.",
-        instructions="You are a menu assistant. Answer briefly and use tools when needed.",
+        instructions='You are a menu assistant. Answer briefly and use tools when needed.',
         tools=[get_specials, get_item_price],
     )
 
+    print(f"Starting MCP agent revision: {AGENT_SPEC_REVISION}")
     server = agent.as_mcp_server()
 
     from mcp.server.stdio import stdio_server

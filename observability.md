@@ -1,12 +1,10 @@
-# Observability for Section 3.1
+# Observability for Sections 3.1 & 3.3
 
-This document explains what Section 3.1 in the Windows notebook turns on today, how that telemetry reaches Azure Monitor and Microsoft Foundry, and which observability enhancements were applied to strengthen the trace story.
+This document explains what Sections 3.1 & 3.3 in the Windows notebook turns on today, how that telemetry reaches Azure Monitor and Microsoft Foundry, and which observability enhancements were applied to strengthen the trace story.
 
-The current Section 3.1 design is already solid. It enables OpenTelemetry-based client-side tracing, exports traces to Azure Monitor via Application Insights, and adds explicit notebook-side dependency spans so agent traffic is visible both in Foundry Traces and in Log Analytics. The recent updates improve semantic richness, propagation, and notebook-kernel reliability without changing the overall architecture.
+The current Sections 3.1 and 3.3 designs are already solid. It enables OpenTelemetry-based client-side tracing, exports traces to Azure Monitor via Application Insights, and adds explicit notebook-side dependency spans so agent traffic is visible both in Foundry Traces and in Log Analytics. The recent updates improve semantic richness, propagation, and notebook-kernel reliability without changing the overall architecture.
 
-## Short Answer
-
-Yes. Section 3.1 was worth improving, and the core path remains correct.
+## Observability Continued
 
 The highest-value enhancements that are now applied are:
 
@@ -16,9 +14,9 @@ The highest-value enhancements that are now applied are:
 4. Harden initialization order for notebook reruns in a reused kernel.
 5. Keep custom span metadata in place for agent, run, and interaction correlation.
 
-## What 3.1 Turns On Today
+## What 3.1 & 3.3 Turns On Today
 
-Section 3.1 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-win11.ipynb#L681) currently enables the following:
+Section 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-win11.ipynb#L681) currently enables the following:
 
 | Capability | Current behavior in 3.1 | Why it matters |
 | --- | --- | --- |
@@ -75,22 +73,23 @@ That is the correct model for agent observability: agent actions, orchestration 
 
 ## Current Package and Version Posture
 
-The active `.venv` in this repo is already on the latest available versions for the primary packages behind Section 3.1 as of April 6, 2026.
+The active `.venv` in this repo was checked with `.\.venv\Scripts\python.exe` on May 14, 2026. The Azure packages behind Section 3.1 are current, while the notebook intentionally holds the OpenTelemetry runtime and HTTPX instrumentation on the `1.40` / `0.61` train.
 
 | Package | Installed | Latest available | Notes |
 | --- | --- | --- | --- |
 | `azure-monitor-opentelemetry` | `1.8.7` | `1.8.7` | Latest stable Azure Monitor OTEL distro for Python. |
-| `opentelemetry-sdk` | `1.40.0` | `1.40.0` | Latest stable OTEL Python SDK in the current environment. |
-| `azure-ai-projects` | `2.0.1` | `2.0.1` | Latest stable package, but Foundry client-side GenAI tracing remains preview. |
-| `azure-monitor-opentelemetry-exporter` | `1.0.0b50` | `1.0.0b50` | Latest prerelease exporter used underneath the distro. |
-| `azure-core-tracing-opentelemetry` | `1.0.0b12` | `1.0.0b12` | Latest prerelease Azure Core OTEL bridge. |
-| `opentelemetry-instrumentation-httpx` | `0.61b0` | `0.61b0` | Latest prerelease HTTPX instrumentation. |
+| `opentelemetry-sdk` | `1.40.0` | `1.41.1` | Notebook currently pins `opentelemetry-sdk==1.40.*`; test the `1.41` train before changing the demo baseline. |
+| `azure-ai-projects` | `2.1.0` | `2.1.0` | Latest stable package, but Foundry client-side GenAI tracing remains preview. |
+| `azure-monitor-opentelemetry-exporter` | `1.0.0b52` | `1.0.0b52` | Latest prerelease exporter used underneath the distro. |
+| `azure-core-tracing-opentelemetry` | `1.0.0b13` | `1.0.0b13` | Latest prerelease Azure Core OTEL bridge. |
+| `opentelemetry-instrumentation-httpx` | `0.61b0` | `0.62b1` | Notebook currently pins `0.61b0` alongside the OTEL `1.40` runtime; test the `0.62` train before changing it. |
 
 So the version recommendation is not "upgrade everything again." The better recommendation is:
 
-1. Keep using the current latest package set.
-2. Pin the versions more intentionally if notebook reproducibility matters.
-3. Spend effort on trace semantics and propagation policy rather than chasing package churn.
+1. Keep the current Azure package set for Section 3.1.
+2. Treat OpenTelemetry `1.41.x` and HTTPX instrumentation `0.62.x` as a small compatibility validation item, not an automatic notebook change.
+3. Pin the versions more intentionally if notebook reproducibility matters.
+4. Spend effort on trace semantics and propagation policy rather than chasing package churn.
 
 ## Environment Variables in 3.1
 
@@ -124,9 +123,9 @@ These are the main variables to understand when operating Section 3.1.
 | `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED=true` | Turn on only when content recording is intentionally approved | Companion content-recording control for the Azure tracing path. |
 | `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` | Optional, but useful if you want env-driven sampling policy | Current code already forces `sampling_ratio=1.0`, which is fine for demos. Adding explicit sampler env vars makes the policy portable and easier to externalize later. |
 
-## Enhancements Applied to 3.1
+## Enhancements Applied to 3.1 & 3.3
 
-These are the main changes applied to the Windows 3.1 cell.
+These are the main changes applied to the Windows 3.1 & 3.3 cells.
 
 ### 1. Add the latest GenAI semantic-convention opt-in
 
