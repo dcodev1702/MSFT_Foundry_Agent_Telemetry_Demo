@@ -1,0 +1,299 @@
+{
+  "definition": {
+    "metadata": {
+      "notes": {}
+    },
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "triggers": {
+      "Recurrence": {
+        "recurrence": {
+          "frequency": "Day",
+          "interval": 1,
+          "schedule": {
+            "hours": [
+              "1"
+            ],
+            "minutes": [
+              0
+            ]
+          },
+          "timeZone": "Pacific Standard Time"
+        },
+        "type": "Recurrence"
+      }
+    },
+    "actions": {
+      "Initialize_NextLink": {
+        "runAfter": {},
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "nextLink",
+              "type": "string",
+              "value": "@{concat(parameters('MdeApiBaseUrl'), '/api/machines/SoftwareVulnerabilitiesByMachine?pageSize=50000')}"
+            }
+          ]
+        }
+      },
+      "Initialize_PageRows": {
+        "runAfter": {
+          "Initialize_NextLink": [
+            "Succeeded"
+          ]
+        },
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "pageRows",
+              "type": "array",
+              "value": []
+            }
+          ]
+        }
+      },
+      "Initialize_PageTotalRows": {
+        "runAfter": {
+          "Initialize_PageRows": [
+            "Succeeded"
+          ]
+        },
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "pageTotalRows",
+              "type": "integer",
+              "value": 0
+            }
+          ]
+        }
+      },
+      "Initialize_BatchIndex": {
+        "runAfter": {
+          "Initialize_PageTotalRows": [
+            "Succeeded"
+          ]
+        },
+        "type": "InitializeVariable",
+        "inputs": {
+          "variables": [
+            {
+              "name": "batchIndex",
+              "type": "integer",
+              "value": 0
+            }
+          ]
+        }
+      },
+      "Page_Loop": {
+        "actions": {
+          "Get_MDVM_Page": {
+            "type": "Http",
+            "inputs": {
+              "uri": "@variables('nextLink')",
+              "method": "GET",
+              "authentication": {
+                "type": "ManagedServiceIdentity",
+                "audience": "@{parameters('MdeApiAudience')}"
+              }
+            }
+          },
+          "Project_Page_Rows": {
+            "runAfter": {
+              "Get_MDVM_Page": [
+                "Succeeded"
+              ]
+            },
+            "type": "Select",
+            "inputs": {
+              "from": "@coalesce(body('Get_MDVM_Page')?['value'], json('[]'))",
+              "select": {
+                "TimeGenerated": "@utcNow()",
+                "id": "@{coalesce(item()?['id'], '')}",
+                "deviceId": "@{coalesce(item()?['deviceId'], '')}",
+                "rbacGroupId": 0,
+                "rbacGroupName": "@{coalesce(item()?['rbacGroupName'], '')}",
+                "deviceName": "@{coalesce(item()?['deviceName'], '')}",
+                "osPlatform": "@{coalesce(item()?['osPlatform'], '')}",
+                "osVersion": "@{coalesce(item()?['osVersion'], '')}",
+                "osArchitecture": "@{coalesce(item()?['osArchitecture'], '')}",
+                "softwareVendor": "@{coalesce(item()?['softwareVendor'], '')}",
+                "softwareName": "@{coalesce(item()?['softwareName'], '')}",
+                "softwareVersion": "@{coalesce(item()?['softwareVersion'], '')}",
+                "cveId": "@{coalesce(item()?['cveId'], '')}",
+                "vulnerabilitySeverityLevel": "@{coalesce(item()?['vulnerabilitySeverityLevel'], '')}",
+                "recommendedSecurityUpdate": "@{coalesce(item()?['recommendedSecurityUpdate'], '')}",
+                "recommendedSecurityUpdateId": "@{coalesce(item()?['recommendedSecurityUpdateId'], '')}",
+                "recommendedSecurityUpdateUrl": "@{coalesce(item()?['recommendedSecurityUpdateUrl'], '')}",
+                "diskPaths": "@{string(coalesce(item()?['diskPaths'], json('[]')))}",
+                "registryPaths": "@{string(coalesce(item()?['registryPaths'], json('[]')))}",
+                "lastSeenTimestamp": "@{coalesce(item()?['lastSeenTimestamp'], '')}",
+                "firstSeenTimestamp": "@{coalesce(item()?['firstSeenTimestamp'], '')}",
+                "endOfSupportStatus": "",
+                "endOfSupportDate": "",
+                "exploitabilityLevel": "@{coalesce(item()?['exploitabilityLevel'], '')}",
+                "recommendationReference": "@{coalesce(item()?['recommendationReference'], '')}",
+                "cvssScore": "@{string(coalesce(item()?['cvssScore'], 0))}",
+                "securityUpdateAvailable": "@{string(coalesce(item()?['securityUpdateAvailable'], false))}",
+                "cveMitigationStatus": ""
+              }
+            }
+          },
+          "Set_PageRows": {
+            "runAfter": {
+              "Project_Page_Rows": [
+                "Succeeded"
+              ]
+            },
+            "type": "SetVariable",
+            "inputs": {
+              "name": "pageRows",
+              "value": "@body('Project_Page_Rows')"
+            }
+          },
+          "Set_PageTotalRows": {
+            "runAfter": {
+              "Set_PageRows": [
+                "Succeeded"
+              ]
+            },
+            "type": "SetVariable",
+            "inputs": {
+              "name": "pageTotalRows",
+              "value": "@length(variables('pageRows'))"
+            }
+          },
+          "Reset_BatchIndex": {
+            "runAfter": {
+              "Set_PageTotalRows": [
+                "Succeeded"
+              ]
+            },
+            "type": "SetVariable",
+            "inputs": {
+              "name": "batchIndex",
+              "value": 0
+            }
+          },
+          "Send_Page_Batched": {
+            "actions": {
+              "Get_Batch": {
+                "type": "Compose",
+                "inputs": "@take(skip(variables('pageRows'), variables('batchIndex')), 500)"
+              },
+              "Send_Batch_To_DCR": {
+                "runAfter": {
+                  "Get_Batch": [
+                    "Succeeded"
+                  ]
+                },
+                "type": "Http",
+                "inputs": {
+                  "uri": "@{parameters('DcrLogsIngestionEndpoint')}/dataCollectionRules/@{parameters('DcrImmutableId')}/streams/Custom-MDETVM_CL?api-version=2023-01-01",
+                  "method": "POST",
+                  "headers": {
+                    "Content-Type": "application/json"
+                  },
+                  "body": "@outputs('Get_Batch')",
+                  "authentication": {
+                    "type": "ManagedServiceIdentity",
+                    "audience": "https://dcr-mdetvm-5zah-eastus.logs.z1.ingest.monitor.azure.com"
+                  }
+                }
+              },
+              "Increment_BatchIndex": {
+                "runAfter": {
+                  "Send_Batch_To_DCR": [
+                    "Succeeded"
+                  ]
+                },
+                "type": "IncrementVariable",
+                "inputs": {
+                  "name": "batchIndex",
+                  "value": 500
+                }
+              }
+            },
+            "runAfter": {
+              "Reset_BatchIndex": [
+                "Succeeded"
+              ]
+            },
+            "expression": "@greaterOrEquals(variables('batchIndex'), variables('pageTotalRows'))",
+            "limit": {
+              "count": 200,
+              "timeout": "PT1H"
+            },
+            "type": "Until"
+          },
+          "Set_NextLink": {
+            "runAfter": {
+              "Send_Page_Batched": [
+                "Succeeded"
+              ]
+            },
+            "type": "SetVariable",
+            "inputs": {
+              "name": "nextLink",
+              "value": "@{coalesce(body('Get_MDVM_Page')?['@odata.nextLink'], '')}"
+            }
+          }
+        },
+        "runAfter": {
+          "Initialize_BatchIndex": [
+            "Succeeded"
+          ]
+        },
+        "expression": "@empty(variables('nextLink'))",
+        "limit": {
+          "count": 200,
+          "timeout": "PT2H"
+        },
+        "type": "Until"
+      }
+    },
+    "outputs": {},
+    "parameters": {
+      "DcrLogsIngestionEndpoint": {
+        "defaultValue": "",
+        "type": "String"
+      },
+      "DcrImmutableId": {
+        "defaultValue": "",
+        "type": "String"
+      },
+      "MdeApiBaseUrl": {
+        "defaultValue": "",
+        "type": "String"
+      },
+      "MdeApiAudience": {
+        "defaultValue": "",
+        "type": "String"
+      },
+      "$connections": {
+        "type": "Object",
+        "defaultValue": {}
+      }
+    }
+  },
+  "parameters": {
+    "DcrLogsIngestionEndpoint": {
+      "value": "https://dcr-mdetvm-5zah-eastus.logs.z1.ingest.monitor.azure.com"
+    },
+    "DcrImmutableId": {
+      "value": "dcr-7132705bd2a74396b7e39fd9446ca8eb"
+    },
+    "MdeApiBaseUrl": {
+      "value": "https://api-gcc.securitycenter.microsoft.us"
+    },
+    "MdeApiAudience": {
+      "value": "https://api-gcc.securitycenter.microsoft.us"
+    },
+    "$connections": {
+      "value": {}
+    }
+  }
+}
