@@ -1,0 +1,190 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 772" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0e1a"/>
+      <stop offset="1" stop-color="#0c1322"/>
+    </linearGradient>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10z" fill="#6b7689"/>
+    </marker>
+    <filter id="gV" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#a855f7" flood-opacity="0.45"/></filter>
+    <filter id="gC" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#22d3ee" flood-opacity="0.45"/></filter>
+    <filter id="gM" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ec4899" flood-opacity="0.45"/></filter>
+    <filter id="gGo" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#fbbf24" flood-opacity="0.45"/></filter>
+    <filter id="gO" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#fb923c" flood-opacity="0.45"/></filter>
+    <filter id="gGr" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#34d399" flood-opacity="0.5"/></filter>
+  </defs>
+
+  <rect width="1240" height="772" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="56" y="58" font-size="30" font-weight="800" fill="#e8edf5" letter-spacing="0.5">AGENT FRAMEWORK <tspan font-weight="300" fill="#9aa7ba">// Notebook Architecture</tspan></text>
+  <text x="56" y="80" font-size="12" fill="#6b7689" letter-spacing="0.3">VS Code · .venv · Azure OpenAI · MCP · Workflows · OpenTelemetry · Aspire</text>
+
+  <circle cx="1004" cy="50" r="5" fill="#34d399" filter="url(#gGr)"/>
+  <text x="1018" y="54" font-size="12" fill="#aeb8c7">Local runtime · No Foundry</text>
+  <text x="1018" y="69" font-size="10" fill="#5b6678">OTLP → Aspire on :4317</text>
+
+  <line x1="56" y1="96" x2="1184" y2="96" stroke="#1c2740" stroke-width="1"/>
+
+  <!-- Container -->
+  <rect x="40" y="112" width="1160" height="624" rx="16" fill="#0c1322" fill-opacity="0.4" stroke="#1c2740" stroke-width="1.5"/>
+
+  <!-- Developer entry -->
+  <rect x="64" y="140" width="200" height="70" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#34d399" stroke-width="1.3" filter="url(#gGr)"/>
+  <rect x="82" y="160" width="18" height="18" rx="4" fill="#34d399"/>
+  <text x="110" y="168" font-size="12.5" font-weight="700" fill="#e3e9f2">DEVELOPER</text>
+  <text x="110" y="186" font-size="11" fill="#6ee7b7">VS Code Notebook</text>
+  <line x1="264" y1="175" x2="298" y2="175" stroke="#6b7689" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <!-- Notebook anchor -->
+  <rect x="300" y="140" width="876" height="70" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#a855f7" stroke-width="1.4" filter="url(#gV)"/>
+  <rect x="320" y="160" width="18" height="18" rx="4" fill="#a855f7"/>
+  <text x="348" y="168" font-size="13" font-weight="700" fill="#e3e9f2">AGENT FRAMEWORK NOTEBOOK</text>
+  <text x="348" y="186" font-size="11" fill="#c4a5f5">guided, cell-by-cell PoC runtime · orchestrates every spoke below</text>
+  <g font-size="10" fill="#cdb6f7">
+    <rect x="960" y="160" width="92" height="22" rx="11" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
+    <text x="1006" y="175" text-anchor="middle">Python 3.13</text>
+    <rect x="1062" y="160" width="92" height="22" rx="11" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
+    <text x="1108" y="175" text-anchor="middle">OTel enabled</text>
+  </g>
+
+  <!-- Bus -->
+  <line x1="165" y1="258" x2="1073" y2="258" stroke="#2a3a57" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <line x1="738" y1="210" x2="738" y2="258" stroke="#2a3a57" stroke-width="1.5"/>
+  <circle cx="738" cy="258" r="4" fill="#0c1322" stroke="#a855f7" stroke-width="1.4"/>
+
+  <!-- Card 1: .venv (violet) -->
+  <g>
+    <line x1="165" y1="258" x2="165" y2="298" stroke="#2a3a57" stroke-width="1.4"/>
+    <circle cx="165" cy="258" r="4" fill="#0c1322" stroke="#a855f7" stroke-width="1.4"/>
+    <rect x="62" y="298" width="206" height="382" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#a855f7" stroke-width="1.4" filter="url(#gV)"/>
+    <rect x="80" y="318" width="18" height="18" rx="4" fill="#a855f7"/>
+    <text x="106" y="326" font-size="12.5" font-weight="700" fill="#e3e9f2">.VENV KERNEL</text>
+    <text x="106" y="342" font-size="9" font-weight="700" letter-spacing="0.8" fill="#c084fc">ENVIRONMENT · DEPS</text>
+    <line x1="78" y1="356" x2="252" y2="356" stroke="#243150" stroke-width="1"/>
+    <text x="80" y="378" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">INSTALLS</text>
+    <g font-size="10.5" fill="#b8c2d2">
+      <circle cx="84" cy="391" r="2" fill="#a855f7"/><text x="94" y="395">agent-framework-core</text>
+      <circle cx="84" cy="408" r="2" fill="#a855f7"/><text x="94" y="412">orchestrations</text>
+      <circle cx="84" cy="425" r="2" fill="#a855f7"/><text x="94" y="429">mcp · anyio</text>
+      <circle cx="84" cy="442" r="2" fill="#a855f7"/><text x="94" y="446">otlp grpc exporter</text>
+      <circle cx="84" cy="459" r="2" fill="#a855f7"/><text x="94" y="463">ipykernel</text>
+    </g>
+    <rect x="78" y="648" width="174" height="26" rx="13" fill="#1a1130" stroke="#7c3aed" stroke-width="0.9"/>
+    <circle cx="92" cy="661" r="3.5" fill="#a855f7"/>
+    <text x="104" y="665" font-size="10" font-weight="600" fill="#cdb6f7">REGISTERED KERNEL</text>
+  </g>
+
+  <!-- Card 2: Azure OpenAI (cyan) -->
+  <g>
+    <line x1="392" y1="258" x2="392" y2="298" stroke="#2a3a57" stroke-width="1.4"/>
+    <circle cx="392" cy="258" r="4" fill="#0c1322" stroke="#22d3ee" stroke-width="1.4"/>
+    <rect x="289" y="298" width="206" height="382" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#22d3ee" stroke-width="1.4" filter="url(#gC)"/>
+    <rect x="307" y="318" width="18" height="18" rx="4" fill="#22d3ee"/>
+    <text x="333" y="326" font-size="12.5" font-weight="700" fill="#e3e9f2">AZURE OPENAI</text>
+    <text x="333" y="342" font-size="9" font-weight="700" letter-spacing="0.8" fill="#67e8f9">MODEL EXECUTION</text>
+    <line x1="305" y1="356" x2="479" y2="356" stroke="#243150" stroke-width="1"/>
+    <text x="307" y="378" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">USES</text>
+    <g font-size="10.5" fill="#b8c2d2">
+      <circle cx="311" cy="391" r="2" fill="#22d3ee"/><text x="321" y="395">OpenAIChatClient</text>
+      <circle cx="311" cy="408" r="2" fill="#22d3ee"/><text x="321" y="412">AzureCliCredential</text>
+      <circle cx="311" cy="425" r="2" fill="#22d3ee"/><text x="321" y="429">Responses API calls</text>
+      <circle cx="311" cy="442" r="2" fill="#22d3ee"/><text x="321" y="446">gpt deployment</text>
+    </g>
+    <rect x="305" y="648" width="174" height="26" rx="13" fill="#0a2a30" stroke="#0891b2" stroke-width="0.9"/>
+    <circle cx="319" cy="661" r="3.5" fill="#22d3ee"/>
+    <text x="331" y="665" font-size="10" font-weight="600" fill="#a5f0fa">RBAC · az login</text>
+  </g>
+
+  <!-- Card 3: MCP Server (magenta) -->
+  <g>
+    <line x1="619" y1="258" x2="619" y2="298" stroke="#2a3a57" stroke-width="1.4"/>
+    <circle cx="619" cy="258" r="4" fill="#0c1322" stroke="#ec4899" stroke-width="1.4"/>
+    <rect x="516" y="298" width="206" height="382" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#ec4899" stroke-width="1.4" filter="url(#gM)"/>
+    <rect x="534" y="318" width="18" height="18" rx="4" fill="#ec4899"/>
+    <text x="560" y="326" font-size="12.5" font-weight="700" fill="#e3e9f2">MCP SERVER</text>
+    <text x="560" y="342" font-size="9" font-weight="700" letter-spacing="0.8" fill="#f9a8d4">STDIO HELPER · SUBPROCESS</text>
+    <line x1="532" y1="356" x2="706" y2="356" stroke="#243150" stroke-width="1"/>
+    <text x="534" y="378" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">EXPOSES</text>
+    <g font-size="10.5" fill="#b8c2d2">
+      <circle cx="538" cy="391" r="2" fill="#ec4899"/><text x="548" y="395">agent.as_mcp_server()</text>
+      <circle cx="538" cy="408" r="2" fill="#ec4899"/><text x="548" y="412">get_specials()</text>
+      <circle cx="538" cy="425" r="2" fill="#ec4899"/><text x="548" y="429">get_item_price()</text>
+      <circle cx="538" cy="442" r="2" fill="#ec4899"/><text x="548" y="446">RestaurantAgent</text>
+    </g>
+    <text x="534" y="498" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">SERVES</text>
+    <rect x="532" y="508" width="174" height="32" rx="8" fill="#2a0f22" stroke="#be185d" stroke-width="1"/>
+    <text x="619" y="528" text-anchor="middle" font-size="10.5" font-weight="600" fill="#f9a8d4">Agent Framework MCP Agent</text>
+    <rect x="532" y="648" width="174" height="26" rx="13" fill="#2a0f22" stroke="#be185d" stroke-width="0.9"/>
+    <circle cx="546" cy="661" r="3.5" fill="#ec4899"/>
+    <text x="558" y="665" font-size="10" font-weight="600" fill="#fbcfe8">STDIO SUBPROCESS</text>
+  </g>
+
+  <!-- Card 4: Workflow (gold) -->
+  <g>
+    <line x1="846" y1="258" x2="846" y2="298" stroke="#2a3a57" stroke-width="1.4"/>
+    <circle cx="846" cy="258" r="4" fill="#0c1322" stroke="#fbbf24" stroke-width="1.4"/>
+    <rect x="743" y="298" width="206" height="382" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#fbbf24" stroke-width="1.4" filter="url(#gGo)"/>
+    <rect x="761" y="318" width="18" height="18" rx="4" fill="#fbbf24"/>
+    <text x="787" y="326" font-size="12.5" font-weight="700" fill="#e3e9f2">GROUP CHAT</text>
+    <text x="787" y="342" font-size="9" font-weight="700" letter-spacing="0.8" fill="#fcd34d">WORKFLOW · ORCHESTRATION</text>
+    <line x1="759" y1="356" x2="933" y2="356" stroke="#243150" stroke-width="1"/>
+    <text x="761" y="378" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">BUILDS</text>
+    <g font-size="10.5" fill="#b8c2d2">
+      <circle cx="765" cy="391" r="2" fill="#fbbf24"/><text x="775" y="395">GroupChatBuilder</text>
+      <circle cx="765" cy="408" r="2" fill="#fbbf24"/><text x="775" y="412">round-robin selector</text>
+      <circle cx="765" cy="425" r="2" fill="#fbbf24"/><text x="775" y="429">terminate len ≥ 6</text>
+      <circle cx="765" cy="442" r="2" fill="#fbbf24"/><text x="775" y="446">streamed turns</text>
+    </g>
+    <text x="761" y="490" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">PARTICIPANTS</text>
+    <rect x="759" y="498" width="174" height="22" rx="11" fill="#2a2208" stroke="#b45309" stroke-width="0.8"/>
+    <circle cx="773" cy="509" r="3" fill="#fbbf24"/><text x="784" y="513" font-size="10" fill="#fde68a">Architect agent</text>
+    <rect x="759" y="524" width="174" height="22" rx="11" fill="#2a2208" stroke="#b45309" stroke-width="0.8"/>
+    <circle cx="773" cy="535" r="3" fill="#fbbf24"/><text x="784" y="539" font-size="10" fill="#fde68a">Reviewer agent</text>
+    <rect x="759" y="550" width="174" height="22" rx="11" fill="#2a2208" stroke="#b45309" stroke-width="0.8"/>
+    <circle cx="773" cy="561" r="3" fill="#fbbf24"/><text x="784" y="565" font-size="10" fill="#fde68a">Coach agent</text>
+    <rect x="759" y="648" width="174" height="26" rx="13" fill="#2a2208" stroke="#b45309" stroke-width="0.9"/>
+    <circle cx="773" cy="661" r="3.5" fill="#fbbf24"/>
+    <text x="785" y="665" font-size="10" font-weight="600" fill="#fde68a">ORCHESTRATIONS</text>
+  </g>
+
+  <!-- Card 5: OpenTelemetry (orange) -->
+  <g>
+    <line x1="1073" y1="258" x2="1073" y2="298" stroke="#2a3a57" stroke-width="1.4"/>
+    <circle cx="1073" cy="258" r="4" fill="#0c1322" stroke="#fb923c" stroke-width="1.4"/>
+    <rect x="970" y="298" width="206" height="382" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#fb923c" stroke-width="1.4" filter="url(#gO)"/>
+    <rect x="988" y="318" width="18" height="18" rx="4" fill="#fb923c"/>
+    <text x="1014" y="326" font-size="12.5" font-weight="700" fill="#e3e9f2">OPENTELEMETRY</text>
+    <text x="1014" y="342" font-size="9" font-weight="700" letter-spacing="0.8" fill="#fdba74">TRACING · SPANS</text>
+    <line x1="986" y1="356" x2="1160" y2="356" stroke="#243150" stroke-width="1"/>
+    <text x="988" y="378" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">EMITS</text>
+    <g font-size="10.5" fill="#b8c2d2">
+      <circle cx="992" cy="391" r="2" fill="#fb923c"/><text x="1002" y="395">configure_otel_providers</text>
+      <circle cx="992" cy="408" r="2" fill="#fb923c"/><text x="1002" y="412">manual notebook spans</text>
+      <circle cx="992" cy="425" r="2" fill="#fb923c"/><text x="1002" y="429">sensitive data (demo)</text>
+    </g>
+    <text x="988" y="472" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">EXPORTS TO</text>
+    <rect x="986" y="482" width="174" height="28" rx="8" fill="#2a1608" stroke="#c2410c" stroke-width="1"/>
+    <text x="1073" y="500" text-anchor="middle" font-size="10.5" font-weight="600" fill="#fdba74">OTLP Export · :4317</text>
+    <line x1="1073" y1="510" x2="1073" y2="528" stroke="#6b7689" stroke-width="1.4" marker-end="url(#ar)"/>
+    <rect x="986" y="528" width="174" height="28" rx="8" fill="#2a1608" stroke="#c2410c" stroke-width="1"/>
+    <text x="1073" y="546" text-anchor="middle" font-size="10.5" font-weight="600" fill="#fdba74">Aspire Dashboard · :18888</text>
+    <rect x="986" y="648" width="174" height="26" rx="13" fill="#2a1608" stroke="#c2410c" stroke-width="0.9"/>
+    <circle cx="1000" cy="661" r="3.5" fill="#fb923c"/>
+    <text x="1012" y="665" font-size="10" font-weight="600" fill="#fed7aa">OTLP :4317</text>
+  </g>
+
+  <!-- Legend -->
+  <g font-size="10.5" fill="#8b97a8">
+    <text x="64" y="711" font-size="9" font-weight="700" letter-spacing="0.8" fill="#5b6678">LEGEND</text>
+    <circle cx="132" cy="708" r="5" fill="#a855f7"/><text x="142" y="711">Environment</text>
+    <circle cx="232" cy="708" r="5" fill="#22d3ee"/><text x="242" y="711">Model</text>
+    <circle cx="302" cy="708" r="5" fill="#ec4899"/><text x="312" y="711">MCP</text>
+    <circle cx="362" cy="708" r="5" fill="#fbbf24"/><text x="372" y="711">Workflow</text>
+    <circle cx="452" cy="708" r="5" fill="#fb923c"/><text x="462" y="711">Telemetry</text>
+    <circle cx="552" cy="708" r="5" fill="#34d399"/><text x="562" y="711">Author</text>
+  </g>
+
+  <text x="1184" y="760" text-anchor="end" font-size="10" fill="#5b6678">agent-framework-demo · notebook architecture · 2026</text>
+</svg>

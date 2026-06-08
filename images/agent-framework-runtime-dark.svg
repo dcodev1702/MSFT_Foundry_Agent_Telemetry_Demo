@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 868" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0a0e1a"/>
+      <stop offset="1" stop-color="#0c1322"/>
+    </linearGradient>
+    <filter id="gV" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#a855f7" flood-opacity="0.45"/></filter>
+    <filter id="gC" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#22d3ee" flood-opacity="0.45"/></filter>
+    <filter id="gM" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#ec4899" flood-opacity="0.45"/></filter>
+    <filter id="gGo" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#fbbf24" flood-opacity="0.45"/></filter>
+    <filter id="gO" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#fb923c" flood-opacity="0.45"/></filter>
+    <filter id="gB" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#60a5fa" flood-opacity="0.45"/></filter>
+    <filter id="gGr" x="-60%" y="-60%" width="220%" height="220%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#34d399" flood-opacity="0.5"/></filter>
+    <marker id="mV" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a855f7"/></marker>
+    <marker id="mC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#22d3ee"/></marker>
+    <marker id="mM" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ec4899"/></marker>
+    <marker id="mB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#60a5fa"/></marker>
+    <marker id="mO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fb923c"/></marker>
+    <marker id="mGo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fbbf24"/></marker>
+  </defs>
+
+  <rect width="1280" height="868" fill="url(#bg)"/>
+
+  <!-- Title -->
+  <text x="56" y="58" font-size="30" font-weight="800" fill="#e8edf5" letter-spacing="0.5">RUNTIME VIEW <tspan font-weight="300" fill="#9aa7ba">// Notebook Sequence</tspan></text>
+  <text x="56" y="80" font-size="12" fill="#6b7689" letter-spacing="0.3">10 ordered interactions · the notebook drives, Agent Framework executes, telemetry fans out</text>
+  <circle cx="1126" cy="50" r="5" fill="#34d399" filter="url(#gGr)"/>
+  <text x="1140" y="54" font-size="12" fill="#aeb8c7">Streamed run</text>
+  <line x1="56" y1="96" x2="1224" y2="96" stroke="#1c2740" stroke-width="1"/>
+
+  <!-- Lifelines -->
+  <g stroke-dasharray="4 5" stroke-width="1.3">
+    <line x1="110" y1="184" x2="110" y2="824" stroke="#34d399" stroke-opacity="0.32"/>
+    <line x1="290" y1="184" x2="290" y2="824" stroke="#a855f7" stroke-opacity="0.32"/>
+    <line x1="470" y1="184" x2="470" y2="824" stroke="#22d3ee" stroke-opacity="0.32"/>
+    <line x1="650" y1="184" x2="650" y2="824" stroke="#60a5fa" stroke-opacity="0.32"/>
+    <line x1="830" y1="184" x2="830" y2="824" stroke="#ec4899" stroke-opacity="0.32"/>
+    <line x1="1010" y1="184" x2="1010" y2="824" stroke="#fb923c" stroke-opacity="0.32"/>
+    <line x1="1170" y1="184" x2="1170" y2="824" stroke="#fbbf24" stroke-opacity="0.32"/>
+  </g>
+
+  <!-- Header cards -->
+  <g>
+    <rect x="35" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#34d399" stroke-width="1.3" filter="url(#gGr)"/>
+    <circle cx="110" cy="128" r="3.5" fill="#34d399"/>
+    <text x="110" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">NOTEBOOK USER</text>
+    <text x="110" y="166" text-anchor="middle" font-size="9.5" fill="#6ee7b7">drives the cells</text>
+
+    <rect x="215" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#a855f7" stroke-width="1.3" filter="url(#gV)"/>
+    <circle cx="290" cy="128" r="3.5" fill="#a855f7"/>
+    <text x="290" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">NOTEBOOK</text>
+    <text x="290" y="166" text-anchor="middle" font-size="9.5" fill="#c4a5f5">cell runtime</text>
+
+    <rect x="395" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#22d3ee" stroke-width="1.3" filter="url(#gC)"/>
+    <circle cx="470" cy="128" r="3.5" fill="#22d3ee"/>
+    <text x="470" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">AGENT FRAMEWORK</text>
+    <text x="470" y="166" text-anchor="middle" font-size="9.5" fill="#67e8f9">agents + workflow</text>
+
+    <rect x="575" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#60a5fa" stroke-width="1.3" filter="url(#gB)"/>
+    <circle cx="650" cy="128" r="3.5" fill="#60a5fa"/>
+    <text x="650" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">AZURE OPENAI</text>
+    <text x="650" y="166" text-anchor="middle" font-size="9.5" fill="#93c5fd">model</text>
+
+    <rect x="755" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#ec4899" stroke-width="1.3" filter="url(#gM)"/>
+    <circle cx="830" cy="128" r="3.5" fill="#ec4899"/>
+    <text x="830" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">MCP SERVER</text>
+    <text x="830" y="166" text-anchor="middle" font-size="9.5" fill="#f9a8d4">stdio process</text>
+
+    <rect x="935" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#fb923c" stroke-width="1.3" filter="url(#gO)"/>
+    <circle cx="1010" cy="128" r="3.5" fill="#fb923c"/>
+    <text x="1010" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">OPENTELEMETRY</text>
+    <text x="1010" y="166" text-anchor="middle" font-size="9.5" fill="#fdba74">spans</text>
+
+    <rect x="1095" y="112" width="150" height="72" rx="10" fill="#0e1626" fill-opacity="0.92" stroke="#fbbf24" stroke-width="1.3" filter="url(#gGo)"/>
+    <circle cx="1170" cy="128" r="3.5" fill="#fbbf24"/>
+    <text x="1170" y="150" text-anchor="middle" font-size="11" font-weight="700" fill="#e3e9f2">ASPIRE</text>
+    <text x="1170" y="166" text-anchor="middle" font-size="9.5" fill="#fde68a">trace viewer</text>
+  </g>
+
+  <!-- Message rows -->
+  <!-- alt bands -->
+  <g fill="#ffffff" fill-opacity="0.02">
+    <rect x="44" y="210" width="1192" height="44"/>
+    <rect x="44" y="326" width="1192" height="44"/>
+    <rect x="44" y="442" width="1192" height="44"/>
+    <rect x="44" y="558" width="1192" height="44"/>
+    <rect x="44" y="674" width="1192" height="44"/>
+  </g>
+
+  <!-- 1 User->NB -->
+  <circle cx="60" cy="232" r="11" fill="#0e1626" stroke="#34d399" stroke-width="1.3"/><text x="60" y="236" text-anchor="middle" font-size="11" font-weight="700" fill="#6ee7b7">1</text>
+  <text x="200" y="224" text-anchor="middle" font-size="11" fill="#cbd5e1">Run notebook cells</text>
+  <line x1="110" y1="232" x2="290" y2="232" stroke="#a855f7" stroke-width="1.6" marker-end="url(#mV)"/>
+
+  <!-- 2 NB->AF -->
+  <circle cx="60" cy="290" r="11" fill="#0e1626" stroke="#a855f7" stroke-width="1.3"/><text x="60" y="294" text-anchor="middle" font-size="11" font-weight="700" fill="#c4a5f5">2</text>
+  <text x="380" y="282" text-anchor="middle" font-size="11" fill="#cbd5e1">Create agent + workflow objects</text>
+  <line x1="290" y1="290" x2="470" y2="290" stroke="#22d3ee" stroke-width="1.6" marker-end="url(#mC)"/>
+
+  <!-- 3 NB->MCP -->
+  <circle cx="60" cy="348" r="11" fill="#0e1626" stroke="#a855f7" stroke-width="1.3"/><text x="60" y="352" text-anchor="middle" font-size="11" font-weight="700" fill="#c4a5f5">3</text>
+  <text x="560" y="340" text-anchor="middle" font-size="11" fill="#cbd5e1">Launch helper MCP process</text>
+  <line x1="290" y1="348" x2="830" y2="348" stroke="#ec4899" stroke-width="1.6" marker-end="url(#mM)"/>
+
+  <!-- 4 NB->AF -->
+  <circle cx="60" cy="406" r="11" fill="#0e1626" stroke="#a855f7" stroke-width="1.3"/><text x="60" y="410" text-anchor="middle" font-size="11" font-weight="700" fill="#c4a5f5">4</text>
+  <text x="380" y="398" text-anchor="middle" font-size="11" fill="#cbd5e1">Run tool-backed agent</text>
+  <line x1="290" y1="406" x2="470" y2="406" stroke="#22d3ee" stroke-width="1.6" marker-end="url(#mC)"/>
+
+  <!-- 5 AF->AOAI -->
+  <circle cx="60" cy="464" r="11" fill="#0e1626" stroke="#22d3ee" stroke-width="1.3"/><text x="60" y="468" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">5</text>
+  <text x="560" y="456" text-anchor="middle" font-size="11" fill="#cbd5e1">Responses API calls</text>
+  <line x1="470" y1="464" x2="650" y2="464" stroke="#60a5fa" stroke-width="1.6" marker-end="url(#mB)"/>
+
+  <!-- 6 NB->AF -->
+  <circle cx="60" cy="522" r="11" fill="#0e1626" stroke="#a855f7" stroke-width="1.3"/><text x="60" y="526" text-anchor="middle" font-size="11" font-weight="700" fill="#c4a5f5">6</text>
+  <text x="380" y="514" text-anchor="middle" font-size="11" fill="#cbd5e1">Run group chat workflow</text>
+  <line x1="290" y1="522" x2="470" y2="522" stroke="#22d3ee" stroke-width="1.6" marker-end="url(#mC)"/>
+
+  <!-- 7 AF->AOAI -->
+  <circle cx="60" cy="580" r="11" fill="#0e1626" stroke="#22d3ee" stroke-width="1.3"/><text x="60" y="584" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">7</text>
+  <text x="560" y="572" text-anchor="middle" font-size="11" fill="#cbd5e1">Multi-agent model calls</text>
+  <line x1="470" y1="580" x2="650" y2="580" stroke="#60a5fa" stroke-width="1.6" marker-end="url(#mB)"/>
+
+  <!-- 8 NB->OT -->
+  <circle cx="60" cy="638" r="11" fill="#0e1626" stroke="#a855f7" stroke-width="1.3"/><text x="60" y="642" text-anchor="middle" font-size="11" font-weight="700" fill="#c4a5f5">8</text>
+  <text x="650" y="630" text-anchor="middle" font-size="11" fill="#cbd5e1">Emit spans + custom workflow spans</text>
+  <line x1="290" y1="638" x2="1010" y2="638" stroke="#fb923c" stroke-width="1.6" marker-end="url(#mO)"/>
+
+  <!-- 9 AF->OT -->
+  <circle cx="60" cy="696" r="11" fill="#0e1626" stroke="#22d3ee" stroke-width="1.3"/><text x="60" y="700" text-anchor="middle" font-size="11" font-weight="700" fill="#67e8f9">9</text>
+  <text x="740" y="688" text-anchor="middle" font-size="11" fill="#cbd5e1">Emit agent + workflow telemetry</text>
+  <line x1="470" y1="696" x2="1010" y2="696" stroke="#fb923c" stroke-width="1.6" marker-end="url(#mO)"/>
+
+  <!-- 10 OT->AD -->
+  <circle cx="60" cy="754" r="11" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/><text x="60" y="758" text-anchor="middle" font-size="11" font-weight="700" fill="#fdba74">10</text>
+  <text x="1090" y="746" text-anchor="middle" font-size="11" fill="#cbd5e1">Export traces via OTLP</text>
+  <line x1="1010" y1="754" x2="1170" y2="754" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#mGo)"/>
+
+  <!-- lifeline feet -->
+  <g fill="#0e1626" stroke-width="1.2">
+    <rect x="100" y="824" width="20" height="8" rx="2" stroke="#34d399"/>
+    <rect x="280" y="824" width="20" height="8" rx="2" stroke="#a855f7"/>
+    <rect x="460" y="824" width="20" height="8" rx="2" stroke="#22d3ee"/>
+    <rect x="640" y="824" width="20" height="8" rx="2" stroke="#60a5fa"/>
+    <rect x="820" y="824" width="20" height="8" rx="2" stroke="#ec4899"/>
+    <rect x="1000" y="824" width="20" height="8" rx="2" stroke="#fb923c"/>
+    <rect x="1160" y="824" width="20" height="8" rx="2" stroke="#fbbf24"/>
+  </g>
+
+  <text x="1224" y="856" text-anchor="end" font-size="10" fill="#5b6678">agent-framework-demo · runtime sequence · 2026</text>
+</svg>
