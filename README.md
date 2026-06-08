@@ -41,9 +41,9 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 | # | Section | What It Does |
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
-| **1** | Install Dependencies | Installs the latest Agent Framework, Foundry, Azure identity, and OpenTelemetry packages used by the notebook |
-| **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `OpenAIChatClient`, and Agent Framework observability helpers |
-| **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures both the Foundry project client and the Azure OpenAI-backed Agent Framework chat client |
+| **1** | Install Dependencies | Installs the current validated Agent Framework, Foundry, Azure identity, and Azure Monitor/OpenTelemetry package matrix used by the notebook |
+| **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `MCPTool`, `PromptAgentDefinition`, and Agent Framework observability helpers |
+| **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures the Foundry project client plus Responses API settings |
 | **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry, Foundry client-side tracing, HTTP dependency telemetry, and trace propagation controls |
 | **3.2** | Configure MSFT Learn MCP Tool | Sets up the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) as a remote MCP tool for the Agent Framework agent |
 | **3.3** | Configure Microsoft Sentinel MCP Tool | Preserves the existing Foundry project-connection dependency for the Sentinel MCP tool |

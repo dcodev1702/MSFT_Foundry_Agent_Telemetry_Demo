@@ -73,22 +73,25 @@ That is the correct model for agent observability: agent actions, orchestration 
 
 ## Current Package and Version Posture
 
-The active `.venv` in this repo was checked with `.\.venv\Scripts\python.exe` on May 14, 2026. The Azure packages behind Section 3.1 are current, while the notebook intentionally holds the OpenTelemetry runtime and HTTPX instrumentation on the `1.40` / `0.61` train.
+The active `.venv` in this repo was checked with `.\.venv\Scripts\python.exe` on June 8, 2026. The notebook package matrix has been upgraded where the resolver allows it: Agent Framework is on `1.8.0`, `azure-ai-projects` is on `2.2.0`, and `azure-monitor-opentelemetry` is on `1.8.8`. The Azure Monitor exporter still pins OpenTelemetry API/SDK `1.40`, so the notebook intentionally holds the OpenTelemetry runtime and HTTPX instrumentation on the `1.40` / `0.61` train.
 
 | Package | Installed | Latest available | Notes |
 | --- | --- | --- | --- |
-| `azure-monitor-opentelemetry` | `1.8.7` | `1.8.7` | Latest stable Azure Monitor OTEL distro for Python. |
-| `opentelemetry-sdk` | `1.40.0` | `1.41.1` | Notebook currently pins `opentelemetry-sdk==1.40.*`; test the `1.41` train before changing the demo baseline. |
-| `azure-ai-projects` | `2.1.0` | `2.1.0` | Latest stable package, but Foundry client-side GenAI tracing remains preview. |
+| `agent-framework-core` | `1.8.0` | `1.8.0` | Latest stable Agent Framework core package; import probe passes for `agent_framework.observability`. |
+| `agent-framework-openai` | `1.8.0` | `1.8.0` | Latest stable OpenAI provider package; retained for the broader demo workspace. |
+| `azure-ai-projects` | `2.2.0` | `2.2.0` | Latest stable package, but Foundry client-side GenAI tracing remains preview. |
+| `azure-identity` | `1.26.0b2` | `1.26.0b2` | Latest prerelease available with `--pre`. |
+| `azure-monitor-opentelemetry` | `1.8.8` | `1.8.8` | Latest stable Azure Monitor OTEL distro for Python. |
 | `azure-monitor-opentelemetry-exporter` | `1.0.0b52` | `1.0.0b52` | Latest prerelease exporter used underneath the distro. |
 | `azure-core-tracing-opentelemetry` | `1.0.0b13` | `1.0.0b13` | Latest prerelease Azure Core OTEL bridge. |
-| `opentelemetry-instrumentation-httpx` | `0.61b0` | `0.62b1` | Notebook currently pins `0.61b0` alongside the OTEL `1.40` runtime; test the `0.62` train before changing it. |
+| `opentelemetry-sdk` | `1.40.0` | `1.42.1` | Notebook pins `opentelemetry-sdk==1.40.*` because `azure-monitor-opentelemetry-exporter==1.0.0b52` requires `opentelemetry-api==1.40`. |
+| `opentelemetry-instrumentation-httpx` | `0.61b0` | `0.63b1` | Notebook pins `0.61b0` alongside the OTEL `1.40` runtime; `0.63b1` pulls the `1.42.1` API train and conflicts with the exporter. |
 
 So the version recommendation is not "upgrade everything again." The better recommendation is:
 
-1. Keep the current Azure package set for Section 3.1.
-2. Treat OpenTelemetry `1.41.x` and HTTPX instrumentation `0.62.x` as a small compatibility validation item, not an automatic notebook change.
-3. Pin the versions more intentionally if notebook reproducibility matters.
+1. Keep the updated Agent Framework, Azure AI Projects, Azure Identity, and Azure Monitor package set in the notebook dependency cell.
+2. Keep OpenTelemetry `1.40.x` and HTTPX instrumentation `0.61b0` until the Azure Monitor exporter releases a compatible newer train.
+3. Treat OpenTelemetry `1.42.x` and HTTPX instrumentation `0.63.x` as blocked by resolver compatibility, not as a manual notebook bump.
 4. Spend effort on trace semantics and propagation policy rather than chasing package churn.
 
 ## Environment Variables in 3.1
