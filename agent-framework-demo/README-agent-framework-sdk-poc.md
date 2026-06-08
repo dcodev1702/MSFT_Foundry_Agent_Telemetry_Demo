@@ -61,63 +61,17 @@ That makes it a useful contrast to the rest of this repo, which includes Foundry
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    U[Developer in VS Code Notebook] --> N[Agent Framework Notebook]
-    N --> VENV[Project .venv Kernel]
-    N --> AOAI[Azure OpenAI]
-    N --> MCP[MCP Server Helper Script]
-    N --> WF[Group Chat Workflow]
-    N --> OTEL[OpenTelemetry SDK]
-    OTEL --> OTLP[OTLP Export]
-    OTLP --> ASPIRE[Aspire Dashboard]
-
-    MCP --> AFMCP[Agent Framework MCP Agent]
-    WF --> A1[Architect Agent]
-    WF --> A2[Reviewer Agent]
-    WF --> A3[Coach Agent]
-```
+![Agent Framework architecture diagram](../images/agent-framework-architecture-dark.svg)
 
 ### Runtime View
 
-```mermaid
-sequenceDiagram
-    participant User as Notebook User
-    participant NB as Notebook
-    participant AF as Agent Framework
-    participant AOAI as Azure OpenAI
-    participant MCP as MCP Server
-    participant OT as OpenTelemetry
-    participant AD as Aspire Dashboard
-
-    User->>NB: Run notebook cells
-    NB->>AF: Create agent and workflow objects
-    NB->>MCP: Launch helper MCP process
-    NB->>AF: Run tool-backed agent
-    AF->>AOAI: Responses API calls
-    NB->>AF: Run group chat workflow
-    AF->>AOAI: Multi-agent model calls
-    NB->>OT: Emit spans and custom workflow spans
-    AF->>OT: Emit agent and workflow telemetry
-    OT->>AD: Export traces via OTLP
-```
+![Agent Framework runtime sequence diagram](../images/agent-framework-runtime-dark.svg)
 
 ## Notebook Walkthrough
 
 The notebook is organized as a step-by-step PoC, not as a generic SDK sample dump.
 
-| Section | Purpose |
-|---|---|
-| `0` | Create or reuse `.venv` and register a Jupyter kernel |
-| `1` | Install Python dependencies for Agent Framework, MCP, OpenTelemetry, and workflows |
-| `2` | Resolve Azure OpenAI configuration and authenticate with Azure CLI |
-| `3` | Start the Aspire Dashboard container and surface the browser token/login URL |
-| `3.1` | Enable OpenTelemetry and establish a notebook-friendly logging profile |
-| `4` | Create a tool-backed Agent Framework agent |
-| `4.1` | Run the basic agent |
-| `5` | Generate and run an MCP server helper script |
-| `6` | Build and run a simple multi-agent workflow |
-| `7` | Stop the MCP process, remove the Aspire container/image, and close credentials |
+![Agent Framework notebook walkthrough diagram](../images/agent-framework-walkthrough-dark.svg)
 
 ## Why Aspire Matters Here
 
