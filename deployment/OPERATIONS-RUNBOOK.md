@@ -92,6 +92,30 @@ az deployment sub create \
     workerImageTag="<prior-worker-tag>"
 ```
 
+## RBAC Recovery After Governance Sweep
+
+The `MCAPSGov-AutomationApp` governance service principal periodically **deletes every role assignment** on the shared bot managed identity (`zolab-bot-mi-${SUFFIX}`). It last swept on 2026-05-22. Symptoms:
+
+- Front-end Teams bot replies `AuthorizationPermissionMismatch` (Storage data-plane access lost).
+- Back-end worker ACI is stuck `Failed` / "Waiting to run" (lost `AcrPull`, cannot pull its image).
+- `weather <city>` silently falls back to the templated `🌦️ Weather for …` format instead of LLM prose.
+- `az role assignment list --assignee <mi-principalId> --all` returns `[]`.
+
+**One-command recovery** — restores the full role-assignment footprint (AcrPull on both ACRs, Foundry User on the bot LLM, Contributor on the bot RG, Storage Blob + Queue Data Contributor on worker storage) and restarts the worker ACI:
+
+```powershell
+pwsh ./deployment/repair-bot-rbac.ps1            # preview first with -WhatIf
+```
+
+Useful switches:
+
+- `-WhatIf` — show the plan without making changes.
+- `-IncludeSubscriptionRoles` — also grant Contributor + User Access Administrator at subscription scope (needed only if Foundry *builds*, which create new resource groups, fail after recovery).
+- `-SkipWorkerRestart` — re-apply RBAC only.
+- `-Suffix` / `-SubscriptionId` — target a different environment.
+
+Allow 1–2 minutes after the run for data-plane RBAC to take effect. The durable fix is a governance **exemption** for the `zolab-bot-${SUFFIX}` and `zolab-worker-${SUFFIX}` resource groups; this script is the stop-gap until that is in place.
+
 ## Smoke Checks
 
 Run the automated Azure-side checks plus the manual Teams checklist:
