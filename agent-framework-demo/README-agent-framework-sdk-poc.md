@@ -204,3 +204,62 @@ That split is useful because it lets you compare two approaches:
 This PoC is a clean, local, inspectable example of Microsoft Agent Framework used the way many engineers actually need it during exploration: one notebook, one Azure OpenAI-backed runtime, one MCP example, one workflow example, and one strong observability surface.
 
 That makes it a useful companion to the broader Foundry and bot assets in this repo, not a replacement for them.
+
+## Appendix: Observability Stack by Python Import / Library
+
+This appendix aligns the broader Microsoft agent observability stack to the Python imports and packages that commonly back each layer. Some layers are Python SDK imports used directly in notebooks or applications; others are Azure, Microsoft Sentinel, Microsoft Defender XDR, or Microsoft Entra service surfaces that are configured through portals, REST APIs, Microsoft Graph, ARM, connectors, or Log Analytics.
+
+| Observability / security layer | Python import / package | What it does in a notebook or app | Notes |
+| --- | --- | --- | --- |
+| Microsoft Foundry | `from azure.ai.projects import AIProjectClient` | Creates the Foundry project client and retrieves project telemetry metadata. | Main SDK entry point for a Foundry project. |
+| Microsoft Foundry project agents | `from azure.ai.projects.models import PromptAgentDefinition, MCPTool` | Defines project-backed agents and attaches MCP tools such as Microsoft Learn or Sentinel MCP. | `PromptAgentDefinition` describes the agent; `MCPTool` describes remote MCP tools. |
+| Foundry agent tracing | `from azure.ai.projects.telemetry import AIProjectInstrumentor` | Enables client-side GenAI tracing for Foundry / Azure AI Projects operations. | Makes Foundry agent activity emit OpenTelemetry GenAI spans. |
+| Foundry Responses API path | `project_client.get_openai_client()` | Gets the OpenAI-compatible client used for `conversations.create()` and `responses.create(...)`. | The `agent_reference` payload ties Responses API runs back to the Foundry project agent. |
+| Azure authentication | `from azure.identity import DefaultAzureCredential` | Authenticates to Foundry, Azure Monitor, and Log Analytics APIs. | In the Agent Framework-only notebook, the equivalent explicit auth choice is `AzureCliCredential`. |
+| OpenTelemetry trace model | `from opentelemetry import trace` | Creates tracers and manual spans. | Core trace/span API. |
+| OpenTelemetry span metadata | `from opentelemetry.trace import SpanKind, Status, StatusCode` | Marks spans as client spans and records success/error state. | Used for operation kind and failure details. |
+| OpenTelemetry baggage/context | `from opentelemetry import baggage, context as otel_context` | Adds safe correlation metadata such as run ID, agent name, model, project, and session ID. | Baggage should not contain secrets, tokens, or sensitive prompt data. |
+| HTTP dependency instrumentation | `from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor` | Captures HTTPX dependency telemetry from SDK/network calls. | Helps Application Insights show outbound dependencies. |
+| Manual dependency spans | `tracer.start_as_current_span("POST /openai/v1/responses", kind=SpanKind.CLIENT)` | Creates explicit client spans around `responses.create(...)`. | Makes notebook-side Responses API dependency calls visible in `AppDependencies`. |
+| Azure Monitor exporter | `from azure.monitor.opentelemetry import configure_azure_monitor` | Exports OpenTelemetry traces to Azure Monitor / Application Insights. | Main bridge from OpenTelemetry to Azure Monitor. |
+| Azure Monitor resource metadata | `from agent_framework.observability import create_resource` | Supplies resource attributes for Azure Monitor export. | Useful for stamping service/resource identity onto telemetry. |
+| Application Insights | `configure_azure_monitor(connection_string=...)` | Receives exported OpenTelemetry telemetry. | There is no separate Application Insights import in the notebook; it is the destination configured through Azure Monitor OpenTelemetry. |
+| `AppDependencies` | Azure Monitor ingestion from OpenTelemetry spans | Stores dependency/span-like operation records. | Populated by Azure Monitor from exported telemetry, not written directly by Python. |
+| `AppGenAIContent` | `AIProjectInstrumentor` plus content-recording environment variables | Stores captured GenAI content such as inputs, outputs, system instructions, tool args, and tool results. | Microsoft-managed Azure Monitor table; Python enables content capture, Azure Monitor materializes the table. |
+| GenAI content capture | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` and `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED=true` | Enables prompt/output/tool content capture for demo/debug scenarios. | Requires strong privacy controls in production. |
+| Log Analytics query path | `urllib.request`, `urllib.error`, `json`, and `DefaultAzureCredential` | Calls `https://api.loganalytics.io/v1/workspaces/{workspace_id}/query`. | The Foundry notebook uses direct REST calls rather than `azure-monitor-query`. |
+| Optional Log Analytics SDK | `from azure.monitor.query import LogsQueryClient` | SDK-based alternative for querying Log Analytics. | Cleaner for production code, but not required by the current notebook. |
+| Microsoft Sentinel MCP | `from azure.ai.projects.models import MCPTool` | Defines the Sentinel MCP tool using `project_connection_id`. | Sentinel access is through Foundry project connection / OAuth passthrough, not a Sentinel Python SDK. |
+| Sentinel workspace lookup | `subprocess` calling `az rest` and `az monitor log-analytics workspace show` | Resolves project connections and workspace identifiers. | CLI-driven discovery in the notebook. |
+| Microsoft Sentinel SIEM | No direct Python import in this notebook | Consumes data through connectors, Log Analytics, and Defender portal experiences. | For management automation, use REST/ARM or `azure-mgmt-securityinsight`; for hunting, use Log Analytics. |
+| Microsoft Defender XDR | No direct Python import in this notebook | Security operations plane for incidents, alerts, advanced hunting, and Sentinel integration. | Typically configured service-to-service through the Defender/Sentinel connector. For API work, use Microsoft Graph Security APIs. |
+| Microsoft Entra Agent ID | No direct Python import in this notebook | Identity/governance concept for non-human agent identities. | For production automation, use Microsoft Graph plus `azure.identity`; the notebook currently uses Azure developer credentials. |
+| Conditional Access | No direct Python import in this notebook | Entra policy plane for users, workload identities, and agent-related conditions. | Programmatic policy management is through Microsoft Graph `conditionalAccessPolicy`, not an Azure Monitor library. |
+
+The most common import map for a Microsoft Foundry observability notebook looks like this:
+
+```python
+from agent_framework.observability import create_resource
+
+from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import MCPTool, PromptAgentDefinition
+from azure.ai.projects.telemetry import AIProjectInstrumentor
+from azure.core.settings import settings
+from azure.identity import DefaultAzureCredential
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+from opentelemetry import baggage, context as otel_context, trace
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.trace import SpanKind, Status, StatusCode
+```
+
+Shortest practical alignment:
+
+- **Foundry**: `azure-ai-projects`
+- **OpenTelemetry traces/spans**: `opentelemetry-api`, `opentelemetry-sdk`
+- **Azure Monitor / Application Insights export**: `azure-monitor-opentelemetry`
+- **Azure SDK trace bridge**: `azure-core-tracing-opentelemetry`
+- **HTTP dependency spans**: `opentelemetry-instrumentation-httpx`
+- **Identity**: `azure-identity`
+- **Log Analytics queries**: REST with `urllib` + `DefaultAzureCredential`, or optional `azure-monitor-query`
+- **Sentinel / XDR / Conditional Access / Entra Agent ID**: mostly service/API planes, commonly Microsoft Graph, ARM/REST, Sentinel connectors, and Log Analytics rather than notebook-local imports
