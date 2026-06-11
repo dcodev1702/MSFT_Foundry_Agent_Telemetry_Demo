@@ -12,6 +12,8 @@ stories.json
 *.ico
 build_info.json
 build_info-*.json
+logicapp.json
+logicapp-vmmymachine-01.json
 
 # Bot runtime state (file-based queue and conversation store)
 .queue/
