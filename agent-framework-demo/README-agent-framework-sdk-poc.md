@@ -96,7 +96,7 @@ For a local teaching PoC, Aspire is the fastest way to make those questions visi
 - Python 3.13+
 - VS Code with Jupyter support
 - Azure CLI logged in with access to the target Azure OpenAI resource
-- Docker Desktop for Aspire Dashboard
+- Docker Desktop for Aspire Dashboard. The notebook startup cell attempts to launch Docker Desktop on Windows when the Docker CLI is installed but the Linux engine is not ready.
 - An Azure OpenAI endpoint and deployment name
 
 ### Notebook Install Set
@@ -117,7 +117,7 @@ The notebook installs these major packages:
 2. Run the virtual-environment and dependency cells first.
 3. Switch the notebook to the registered `.venv` kernel.
 4. Run the Azure OpenAI configuration cell.
-5. Run the Aspire Dashboard startup cell and use the printed browser token or login URL.
+5. Run the Aspire Dashboard startup cell and use the printed browser token or login URL. If Docker Desktop is not already running, the cell waits for the Docker Linux engine and prints a clear fallback status instead of raising a Docker `CalledProcessError`.
 6. Run the observability cell to initialize OTLP export.
 7. Run the basic agent section.
 8. Run the MCP demo.
@@ -135,6 +135,15 @@ The intended telemetry model is:
 - the notebook remains understandable while still showing that real tracing is happening
 
 This is deliberately different from a production posture. In production, you would likely reduce sensitive data capture, harden auth posture further, and control sampling more aggressively.
+
+### Aspire Dashboard Startup Behavior
+
+The Windows notebook now handles the common Docker Desktop cold-start case explicitly:
+
+- If Docker CLI is missing, the notebook skips Aspire and continues with console exporters.
+- If Docker CLI is present but the Docker Desktop Linux engine is unavailable, the notebook attempts to start Docker Desktop and waits for the engine.
+- If ports `18888` or `4317` are already busy, the notebook chooses available local ports and prints the actual Aspire UI and OTLP endpoint.
+- If container startup fails, the notebook prints Docker stderr and keeps the rest of the demo runnable with console exporters.
 
 ## Scope Boundaries
 
