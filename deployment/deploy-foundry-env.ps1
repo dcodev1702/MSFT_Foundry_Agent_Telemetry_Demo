@@ -18,6 +18,10 @@ param(
     [int]$TeamsChatSelectionTimeoutMinutes = 10,
     [string]$TeamsChatTopic = 'Microsoft Foundry Deployments',
     [string]$SelectedAiModel,   # Non-interactive model selection (bypasses PromptForChoice)
+    [string]$SubscriptionName = 'zolab',
+    [string]$SubscriptionId = $env:AZURE_SUBSCRIPTION_ID,
+    [string]$SecuritySubscriptionName = 'Security',
+    [string]$SecuritySubscriptionId = $env:SECURITY_SUBSCRIPTION_ID,
     [string]$RequestedBy,
     [string]$RequestedByObjectId,
     [string]$LawResourceGroup = 'Sentinel',
@@ -31,6 +35,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:NO_COLOR = '1'
+if (Get-Variable -Name PSStyle -ErrorAction SilentlyContinue) {
+    $PSStyle.OutputRendering = 'PlainText'
+}
 
 . (Join-Path $PSScriptRoot 'teams-chat.ps1')
 . (Join-Path $PSScriptRoot 'foundry-azure-auth.helpers.ps1')
@@ -77,11 +85,22 @@ if (-not (Get-AzContext -ErrorAction SilentlyContinue)) {
 }
 
 # ── Configuration ──
-$subscriptionId         = (Get-AzSubscription -SubscriptionName "zolab").Id
-$securitySubscriptionId = (Get-AzSubscription -SubscriptionName "Security").Id
-$location               = "eastus2"
-$groupDisplayName       = "zolab-ai-dev"
-$defaultModelCapacity   = 250
+if ([string]::IsNullOrWhiteSpace($SecuritySubscriptionId) -and -not [string]::IsNullOrWhiteSpace($env:SECURITY_SUB)) {
+    $SecuritySubscriptionId = $env:SECURITY_SUB
+}
+
+$readOnlyBuildInspection = ($ListBuilds -or $BuildStatusResourceGroup)
+$subscriptionId = Resolve-AzSubscriptionId `
+    -SubscriptionId $SubscriptionId `
+    -SubscriptionName $SubscriptionName `
+    -Required
+$securitySubscriptionId = Resolve-AzSubscriptionId `
+    -SubscriptionId $SecuritySubscriptionId `
+    -SubscriptionName $SecuritySubscriptionName `
+    -Required:(-not $readOnlyBuildInspection)
+$location             = "eastus2"
+$groupDisplayName     = "zolab-ai-dev"
+$defaultModelCapacity = 250
 
 function Set-AzureSession {
     param(
@@ -110,17 +129,22 @@ function Set-AzureSession {
     }
 
     if ($needsConnect) {
-        Write-Host "Refreshing Azure PowerShell context for subscription '$($targetSubscription.Name)'..."
-        $connectParams = @{
-            Tenant       = $targetSubscription.TenantId
-            Subscription = $SubscriptionId
-            ErrorAction  = 'Stop'
-        }
-        if ($ExpectedAccount) {
-            $connectParams.AccountId = $ExpectedAccount
-        }
+        if ($env:AZURE_CLIENT_ID -and (Test-ManagedIdentityBootstrapAvailable)) {
+            Write-Host "Refreshing Azure PowerShell context for subscription '$($targetSubscription.Name)' via managed identity..."
+            Connect-AzWithManagedIdentityRetry -ClientId $env:AZURE_CLIENT_ID
+        } else {
+            Write-Host "Refreshing Azure PowerShell context for subscription '$($targetSubscription.Name)'..."
+            $connectParams = @{
+                Tenant       = $targetSubscription.TenantId
+                Subscription = $SubscriptionId
+                ErrorAction  = 'Stop'
+            }
+            if ($ExpectedAccount) {
+                $connectParams.AccountId = $ExpectedAccount
+            }
 
-        Connect-AzAccount @connectParams | Out-Null
+            Connect-AzAccount @connectParams | Out-Null
+        }
     }
 
     $azContext = Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop
@@ -274,7 +298,6 @@ function Assert-FoundryDeploymentAuthorization {
         [Parameter(Mandatory)]
         [string]$WorkloadSubscriptionId,
 
-        [Parameter(Mandatory)]
         [string]$SecuritySubscriptionId,
 
         [Parameter(Mandatory)]
@@ -1802,18 +1825,24 @@ function Get-FoundryBuildStatusLines {
             'Reader missing on resource group ❌'
         }
 
-        $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
-        Set-AzContext -SubscriptionId $SecuritySubscriptionId | Out-Null
-        try {
-            $lawAssignments = Get-AzRoleAssignment -ObjectId $group.Id -Scope $lawScope -ErrorAction SilentlyContinue
-        } finally {
-            Set-AzContext -SubscriptionId $SubscriptionId | Out-Null
-        }
-
-        $lawRbacStatus = if ($lawAssignments) {
-            "Log Analytics Reader on $LawWorkspaceName ✅"
+        if ([string]::IsNullOrWhiteSpace($SecuritySubscriptionId)) {
+            $lawRbacStatus = "Security subscription unavailable; Log Analytics Reader check skipped ⚠️"
         } else {
-            "Log Analytics Reader missing on $LawWorkspaceName ❌"
+            $lawScope = "/subscriptions/$SecuritySubscriptionId/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
+            $lawAssignments = $null
+            try {
+                Set-AzContext -SubscriptionId $SecuritySubscriptionId | Out-Null
+                $lawAssignments = Get-AzRoleAssignment -ObjectId $group.Id -Scope $lawScope -ErrorAction SilentlyContinue
+                $lawRbacStatus = if ($lawAssignments) {
+                    "Log Analytics Reader on $LawWorkspaceName ✅"
+                } else {
+                    "Log Analytics Reader missing on $LawWorkspaceName ❌"
+                }
+            } catch {
+                $lawRbacStatus = "Log Analytics Reader check skipped on ${LawWorkspaceName}: $($_.Exception.Message) ⚠️"
+            } finally {
+                Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction SilentlyContinue | Out-Null
+            }
         }
     }
 
@@ -2105,7 +2134,7 @@ function Remove-BuildInfoForResourceGroup {
 
 Write-Host "Resolved subscriptions:"
 Write-Host "  zolab    : $subscriptionId"
-Write-Host "  Security : $securitySubscriptionId"
+Write-Host "  Security : $(if ($securitySubscriptionId) { $securitySubscriptionId } else { 'not required for this operation' })"
 
 # ── 1. Ensure Microsoft.Graph modules ──
 if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Groups)) {

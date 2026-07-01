@@ -67,3 +67,37 @@ Describe 'Connect-AzureCliWithManagedIdentityRetry' {
         $script:sleepCalls | Should -Be @(2)
     }
 }
+
+Describe 'Resolve-AzSubscriptionId' {
+    BeforeAll {
+        . (Join-Path $PSScriptRoot '..' 'foundry-azure-auth.helpers.ps1')
+    }
+
+    It 'returns an explicit subscription id without resolving by name' {
+        $resolved = Resolve-AzSubscriptionId `
+            -SubscriptionId ' 08fdc492-f5aa-4601-84ae-03a37449c2ba ' `
+            -SubscriptionName 'zolab' `
+            -SubscriptionResolver {
+                throw 'resolver should not be called'
+            }
+
+        $resolved | Should -Be '08fdc492-f5aa-4601-84ae-03a37449c2ba'
+    }
+
+    It 'returns null for an optional missing subscription' {
+        $resolved = Resolve-AzSubscriptionId `
+            -SubscriptionName 'Security' `
+            -SubscriptionResolver { $null }
+
+        $resolved | Should -BeNullOrEmpty
+    }
+
+    It 'throws for a required missing subscription' {
+        {
+            Resolve-AzSubscriptionId `
+                -SubscriptionName 'Security' `
+                -Required `
+                -SubscriptionResolver { $null }
+        } | Should -Throw "Azure subscription 'Security' was not found*"
+    }
+}

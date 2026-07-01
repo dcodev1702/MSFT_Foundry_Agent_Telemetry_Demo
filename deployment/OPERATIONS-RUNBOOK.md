@@ -101,7 +101,7 @@ The `MCAPSGov-AutomationApp` governance service principal periodically **deletes
 - `weather <city>` silently falls back to the templated `🌦️ Weather for …` format instead of LLM prose.
 - `az role assignment list --assignee <mi-principalId> --all` returns `[]`.
 
-**One-command recovery** — restores the full role-assignment footprint (AcrPull on both ACRs, Foundry User on the bot LLM, Contributor on the bot RG, Storage Blob + Queue Data Contributor on worker storage) and restarts the worker ACI:
+**One-command recovery** — restores the default role-assignment footprint (AcrPull on both ACRs, Foundry User on the bot LLM, Contributor on the bot RG, Storage Blob + Queue Data Contributor on worker storage) and restarts the worker ACI:
 
 ```powershell
 pwsh ./deployment/repair-bot-rbac.ps1            # preview first with -WhatIf
@@ -110,9 +110,11 @@ pwsh ./deployment/repair-bot-rbac.ps1            # preview first with -WhatIf
 Useful switches:
 
 - `-WhatIf` — show the plan without making changes.
-- `-IncludeSubscriptionRoles` — also grant Contributor + User Access Administrator at subscription scope (needed only if Foundry *builds*, which create new resource groups, fail after recovery).
+- `-IncludeSubscriptionRoles` — also restores the out-of-band build roles: Contributor + User Access Administrator on the `zolab` subscription, Reader on the `Security` subscription, User Access Administrator on the `DIBSecCom` workspace, `zolab-ai-dev` Reader on active `zolab-ai-*` build resource groups, and `zolab-ai-dev` Log Analytics Reader on `DIBSecCom`. Use this when `build it`, `build status`, or cross-subscription Log Analytics RBAC fails after recovery.
 - `-SkipWorkerRestart` — re-apply RBAC only.
-- `-Suffix` / `-SubscriptionId` — target a different environment.
+- `-Suffix` / `-SubscriptionId` / `-SecuritySubscriptionId` — target a different environment.
+
+`build status` is intentionally read-only. If the `Security` subscription cannot be resolved, it should still report the build resources in `zolab` and mark only the `DIBSecCom` Log Analytics Reader check as skipped/unavailable. Full deploy and cleanup operations still require `Security` access.
 
 Allow 1–2 minutes after the run for data-plane RBAC to take effect. The durable fix is a governance **exemption** for the `zolab-bot-${SUFFIX}` and `zolab-worker-${SUFFIX}` resource groups; this script is the stop-gap until that is in place.
 

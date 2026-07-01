@@ -30,6 +30,7 @@ WORKER_BUILD_INFO_PATHS = (
 RESULT_MESSAGE_CHUNK_SIZE = 12000
 FOUNDRY_RESOURCE_GROUP_PATTERN = re.compile(r"^zolab-ai-.{4,}$")
 FOUNDRY_RESOURCE_GROUP_SUFFIX_PATTERN = re.compile(r"^zolab-ai-(.+)$")
+ANSI_ESCAPE_PATTERN = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
 def _utc_now() -> str:
@@ -323,7 +324,7 @@ class BackgroundWorker:
             stderr=asyncio.subprocess.STDOUT,
         )
         stdout, _ = await proc.communicate()
-        output = stdout.decode("utf-8", errors="replace")
+        output = self._strip_ansi(stdout.decode("utf-8", errors="replace"))
         return self._prepend_worker_metadata(output)
 
     async def _run_list_builds(self) -> str:
@@ -412,7 +413,7 @@ class BackgroundWorker:
             except asyncio.CancelledError:
                 pass
 
-        output = stdout.decode("utf-8", errors="replace")
+        output = self._strip_ansi(stdout.decode("utf-8", errors="replace"))
 
         if proc.returncode != 0:
             raise RuntimeError(
@@ -420,6 +421,10 @@ class BackgroundWorker:
             )
 
         return output
+
+    @staticmethod
+    def _strip_ansi(output: str) -> str:
+        return ANSI_ESCAPE_PATTERN.sub("", output)
 
     def _prepend_worker_metadata(self, output: str) -> str:
         metadata_lines = [

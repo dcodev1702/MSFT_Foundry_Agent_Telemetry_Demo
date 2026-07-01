@@ -37,13 +37,18 @@
 
   Optional (-IncludeSubscriptionRoles, OFF by default)
   ────────────────────────────────────────────────────
-      • Contributor + User Access Administrator at SUBSCRIPTION scope.
+      • Contributor + User Access Administrator at zolab SUBSCRIPTION scope.
+      • Reader at Security SUBSCRIPTION scope.
+      • User Access Administrator on the DIBSecCom LAW workspace.
+      • zolab-ai-dev Reader on active zolab-ai-* build resource groups.
+      • zolab-ai-dev Log Analytics Reader on the DIBSecCom LAW workspace.
         These let the worker run Foundry environment *builds* (which create new
-        resource groups and their own role assignments). They are NOT in the
-        per-RG Bicep — they were granted out-of-band during original setup and
-        are inferred from the deploy-foundry-env.ps1 preflight requirements.
-        Enable only if Foundry builds fail after the default recovery. This is a
-        broad, security-sensitive grant — review before using.
+        resource groups and their own role assignments, including cross-sub LAW
+        RBAC). They are NOT in the per-RG Bicep — they were granted out-of-band
+        during original setup and are inferred from the deploy-foundry-env.ps1
+        preflight/build-status requirements. Enable only if Foundry builds or
+        build-status checks fail after the default recovery. These are
+        security-sensitive grants — review before using.
 
 .PARAMETER Suffix
   Environment suffix used in all resource names. Default: botprd
@@ -51,9 +56,16 @@
 .PARAMETER SubscriptionId
   Target subscription ID. Default: the zolab subscription.
 
+.PARAMETER SecuritySubscriptionId
+  Security subscription ID that hosts the DIBSecCom Log Analytics workspace.
+
+.PARAMETER AiDevGroupDisplayName
+  Entra security group used by Foundry builds for notebook/App Insights access.
+
 .PARAMETER IncludeSubscriptionRoles
-  Also grant Contributor + User Access Administrator at subscription scope
-  (worker Foundry-build capability). OFF by default.
+  Also grant the out-of-band worker Foundry-build roles at zolab subscription,
+  Security subscription, DIBSecCom workspace, and active build resource-group
+  scopes. OFF by default.
 
 .PARAMETER SkipWorkerRestart
   Do not restart the worker ACI (only re-apply RBAC).
@@ -83,6 +95,10 @@
 param(
     [string]$Suffix = 'botprd',
     [string]$SubscriptionId = '08fdc492-f5aa-4601-84ae-03a37449c2ba',
+    [string]$SecuritySubscriptionId = '192ad012-896e-4f14-8525-c37a2a9640f9',
+    [string]$LawResourceGroup = 'Sentinel',
+    [string]$LawWorkspaceName = 'DIBSecCom',
+    [string]$AiDevGroupDisplayName = 'zolab-ai-dev',
     [switch]$IncludeSubscriptionRoles,
     [switch]$SkipWorkerRestart,
     [ValidateRange(0, 600)]
@@ -106,6 +122,8 @@ $ROLE = @{
     AcrPull                     = '7f951dda-4ed3-4680-a7ca-43fe172d538d'  # AcrPull
     FoundryUser                 = '53ca6127-db72-4b80-b1b0-d745d6d5456d'  # Foundry User (was "Azure AI User")
     Contributor                 = 'b24988ac-6180-42a0-ab88-20f7382dd24c'  # Contributor
+    Reader                      = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'  # Reader
+    LogAnalyticsReader          = '73c42c96-874c-492b-b04d-ab87d138a893'  # Log Analytics Reader
     StorageQueueDataContributor = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'  # Storage Queue Data Contributor
     StorageBlobDataContributor  = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'  # Storage Blob Data Contributor
     UserAccessAdministrator     = '18d7d88d-d35e-4fb5-a5c3-7773c20a72d9'  # User Access Administrator
@@ -124,18 +142,41 @@ function Grant-RoleAssignment {
         [string]$PrincipalId,
         [string]$RoleId,
         [string]$Scope,
-        [string]$Label
+        [string]$Label,
+        [ValidateSet('ServicePrincipal', 'Group')]
+        [string]$PrincipalType = 'ServicePrincipal'
     )
+
+      $existingCount = az role assignment list `
+        --assignee-object-id $PrincipalId `
+        --scope $Scope `
+        --query "[?contains(roleDefinitionId, '$RoleId')] | length(@)" `
+        -o tsv 2>$null
+      if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingCount) -and [int]$existingCount -gt 0) {
+        Write-Host "  [ensured] $Label" -ForegroundColor Green
+        return $true
+      }
+
     if (-not $PSCmdlet.ShouldProcess($Scope, "Grant '$Label'")) {
         return $true
     }
     $null = az role assignment create `
         --assignee-object-id $PrincipalId `
-        --assignee-principal-type ServicePrincipal `
+      --assignee-principal-type $PrincipalType `
         --role $RoleId `
         --scope $Scope `
         --output none 2>&1
     if ($LASTEXITCODE -ne 0) {
+      $existingCount = az role assignment list `
+        --assignee-object-id $PrincipalId `
+        --scope $Scope `
+        --query "[?contains(roleDefinitionId, '$RoleId')] | length(@)" `
+        -o tsv 2>$null
+      if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingCount) -and [int]$existingCount -gt 0) {
+        Write-Host "  [ensured] $Label" -ForegroundColor Green
+        return $true
+      }
+
         Write-Warning "FAILED: $Label"
         return $false
     }
@@ -168,14 +209,43 @@ Write-Host "  $miName"
 Write-Host "    principalId : $principalId"
 Write-Host "    clientId    : $clientId"
 
+$aiDevGroupObjectId = $null
+$foundryBuildResourceGroupNames = @()
+if ($IncludeSubscriptionRoles) {
+  Write-Banner "Resolving AI dev group and active builds"
+  $aiDevGroupObjectId = (az ad group show --group $AiDevGroupDisplayName --query id -o tsv 2>$null)
+  if ([string]::IsNullOrWhiteSpace($aiDevGroupObjectId)) {
+    throw "Could not resolve Entra group '$AiDevGroupDisplayName'. Confirm it exists and that the current account can read Microsoft Graph directory objects."
+  }
+
+  $buildRgText = az group list --subscription $SubscriptionId --query "[?starts_with(name, 'zolab-ai-')].name" -o tsv 2>$null
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($buildRgText)) {
+    $foundryBuildResourceGroupNames = @(
+      $buildRgText -split "`r?`n" |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique
+    )
+  }
+
+  Write-Host "  $AiDevGroupDisplayName"
+  Write-Host "    objectId : $aiDevGroupObjectId"
+  if ($foundryBuildResourceGroupNames.Count -gt 0) {
+    Write-Host "    active builds : $($foundryBuildResourceGroupNames -join ', ')"
+  } else {
+    Write-Host "    active builds : none found"
+  }
+}
+
 # ── Scope strings ─────────────────────────────────────────────────
 $subScope       = "/subscriptions/$SubscriptionId"
+$securitySubScope = "/subscriptions/$SecuritySubscriptionId"
 $botRgScope     = "$subScope/resourceGroups/$botRg"
 $workerRgScope  = "$subScope/resourceGroups/$workerRg"
 $botAcrScope    = "$botRgScope/providers/Microsoft.ContainerRegistry/registries/$botAcr"
 $botLlmScope    = "$botRgScope/providers/Microsoft.CognitiveServices/accounts/$botLlm"
 $workerAcrScope = "$workerRgScope/providers/Microsoft.ContainerRegistry/registries/$workerAcr"
 $workerStgScope = "$workerRgScope/providers/Microsoft.Storage/storageAccounts/$workerStg"
+$lawWorkspaceScope = "$securitySubScope/resourceGroups/$LawResourceGroup/providers/Microsoft.OperationalInsights/workspaces/$LawWorkspaceName"
 
 # ── Assignment plan ───────────────────────────────────────────────
 $assignments = @(
@@ -190,13 +260,28 @@ $assignments = @(
 if ($IncludeSubscriptionRoles) {
     $assignments += @{ Id = $ROLE.Contributor;             Scope = $subScope; Label = "Contributor -> SUBSCRIPTION (worker Foundry builds)" }
     $assignments += @{ Id = $ROLE.UserAccessAdministrator; Scope = $subScope; Label = "User Access Administrator -> SUBSCRIPTION (worker Foundry builds)" }
+  $assignments += @{ Id = $ROLE.Reader;                  Scope = $securitySubScope; Label = "Reader -> Security SUBSCRIPTION (worker subscription discovery)" }
+  $assignments += @{ Id = $ROLE.UserAccessAdministrator; Scope = $lawWorkspaceScope; Label = "User Access Administrator -> $LawWorkspaceName LAW workspace (worker cross-sub LAW RBAC)" }
+  $assignments += @{ Id = $ROLE.LogAnalyticsReader;      Scope = $lawWorkspaceScope; Label = "Log Analytics Reader -> $LawWorkspaceName LAW workspace ($AiDevGroupDisplayName)"; PrincipalId = $aiDevGroupObjectId; PrincipalType = 'Group' }
+
+  foreach ($buildResourceGroupName in $foundryBuildResourceGroupNames) {
+    $assignments += @{
+      Id            = $ROLE.Reader
+      Scope         = "$subScope/resourceGroups/$buildResourceGroupName"
+      Label         = "Reader -> build RG $buildResourceGroupName ($AiDevGroupDisplayName)"
+      PrincipalId   = $aiDevGroupObjectId
+      PrincipalType = 'Group'
+    }
+  }
 }
 
 # ── Apply assignments ─────────────────────────────────────────────
 Write-Banner "Restoring role assignments"
 $failures = 0
 foreach ($a in $assignments) {
-    if (-not (Grant-RoleAssignment -PrincipalId $principalId -RoleId $a.Id -Scope $a.Scope -Label $a.Label)) {
+  $targetPrincipalId = if ($a.PrincipalId) { $a.PrincipalId } else { $principalId }
+  $targetPrincipalType = if ($a.PrincipalType) { $a.PrincipalType } else { 'ServicePrincipal' }
+  if (-not (Grant-RoleAssignment -PrincipalId $targetPrincipalId -PrincipalType $targetPrincipalType -RoleId $a.Id -Scope $a.Scope -Label $a.Label)) {
         $failures++
     }
 }
@@ -231,6 +316,17 @@ if (-not $WhatIfPreference) {
     Write-Banner "Current managed-identity role assignments"
     az role assignment list --assignee $principalId --all `
         --query "[].{role:roleDefinitionName, scope:scope}" -o table
+
+    if ($IncludeSubscriptionRoles -and $aiDevGroupObjectId) {
+      Write-Banner "Current AI dev group role assignments"
+      $verificationScopes = @($lawWorkspaceScope) + @(
+        $foundryBuildResourceGroupNames | ForEach-Object { "$subScope/resourceGroups/$_" }
+      )
+      foreach ($scope in $verificationScopes) {
+        az role assignment list --assignee-object-id $aiDevGroupObjectId --scope $scope `
+          --query "[].{role:roleDefinitionName, scope:scope}" -o table
+      }
+    }
 
     if (-not $SkipWorkerRestart) {
         Write-Banner "Worker ACI state"

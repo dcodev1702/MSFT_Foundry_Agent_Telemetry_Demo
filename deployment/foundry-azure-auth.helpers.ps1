@@ -84,6 +84,60 @@ function Get-AzureCliContext {
     $cliContextJson | ConvertFrom-Json
 }
 
+function Resolve-AzSubscriptionId {
+    param(
+        [string]$SubscriptionId,
+
+        [string]$SubscriptionName,
+
+        [switch]$Required,
+
+        [scriptblock]$SubscriptionResolver
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
+        return $SubscriptionId.Trim()
+    }
+
+    if ([string]::IsNullOrWhiteSpace($SubscriptionName)) {
+        if ($Required) {
+            throw 'A subscription ID or subscription name is required.'
+        }
+
+        return $null
+    }
+
+    if (-not $SubscriptionResolver) {
+        $SubscriptionResolver = {
+            param($Name)
+
+            Get-AzSubscription -SubscriptionName $Name -ErrorAction SilentlyContinue
+        }
+    }
+
+    try {
+        $subscription = @(& $SubscriptionResolver $SubscriptionName) | Select-Object -First 1
+    } catch {
+        if ($Required) {
+            throw "Could not resolve Azure subscription '$SubscriptionName': $($_.Exception.Message)"
+        }
+
+        Write-Host "Azure subscription '$SubscriptionName' could not be resolved; continuing without it."
+        return $null
+    }
+
+    if ($subscription -and -not [string]::IsNullOrWhiteSpace($subscription.Id)) {
+        return [string]$subscription.Id
+    }
+
+    if ($Required) {
+        throw "Azure subscription '$SubscriptionName' was not found in the current Azure context. Provide the subscription ID explicitly or restore access to that subscription."
+    }
+
+    Write-Host "Azure subscription '$SubscriptionName' was not found in the current Azure context; continuing without it."
+    $null
+}
+
 function Connect-AzureCliWithManagedIdentityRetry {
     param(
         [Parameter(Mandatory)]

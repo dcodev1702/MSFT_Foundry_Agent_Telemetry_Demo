@@ -174,12 +174,24 @@ The script will:
 9. 📊 Configure diagnostic settings on Key Vault and Blob Storage
 10. 📡 Assign Log Analytics Reader on DIBSecCom workspace in the Security subscription
 
+The script also accepts explicit subscription overrides for automation contexts that can see a subscription by ID but not by display name:
+
+```powershell
+pwsh ./deploy-foundry-env.ps1 `
+  -SubscriptionId 08fdc492-f5aa-4601-84ae-03a37449c2ba `
+  -SecuritySubscriptionId 192ad012-896e-4f14-8525-c37a2a9640f9
+```
+
+For read-only `-ListBuilds` and `-BuildStatusResourceGroup` operations, the script no longer hard-fails when the `Security` subscription is unavailable. It reports the `zolab` build status and marks only the `DIBSecCom` Log Analytics RBAC check as skipped/unavailable. Deploy and cleanup still require the Security subscription because they create or remove cross-subscription LAW RBAC.
+
 When this deployment runs under the worker managed identity, that identity must have enough RBAC to do two distinct things:
 
 1. Create resources in the `zolab` subscription.
 2. Create and remove `Microsoft.Authorization/roleAssignments` resources in both the `zolab` subscription and on the `DIBSecCom` workspace scope in the `Security` subscription.
 
 `Contributor` alone is not enough for the RBAC portion because it explicitly excludes `Microsoft.Authorization/*/Write`.
+
+If MCAPSGov removes the worker identity assignments, use [OPERATIONS-RUNBOOK.md](OPERATIONS-RUNBOOK.md)'s RBAC recovery section. The `-IncludeSubscriptionRoles` repair path restores the `zolab` subscription roles, Security-side Reader, DIBSecCom workspace User Access Administrator, `zolab-ai-dev` Reader on active `zolab-ai-*` resource groups, and `zolab-ai-dev` Log Analytics Reader on DIBSecCom needed for build status and cross-subscription Log Analytics RBAC.
 
 For worker rollouts, avoid relying on a retagged `latest` image if you need deterministic pickup in Azure Container Instances. `worker-infra.bicep` now accepts `workerImageTag`, and `deployment/deploy-worker-app.sh` performs a local Docker `--no-cache --pull` build, pushes both an immutable tag and `latest`, and then deploys ACI pinned to the immutable tag.
 
