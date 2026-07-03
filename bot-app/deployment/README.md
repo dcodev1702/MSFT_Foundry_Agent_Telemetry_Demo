@@ -65,17 +65,13 @@ Azure Container Apps also creates a separate infrastructure resource group for e
 
 ---
 
-## 📂 Files
+## 🧭 Architecture
 
-```text
-bot-app/deployment/
-├── README.md
-├── bot-infra.bicep
-├── bot-infra.bicepparam
-├── deploy-bot-app.sh
-└── modules/
-    └── bot-resources.bicep
-```
+![Zobot Teams Ops Bot architecture](../../images/zobot-architecture-neon.svg)
+
+---
+
+## 📂 Files
 
 | File | Purpose |
 |---|---|

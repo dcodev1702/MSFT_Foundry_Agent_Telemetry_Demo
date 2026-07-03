@@ -1,0 +1,190 @@
+<svg viewBox="0 0 1060 1470" xmlns="http://www.w3.org/2000/svg" font-family="'Segoe UI','Inter',sans-serif">
+  <defs>
+    <linearGradient id="titleBar" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#bc8cff"/><stop offset="0.5" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0a0e17" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#13202f"/><stop offset="1" stop-color="#0e1626"/>
+    </linearGradient>
+    <filter id="glowCoral" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ff7b72" flood-opacity="0.45"/></filter>
+    <filter id="glowBlue" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#58a6ff" flood-opacity="0.45"/></filter>
+    <filter id="glowTeal" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#2dd4bf" flood-opacity="0.45"/></filter>
+    <filter id="glowYellow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#e3b341" flood-opacity="0.40"/></filter>
+    <filter id="glowPurple" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#bc8cff" flood-opacity="0.40"/></filter>
+    <marker id="arrBlue" markerWidth="10" markerHeight="10" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#58a6ff"/></marker>
+    <marker id="arrCoral" markerWidth="10" markerHeight="10" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#ff7b72"/></marker>
+    <marker id="arrTeal" markerWidth="10" markerHeight="10" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2dd4bf"/></marker>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0 H0 V40" fill="none" stroke="#152238" stroke-width="0.5" opacity="0.35"/>
+    </pattern>
+  </defs>
+
+  <!-- ================= BACKGROUND ================= -->
+  <rect width="1060" height="1470" fill="#0a0e17"/>
+  <rect width="1060" height="1470" fill="url(#grid)"/>
+
+  <!-- ================= HEADER ================= -->
+  <text x="40" y="64" font-size="30" font-weight="800" fill="#e6edf3" letter-spacing="1">ZOBOT <tspan fill="#8b949e" font-weight="400">// Teams Ops Bot Architecture</tspan></text>
+  <rect x="40" y="76" width="360" height="4" rx="2" fill="url(#titleBar)"/>
+  <text x="40" y="100" font-size="13" fill="#8b949e" letter-spacing="2">M365 AGENTS SDK · CONTAINER APPS · ACI WORKER · PRIVATE LINK</text>
+  <circle cx="836" cy="52" r="5" fill="#3fb950"/>
+  <text x="850" y="57" font-size="13" fill="#e6edf3" font-weight="600">PROD · botprd · VNet-integrated</text>
+  <text x="850" y="76" font-size="11.5" fill="#8b949e">async job pattern · zero secrets · single UAMI</text>
+
+  <!-- ================= LEGEND PILLS ================= -->
+  <g font-size="11.5" fill="#c9d1d9">
+    <rect x="40" y="122" width="170" height="26" rx="13" fill="#0d1420" stroke="#ff7b72" stroke-width="1"/>
+    <circle cx="56" cy="135" r="4" fill="#ff7b72"/><text x="68" y="139">Interface / Storage</text>
+    <rect x="222" y="122" width="140" height="26" rx="13" fill="#0d1420" stroke="#58a6ff" stroke-width="1"/>
+    <circle cx="238" cy="135" r="4" fill="#58a6ff"/><text x="250" y="139">Orchestration</text>
+    <rect x="374" y="122" width="120" height="26" rx="13" fill="#0d1420" stroke="#2dd4bf" stroke-width="1"/>
+    <circle cx="390" cy="135" r="4" fill="#2dd4bf"/><text x="402" y="139">Execution</text>
+    <rect x="506" y="122" width="120" height="26" rx="13" fill="#0d1420" stroke="#e3b341" stroke-width="1"/>
+    <circle cx="522" cy="135" r="4" fill="#e3b341"/><text x="534" y="139">Network</text>
+    <rect x="638" y="122" width="150" height="26" rx="13" fill="#0d1420" stroke="#bc8cff" stroke-width="1"/>
+    <circle cx="654" cy="135" r="4" fill="#bc8cff"/><text x="666" y="139">Identity / Auth</text>
+    <rect x="800" y="122" width="200" height="26" rx="13" fill="#0d1420" stroke="#2dd4bf" stroke-width="1" stroke-dasharray="4 3"/>
+    <line x1="812" y1="135" x2="832" y2="135" stroke="#2dd4bf" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="840" y="139">Proactive return path</text>
+  </g>
+
+  <!-- ================= TEAMS ENTRY ================= -->
+  <rect x="410" y="188" width="180" height="46" rx="23" fill="#131a2b" stroke="#ff7b72" stroke-width="1.6" filter="url(#glowCoral)"/>
+  <text x="500" y="211" font-size="16" font-weight="700" fill="#e6edf3" text-anchor="middle">Teams</text>
+  <text x="500" y="227" font-size="10.5" fill="#8b949e" text-anchor="middle">M365 client · user commands</text>
+  <line x1="500" y1="234" x2="500" y2="282" stroke="#ff7b72" stroke-width="1.6" marker-end="url(#arrCoral)"/>
+
+  <!-- ================= AZURE BOT SERVICE ================= -->
+  <rect x="330" y="288" width="340" height="88" rx="12" fill="#0f1626" stroke="#ff7b72" stroke-width="1.6" filter="url(#glowCoral)"/>
+  <text x="352" y="316" font-size="10.5" fill="#ff7b72" letter-spacing="2" font-weight="700">CHANNEL GATEWAY</text>
+  <text x="352" y="340" font-size="17" font-weight="700" fill="#e6edf3">Azure Bot Service <tspan fill="#8b949e" font-weight="400">(F0)</tspan></text>
+  <text x="352" y="360" font-size="11.5" fill="#8b949e">Teams channel registration · activity routing</text>
+  <line x1="500" y1="376" x2="500" y2="424" stroke="#58a6ff" stroke-width="1.6" marker-end="url(#arrBlue)"/>
+
+  <!-- ================= LEFT PANEL: NETWORK ================= -->
+  <rect x="25" y="430" width="205" height="530" rx="12" fill="#0e1420" stroke="#e3b341" stroke-width="1.4" filter="url(#glowYellow)"/>
+  <text x="45" y="460" font-size="12" fill="#e3b341" letter-spacing="2.5" font-weight="700">NETWORK</text>
+  <line x1="45" y1="472" x2="210" y2="472" stroke="#e3b341" stroke-width="0.6" opacity="0.4"/>
+  <g font-family="'Cascadia Code','Consolas',monospace" font-size="10.5" fill="#c9d1d9">
+    <circle cx="52" cy="494" r="3" fill="#e3b341"/><text x="62" y="498">VNet-integrated</text>
+    <text x="62" y="512">Container App ingress</text>
+    <circle cx="52" cy="536" r="3" fill="#e3b341"/><text x="62" y="540">Storage reachable only</text>
+    <text x="62" y="554">via Private Endpoints</text>
+    <circle cx="52" cy="578" r="3" fill="#3fb950"/><text x="62" y="582">Public network access:</text>
+    <text x="62" y="596" fill="#3fb950" font-weight="700">Disabled</text>
+    <circle cx="52" cy="620" r="3" fill="#e3b341"/><text x="62" y="624">Private DNS zones:</text>
+    <text x="62" y="638" fill="#8b949e">privatelink.queue.</text>
+    <text x="62" y="651" fill="#8b949e">core.windows.net</text>
+    <text x="62" y="668" fill="#8b949e">privatelink.blob.</text>
+    <text x="62" y="681" fill="#8b949e">core.windows.net</text>
+    <circle cx="52" cy="705" r="3" fill="#e3b341"/><text x="62" y="709">NSG: outbound 443</text>
+    <text x="62" y="723">to Bot Framework only</text>
+    <circle cx="52" cy="747" r="3" fill="#e3b341"/><text x="62" y="751">ACI joined to same</text>
+    <text x="62" y="765">VNet subnet as PEs</text>
+  </g>
+  <text x="45" y="800" font-size="10" fill="#8b949e" font-style="italic">Traffic between bot, queue,</text>
+  <text x="45" y="814" font-size="10" fill="#8b949e" font-style="italic">blob and worker never</text>
+  <text x="45" y="828" font-size="10" fill="#8b949e" font-style="italic">leaves the VNet.</text>
+  <line x1="230" y1="560" x2="250" y2="560" stroke="#e3b341" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+  <line x1="230" y1="890" x2="250" y2="890" stroke="#e3b341" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+
+  <!-- ================= RIGHT PANEL: IDENTITY & AUTH ================= -->
+  <rect x="800" y="430" width="205" height="530" rx="12" fill="#0e1420" stroke="#bc8cff" stroke-width="1.4" filter="url(#glowPurple)"/>
+  <text x="820" y="460" font-size="12" fill="#bc8cff" letter-spacing="2.5" font-weight="700">IDENTITY &amp; AUTH</text>
+  <line x1="820" y1="472" x2="985" y2="472" stroke="#bc8cff" stroke-width="0.6" opacity="0.4"/>
+  <g font-family="'Cascadia Code','Consolas',monospace" font-size="10.5" fill="#c9d1d9">
+    <circle cx="827" cy="494" r="3" fill="#bc8cff"/><text x="837" y="498">One shared UAMI:</text>
+    <rect x="833" y="506" width="128" height="20" rx="10" fill="none" stroke="#e3b341" stroke-width="1.4"/>
+    <text x="843" y="520" fill="#e6edf3" font-weight="700">zolab-bot-mi</text>
+    <text x="837" y="544" fill="#8b949e">used by CA + ACI</text>
+    <circle cx="827" cy="570" r="3" fill="#bc8cff"/><text x="837" y="574">RBAC (data plane):</text>
+    <text x="837" y="590" fill="#8b949e">Storage Queue Data</text>
+    <text x="837" y="603" fill="#8b949e">Contributor</text>
+    <text x="837" y="620" fill="#8b949e">Storage Blob Data</text>
+    <text x="837" y="633" fill="#8b949e">Contributor</text>
+    <circle cx="827" cy="659" r="3" fill="#bc8cff"/><text x="837" y="663">JWT middleware:</text>
+    <text x="837" y="679" fill="#8b949e">validates Bot Framework</text>
+    <text x="837" y="692" fill="#8b949e">tokens on every POST</text>
+    <circle cx="827" cy="718" r="3" fill="#3fb950"/><text x="837" y="722" fill="#3fb950" font-weight="700">Zero secrets</text>
+    <text x="837" y="738" fill="#8b949e">no keys / no SAS —</text>
+    <text x="837" y="751" fill="#8b949e">Entra ID tokens only</text>
+  </g>
+  <text x="820" y="790" font-size="10" fill="#8b949e" font-style="italic">Yellow ring = deliberate</text>
+  <text x="820" y="804" font-size="10" fill="#8b949e" font-style="italic">choice: one identity, two</text>
+  <text x="820" y="818" font-size="10" fill="#8b949e" font-style="italic">compute planes.</text>
+  <line x1="780" y1="560" x2="800" y2="560" stroke="#bc8cff" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+  <line x1="780" y1="1140" x2="800" y2="1140" stroke="#bc8cff" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>
+
+  <!-- ================= AZURE CONTAINER APP ================= -->
+  <rect x="250" y="430" width="500" height="330" rx="14" fill="#0f1626" stroke="#58a6ff" stroke-width="1.8" filter="url(#glowBlue)"/>
+  <text x="278" y="462" font-size="11" fill="#58a6ff" letter-spacing="2.5" font-weight="700">AZURE CONTAINER APP · ORCHESTRATION</text>
+  <text x="278" y="490" font-family="'Cascadia Code','Consolas',monospace" font-size="17" font-weight="700" fill="#e6edf3">zolab-bot-ca-botprd-vnet</text>
+  <line x1="278" y1="504" x2="722" y2="504" stroke="#58a6ff" stroke-width="0.6" opacity="0.4"/>
+  <g font-family="'Cascadia Code','Consolas',monospace" font-size="12.5" fill="#c9d1d9">
+    <circle cx="288" cy="530" r="3.5" fill="#58a6ff"/><text x="302" y="535">aiohttp web server <tspan fill="#e3b341">(:8000)</tspan></text>
+    <circle cx="288" cy="560" r="3.5" fill="#58a6ff"/><text x="302" y="565">M365 Agents SDK handlers</text>
+    <circle cx="288" cy="590" r="3.5" fill="#bc8cff"/><text x="302" y="595">JWT auth middleware</text>
+    <circle cx="288" cy="620" r="3.5" fill="#58a6ff"/><text x="302" y="625">Proactive messaging</text>
+    <text x="316" y="650" fill="#8b949e">&#8627; Heartbeat service <tspan fill="#e6edf3">(6 hours)</tspan></text>
+  </g>
+  <rect x="278" y="688" width="330" height="34" rx="17" fill="#101c2e" stroke="#3fb950" stroke-width="1.2"/>
+  <circle cx="296" cy="705" r="4" fill="#3fb950"/>
+  <text x="308" y="710" font-family="'Cascadia Code','Consolas',monospace" font-size="12" fill="#c9d1d9">IDENTITY · UAMI <tspan fill="#e6edf3" font-weight="700">zolab-bot-mi</tspan></text>
+
+  <!-- branch to queue + blob -->
+  <line x1="500" y1="760" x2="500" y2="792" stroke="#ff7b72" stroke-width="1.6"/>
+  <line x1="360" y1="792" x2="645" y2="792" stroke="#ff7b72" stroke-width="1.6"/>
+  <line x1="360" y1="792" x2="360" y2="826" stroke="#ff7b72" stroke-width="1.6" marker-end="url(#arrCoral)"/>
+  <line x1="645" y1="792" x2="645" y2="826" stroke="#ff7b72" stroke-width="1.6" marker-end="url(#arrCoral)"/>
+  <text x="366" y="812" font-size="10" fill="#8b949e" font-family="'Cascadia Code',monospace">enqueue jobs</text>
+  <text x="651" y="812" font-size="10" fill="#8b949e" font-family="'Cascadia Code',monospace">conversation refs</text>
+
+  <!-- ================= PRIVATE QUEUE ================= -->
+  <rect x="235" y="832" width="255" height="118" rx="12" fill="#0f1626" stroke="#ff7b72" stroke-width="1.6" filter="url(#glowCoral)"/>
+  <text x="255" y="860" font-size="10.5" fill="#ff7b72" letter-spacing="2" font-weight="700">PRIVATE QUEUE ENDPOINT</text>
+  <text x="255" y="888" font-family="'Cascadia Code','Consolas',monospace" font-size="16" font-weight="700" fill="#e6edf3">botjobs</text>
+  <rect x="255" y="904" width="92" height="22" rx="11" fill="none" stroke="#e3b341" stroke-width="1"/>
+  <text x="268" y="919" font-size="10.5" fill="#e3b341">Private Link</text>
+  <text x="358" y="919" font-size="10.5" fill="#8b949e">job payloads</text>
+
+  <!-- ================= PRIVATE BLOB ================= -->
+  <rect x="520" y="832" width="255" height="118" rx="12" fill="#0f1626" stroke="#ff7b72" stroke-width="1.6" filter="url(#glowCoral)"/>
+  <text x="540" y="860" font-size="10.5" fill="#ff7b72" letter-spacing="2" font-weight="700">PRIVATE BLOB ENDPOINT</text>
+  <text x="540" y="888" font-family="'Cascadia Code','Consolas',monospace" font-size="16" font-weight="700" fill="#e6edf3">botstate</text>
+  <rect x="540" y="904" width="92" height="22" rx="11" fill="none" stroke="#e3b341" stroke-width="1"/>
+  <text x="553" y="919" font-size="10.5" fill="#e3b341">Private Link</text>
+  <text x="643" y="919" font-size="10.5" fill="#8b949e">conv refs · state</text>
+
+  <!-- queue -> worker -->
+  <path d="M360,950 V985 H500 V1014" fill="none" stroke="#2dd4bf" stroke-width="1.6" marker-end="url(#arrTeal)"/>
+  <text x="372" y="980" font-size="10" fill="#8b949e" font-family="'Cascadia Code',monospace">dequeue</text>
+  <!-- blob -> worker (read for proactive) -->
+  <path d="M645,950 V1014" fill="none" stroke="#2dd4bf" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrTeal)"/>
+  <text x="656" y="985" font-size="10" fill="#8b949e" font-family="'Cascadia Code',monospace">read refs</text>
+
+  <!-- ================= ACI WORKER ================= -->
+  <rect x="250" y="1020" width="500" height="290" rx="14" fill="#0f1626" stroke="#2dd4bf" stroke-width="1.8" filter="url(#glowTeal)"/>
+  <text x="278" y="1052" font-size="11" fill="#2dd4bf" letter-spacing="2.5" font-weight="700">ACI WORKER CONTAINER · EXECUTION</text>
+  <text x="278" y="1080" font-family="'Cascadia Code','Consolas',monospace" font-size="17" font-weight="700" fill="#e6edf3">zolab-worker-aci-botprd</text>
+  <line x1="278" y1="1094" x2="722" y2="1094" stroke="#2dd4bf" stroke-width="0.6" opacity="0.4"/>
+  <g font-family="'Cascadia Code','Consolas',monospace" font-size="12.5" fill="#c9d1d9">
+    <circle cx="288" cy="1120" r="3.5" fill="#2dd4bf"/><text x="302" y="1125">Polls queue every <tspan fill="#e6edf3" font-weight="700">5s</tspan></text>
+    <circle cx="288" cy="1150" r="3.5" fill="#2dd4bf"/><text x="302" y="1155">Executes <tspan fill="#e6edf3" font-weight="700">PowerShell / Bicep</tspan></text>
+    <circle cx="288" cy="1180" r="3.5" fill="#2dd4bf"/><text x="302" y="1185">Sends results via proactive</text>
+    <text x="302" y="1205">messaging <tspan fill="#2dd4bf">&#8594; back to Teams</tspan></text>
+  </g>
+  <rect x="278" y="1238" width="330" height="34" rx="17" fill="#101c2e" stroke="#3fb950" stroke-width="1.2"/>
+  <circle cx="296" cy="1255" r="4" fill="#3fb950"/>
+  <text x="308" y="1260" font-family="'Cascadia Code','Consolas',monospace" font-size="12" fill="#c9d1d9">IDENTITY · UAMI <tspan fill="#e6edf3" font-weight="700">zolab-bot-mi</tspan></text>
+
+  <!-- ================= PROACTIVE RETURN PATH ================= -->
+  <path d="M750,1165 H1032 V211 H598" fill="none" stroke="#2dd4bf" stroke-width="1.4" stroke-dasharray="6 4" marker-end="url(#arrTeal)" opacity="0.85"/>
+  <text x="1019" y="1120" font-size="11" fill="#2dd4bf" font-family="'Cascadia Code',monospace" letter-spacing="2" transform="rotate(-90 1019 1120)" text-anchor="start">PROACTIVE MESSAGING · RESULTS &#8594; TEAMS</text>
+
+  <!-- ================= FOOTER RIBBON ================= -->
+  <rect x="25" y="1350" width="1010" height="56" rx="12" fill="url(#ribbon)" stroke="#2dd4bf" stroke-width="1" opacity="0.95"/>
+  <circle cx="52" cy="1378" r="5" fill="#2dd4bf"/>
+  <text x="68" y="1383" font-size="11.5" fill="#c9d1d9">Teams &#8594; Bot Service &#8594; Container App &#8594; Private Link queue &#8594; ACI worker runs PowerShell/Bicep &#8594; proactive results &#8594; Teams · <tspan fill="#3fb950" font-weight="700">zero secrets · one UAMI</tspan></text>
+
+  <text x="1035" y="1444" font-size="10.5" fill="#4d5b6e" text-anchor="end" font-family="'Cascadia Code',monospace">zobot · botprd · 2026</text>
+</svg>
