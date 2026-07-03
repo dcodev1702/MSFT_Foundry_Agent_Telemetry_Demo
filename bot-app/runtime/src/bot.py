@@ -198,13 +198,15 @@ def _list_foundry_builds() -> list[str]:
     """Query Azure for zolab-ai-* resource groups (active Foundry builds)."""
     try:
         from azure.identity import DefaultAzureCredential
-        from azure.mgmt.resource import ResourceManagementClient
+
+        from azure_resource_compat import get_resource_management_client_class
 
         client_id = os.getenv("AZURE_CLIENT_ID")
         credential = DefaultAzureCredential(
             managed_identity_client_id=client_id
         )
         sub_id = os.getenv("AZURE_SUBSCRIPTION_ID", "08fdc492-f5aa-4601-84ae-03a37449c2ba")
+        ResourceManagementClient = get_resource_management_client_class()
         client = ResourceManagementClient(credential, sub_id)
         groups = client.resource_groups.list()
         return sorted(

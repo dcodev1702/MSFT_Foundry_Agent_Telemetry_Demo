@@ -539,7 +539,8 @@ class BackgroundWorker:
 
     def _get_foundry_resource_group_names(self) -> list[str]:
         from azure.identity import DefaultAzureCredential
-        from azure.mgmt.resource import ResourceManagementClient
+
+        from azure_resource_compat import get_resource_management_client_class
 
         client_id = os.getenv("AZURE_CLIENT_ID")
         credential = DefaultAzureCredential(managed_identity_client_id=client_id)
@@ -547,6 +548,7 @@ class BackgroundWorker:
             "AZURE_SUBSCRIPTION_ID",
             "08fdc492-f5aa-4601-84ae-03a37449c2ba",
         )
+        ResourceManagementClient = get_resource_management_client_class()
         client = ResourceManagementClient(credential, subscription_id)
 
         return sorted(
