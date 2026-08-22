@@ -1,6 +1,6 @@
 # 🤖 Microsoft Foundry — Agent Framework Observability PoC
 
-Jupyter notebooks for Python 3.13+ that configure and query a Microsoft Agent Framework agent backed by Microsoft Foundry with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics.
+Jupyter notebooks that configure and query a Microsoft Agent Framework agent backed by Microsoft Foundry with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 notebook uses Python 3.14+; the macOS notebook supports Python 3.13+.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
@@ -15,7 +15,7 @@ Jupyter notebooks for Python 3.13+ that configure and query a Microsoft Agent Fr
 | **Entra ID Permissions** | `Contributor` (or equivalent) on the Foundry project and Application Insights resource |
 | **Microsoft Foundry Project** | Connected to an **Application Insights** instance backed by a **Log Analytics workspace** |
 | **Model Deployment** | One allowed model (`gpt-4.1-mini`, `gpt-5.3`, `gpt-5.4`, or `grok-4-1-fast-reasoning`) is selected during deployment and auto-deployed — no manual setup needed |
-| **Python 3.13+** | With `venv` support |
+| **Python** | Python 3.14+ for Win11 or Python 3.13+ for macOS, with `venv` support |
 | **Jupyter Notebook** | VS Code with Jupyter extension or JupyterLab |
 
 ---
@@ -24,8 +24,8 @@ Jupyter notebooks for Python 3.13+ that configure and query a Microsoft Agent Fr
 
 1. Run the deployment first — it generates `build_info-<suffix>.json` at the repo root (see [`deployment/README.md`](deployment/README.md))
 2. Open `zolab-ai-agent-demo-macbook.ipynb` or `zolab-ai-agent-demo-win11.ipynb`
-3. Run **Section 0** — creates `.venv` and registers the `AI Agent Demo (.venv)` kernel
-4. Switch to the **AI Agent Demo (.venv)** kernel
+3. Run **Section 0** — creates `.venv` and registers the notebook kernel
+4. On Win11, switch to the **AI Agent Demo (.venv, Python 3.14)** kernel
 5. Run sections **1 → 5** in order
 6. Run **Section 6** and inspect telemetry in the Azure Portal:
    - 📊 **Application Insights** — request/dependency traces
@@ -40,7 +40,7 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 
 | # | Section | What It Does |
 |---|---|---|
-| **0** | Create or Reuse Virtual Environment | Creates `.venv`, installs `ipykernel`, registers Jupyter kernel |
+| **0** | Create or Reuse Virtual Environment | Validates Python 3.14 on Win11, creates `.venv`, installs `ipykernel`, and registers the Jupyter kernel |
 | **1** | Install Dependencies | Installs the current validated Agent Framework, Foundry, Azure identity, and Azure Monitor/OpenTelemetry package matrix used by the notebook |
 | **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `MCPTool`, `PromptAgentDefinition`, and Agent Framework observability helpers |
 | **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures the Foundry project client plus Responses API settings |
