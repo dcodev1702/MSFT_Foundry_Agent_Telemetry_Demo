@@ -8,7 +8,7 @@ new-model backend agents with unique identities and fixed version pins, not
 Teams/M365 publishing. The original agents and **`project`** mode are retained
 for rollback.
 
-| Role | Original agent | New backend agent | Active version |
+| Role | Original agent | New backend agent | Initial migration version |
 |---|---|---|---|
 | Story / Learn | `ZoDEfendersAgent-1702` | `ZoDEfendersAgent-1702-backend` | `1` |
 | Sentinel | `ZoDEfendersAgent-1702-sentinel` | `ZoDEfendersAgent-1702-sentinel-backend` | `1` |
@@ -24,7 +24,8 @@ assignments or OAuth consent were needed for the tested caller/tool path.
 - **Section 4:** in backend mode, `resolve_agent` wraps reads of the agent and
   selected version. It verifies unique identity, enabled state, Responses/Entra
   configuration, 100% fixed-version routing and equality with the notebook
-  definition. It never creates a version or changes routing. The shared model
+  definition under strict `pinned` policy. The demo's newer `sync` policy is
+  described below and can activate changed definitions. The shared model
   metadata, request IDs and configuration fingerprint remain present.
 - **Identity metadata:** setup spans also record
   `app.agent.identity.principal_id`, `app.agent.identity.client_id` and
@@ -49,7 +50,49 @@ They remain valid audit evidence, but are not fixed expected counts or exact
 span names for backend mode. See [observability.md](observability.md#backend-endpoint-migration)
 and [runtime configuration / rollback](README.md#backend-agent-endpoints).
 
-### Backend validation snapshot
+### Version synchronization: current demo policy
+
+The initial read-only pin policy was too restrictive for notebook edits.
+The demo now explicitly selects `backend_version_policy=sync`:
+
+1. Read the actual fixed active version; do not assume the local checkpoint is current.
+2. Reuse its definition if it matches the notebook; otherwise reuse a matching
+   latest candidate or call `create_version`.
+3. Verify the returned definition, check for intervening endpoint/identity changes,
+   and update only the fixed-version selector.
+4. Read back the endpoint and identity, then persist the selected version locally
+   and update the notebook runtime object.
+
+Sync does not delete old versions, switch identities, use `@latest`, remove
+authorization or silently fall back to the project endpoint. It updates the
+version served to **all consumers** of the stable endpoint; it verifies definition
+and routing consistency, not a complete evaluation suite before activation.
+Use `pinned` policy when release approval must remain separate.
+
+Setup spans use `sync_agent` and retain the existing diagnostic fields. New fields
+are `app.agent.version_policy`, `app.agent.version_action`,
+`app.agent.previous_version` and the verified `app.agent.active_version`.
+Activation and local checkpoint completion have separate events. POST/PATCH
+dependency spans occur when needed; unchanged reruns perform reads only.
+
+**Validated run:** `447909c6-f671-4146-bade-cf841fd3644a` completed all 10 runtime
+cells and live assertions (exit 0). Both actual edited definitions were activated
+as version **2** from version **1**, and local/runtime selections matched the
+endpoint. Identity and endpoint continuity, retained version 1, real Learn and
+SigninLogs calls, response metadata and persistence all passed.
+The gate snapshot was **64 spans, 6 Responses dependencies, 1 persistence span,
+0 failures**. Two extra unchanged sync rounds per agent were run with create and
+update calls blocked: version 2 was reused and the local file was unchanged.
+All **80 regression tests** pass.
+
+If cloud activation succeeds but local saving fails, the error explicitly names
+the active version. Rerunning sync reconciles the checkpoint. Concurrent edits
+are checked before endpoint activation and before atomic local-file replacement;
+there is no cross-service/file transaction or guarantee against races after those
+checks. Avoid competing releases. All earlier inventories below are historical
+snapshots of their stated version policies.
+
+### Backend validation snapshot (initial pinned policy)
 
 Run `b4591fc5-2289-4527-8e81-a9e97e153f34` used the saved local backend
 configuration, with no injected candidate settings. All **10 runtime cells** and

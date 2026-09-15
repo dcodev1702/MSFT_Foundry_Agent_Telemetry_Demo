@@ -119,14 +119,16 @@ Generated stories and Marp decks are local demo artifacts, not evidence that the
 The current Windows runtime can select the new backend endpoint mode through
 its local build metadata. New agents `ZoDEfendersAgent-1702-backend` and
 `ZoDEfendersAgent-1702-sentinel-backend` were created alongside the legacy agents,
-each with a distinct instance identity/blueprint and version **1** pinned at 100%.
+each with a distinct instance identity/blueprint and version **1** initially pinned at 100%.
 Only Responses and Entra authorization are enabled; there is no Teams publishing.
 
 In backend mode:
 
-- Section 4 emits **`resolve_agent`** setup spans around read-only agent/version
-  checks instead of creating versions on every rerun. SDK `AgentsOperations.get`,
-  `AgentsOperations.get_version` and GET dependency spans replace creation POSTs.
+- With **`pinned`** policy, Section 4 emits **`resolve_agent`** around read-only
+  checks. With the demo's **`sync`** policy, it emits **`sync_agent`**, reuses a
+  matching active/latest version or calls `create_version`, verifies activation
+  on a concrete version and saves the new local checkpoint. Unchanged reruns
+  make no create/update calls.
 - The setup spans retain the model/request-ID/fingerprint attributes described
   below and add `app.agent.identity.principal_id`, `app.agent.identity.client_id`
   and `app.agent.active_version`.
@@ -140,10 +142,14 @@ In backend mode:
   `invoke_agent` span. Service-side agent/model/tool spans and notebook roots
   remain correlated. Do not assert a fixed span count or require the old URL.
 
-The stable endpoint's selected version, unique identity and enabled state are
-verified before invocation. The notebook fails on pin/definition drift rather
-than publishing changed instructions, routing to `@latest`, or silently falling
-back. The model-definition fingerprint remains separate from endpoint routing.
+The endpoint's selected version, unique identity and enabled state are verified
+before invocation. Strict `pinned` policy rejects drift; explicit `sync` policy
+reconciles changed definitions and stale local version checkpoints. It preserves
+protocols, authorization, identities and older versions, and does not enable
+`@latest` or silently fall back. Sync changes are visible to all endpoint
+consumers immediately after activation; it is a development convenience, not a
+pre-activation evaluation/approval pipeline.
+The model-definition fingerprint remains separate from endpoint routing.
 Use [the README rollback setting](README.md#backend-agent-endpoints) to explicitly
 return to the retained project endpoint path.
 
@@ -159,7 +165,8 @@ The agent principal/client IDs and active version on both setup spans were
 compared directly with live agent metadata. Exported main/Sentinel Marp decks
 passed browser checks for runtime labels and footer fit on all seven slides.
 
-The four additional spans relative to the comparable 50-span project-mode run
+In that original pinned-mode validation, the four additional spans relative to
+the comparable 50-span project-mode run
 come from reading both agent details and the pinned version during setup, rather
 than one creation request per agent. This comparison applies to these measured
 runs; additional tool calls or asynchronous ingestion can change the totals.
@@ -167,10 +174,44 @@ Both candidates stayed pinned to version 1. A separate two-turn endpoint test
 confirmed conversation continuity, and anonymous calls to both were rejected
 with HTTP 401. No claim is made that old project conversation IDs are portable.
 
+### Version Synchronization Follow-up
+
+The demo now opts in to `backend_version_policy=sync`; strict `pinned` behavior
+remains available and remains the default for build files without a policy.
+Section 4 handles definition changes rather than treating the original version
+checkpoint as permanent. It reuses the active or matching latest version,
+otherwise calls `create_version`, then verifies the definition and activates a
+concrete version. It writes only the corresponding local version checkpoint,
+preserving other configuration and older remote versions.
+
+The `sync_agent` span carries `app.agent.version_policy`,
+`app.agent.version_action` (`reuse_active`, `reuse_latest`, or `create_version`),
+`app.agent.previous_version` and the verified `app.agent.active_version`.
+The create action records the API used; the service can itself deduplicate an
+identical definition. `agent_version.endpoint_updated` and
+`agent_version.selection_saved` events distinguish activation from checkpointing.
+
+Run `447909c6-f671-4146-bade-cf841fd3644a` successfully synchronized both edited
+definitions from version **1 to 2**, saved those selections, and completed all
+10 runtime cells and live data/model/telemetry assertions with exit code 0.
+The gate observed 64 spans, six Responses dependencies, one persistence span and
+zero failures; counts are ingestion snapshots, not fixed requirements.
+Both identities and stable endpoints remained the same, with version 1 retained.
+Two further unchanged sync rounds per agent were tested with create/update calls
+blocked: they reused version 2 without rewriting the build file.
+
+All 80 regression tests pass, including creation/activation failures, wrong
+returned definitions, unverified activation, concurrent endpoint/local edits,
+atomic-save failure and reconciliation after a partial save failure.
+Service activation and local persistence are not one transaction: a later file
+error reports the already-active version, and a subsequent sync repairs the
+checkpoint without creating another version. Synchronization is per agent;
+successful earlier work is retained if a later agent fails.
+
 ### Creation Diagnostics and Persistence Correlation
 
 The main/Sentinel **client setup spans** (`create_agent` in project mode,
-`resolve_agent` in backend mode) include:
+`sync_agent` in backend sync mode, or `resolve_agent` in strict pinned mode) include:
 
 - `app.model.publisher`, `app.model.name`, `app.model.version` and
   `app.model.deployment`, using the resolved deployment metadata.

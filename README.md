@@ -85,7 +85,7 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 | **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry, Foundry client-side tracing, HTTP dependency telemetry, and trace propagation controls |
 | **3.2** | Configure MSFT Learn MCP Tool | Attaches the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) directly to the Foundry project agent |
 | **3.3** | Configure Microsoft Sentinel MCP Tool | Preserves the existing Foundry project-connection dependency for the Sentinel MCP tool |
-| **4** | Prepare the Agents | In backend mode, verifies existing identities, pinned versions and unchanged definitions; in project mode, creates agent versions as before |
+| **4** | Prepare the Agents | In backend sync mode, creates/reuses and activates the matching definition version; strict pinned mode validates only; project mode creates agent versions as before |
 | **5** | Query the Agent | Runs storytelling and Microsoft Learn grounded queries through the Responses API; saves results to `stories.json` and generates a Marp deck |
 | **5.1** | Query Microsoft Sentinel | Keeps the Sentinel MCP dependency path and runs the Sentinel-specific interaction separately |
 | **6** | Validate Telemetry | Resolves the linked workspace, flushes traces, waits for ingestion, and checks current-run interactions, dependencies, failures, service identity and version |
@@ -128,30 +128,64 @@ The local build metadata selects the mode and fixed versions:
 ```json
 {
   "agent_invocation_mode": "agent_endpoint",
+  "backend_version_policy": "sync",
   "backend_agents": {
-    "main": {"name": "ZoDEfendersAgent-1702-backend", "version": "1"},
-    "sentinel": {"name": "ZoDEfendersAgent-1702-sentinel-backend", "version": "1"}
+    "main": {"name": "ZoDEfendersAgent-1702-backend", "version": "2"},
+    "sentinel": {"name": "ZoDEfendersAgent-1702-sentinel-backend", "version": "2"}
   }
 }
 ```
 
 These fields supplement the existing build file; do not replace its other values.
-The metadata file remains Git-ignored. Section 4 only reads and validates backend
-agents: it requires a unique identity, an enabled Responses endpoint with Entra
-authorization, a 100% fixed-version pin, and a definition matching the notebook.
-It **never creates/promotes versions in backend mode**. A changed notebook
-definition or endpoint pin raises an actionable error rather than switching
-versions or falling back to the project endpoint.
+The metadata file remains Git-ignored. Backend endpoints require a unique
+identity, an enabled Responses endpoint with Entra authorization and a single
+100% fixed-version selector. Version handling is explicit:
 
-For a new release, create a candidate version separately, test it, explicitly
-update the endpoint's fixed-version selector, and update the local version value.
-Do not use `@latest` for backend consumers. For rollback, set
+- **`sync` (selected for this demo):** Section 4 compares the notebook definition
+  with the actual active version. It reuses the active version when unchanged,
+  reuses a matching latest candidate if available, or calls `create_version`.
+  It verifies the returned definition, pins the endpoint to that concrete version,
+  reads the endpoint back, and saves the selected version to the local build file
+  and in-memory runtime. The example version values above are checkpoints, not
+  permanent restrictions. Rerunning unchanged definitions does not create or
+  reactivate versions.
+- **`pinned` (default when no policy is specified):** read-only validation retains
+  the stricter release workflow. A definition or pin mismatch raises rather than
+  creating/promoting. Use this for consumers that require separate release approval.
+
+Set `FOUNDRY_AGENT_VERSION_POLICY` to override the local policy explicitly.
+**Sync activation changes behavior for every consumer of that agent endpoint.**
+It does not enable `@latest`, delete older versions, change identities/endpoints,
+or remove authorization. Do not run competing releases concurrently: the helper
+checks for endpoint changes before activation but cannot make service updates
+and local file persistence one atomic transaction.
+Sync verifies the definition and endpoint state, not a full evaluation suite
+before activation. Use `pinned` when a release must pass separate approval.
+
+For strict releases, create and test a candidate separately, then update both
+the endpoint selector and the local selected version. For rollback to the legacy path, set
 `FOUNDRY_AGENT_INVOCATION_MODE=project` before restarting the kernel and rerunning
 from Section 3, or set `agent_invocation_mode` to `project` in the local build
 file. The legacy agent names and invocation path are retained. Start new
 conversations after switching modes; conversation portability is not assumed.
 An agent-version pin does not freeze changes made directly to the underlying
 model deployment or external MCP service; those remain separate change controls.
+
+If activation succeeds but saving local metadata fails, the error reports the
+active version and does not pretend the run succeeded. Resolve the file error and
+rerun sync: it reconciles the checkpoint without creating another version.
+Concurrent local file changes are detected before replacement; unrelated build
+metadata is preserved. Start new conversations when you activate changed behavior.
+Synchronization is per agent: if a later agent fails, an earlier successful
+activation remains recorded and can be reused on the next run.
+
+**Version-sync fix validation:** run `447909c6-f671-4146-bade-cf841fd3644a`
+successfully created and activated version 2 of both backend agents from the
+edited notebook definitions, persisted both selections and completed all 10
+runtime cells with no failures. Two additional unchanged sync rounds per agent
+were tested with create/update operations blocked: version 2 was reused and the
+build file was not rewritten. Version 1 and the original identities were retained.
+All 80 regression tests passed.
 
 The project metadata is regenerated by environment deployment scripts; preserve
 or reapply these local migration settings when regenerating it. Other notebooks
@@ -230,7 +264,7 @@ Section **3.1** configures the notebook's observability path end to end:
 - **One content policy** controls SDK and custom spans: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `true` for this demo, accepts only `true`/`false` (case-insensitive), and is passed as an explicit boolean to Projects. Set it explicitly to `false` to opt out. The obsolete Azure content flag is ignored. Changing policy requires a kernel restart.
 - **Trace-only export is enforced** with `OTEL_LOGS_EXPORTER=none`, `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False`, and `enable_performance_counters=False`. Sampling is explicitly fixed at 100%, overriding inherited sampling settings for this demo. `OTEL_TRACES_EXPORTER=none` is rejected.
 - **Native resources preserve service/session/project identity**, add `deployment.environment.name`, and retain additional `OTEL_RESOURCE_ATTRIBUTES`. Supply `cloud.region` only from verified deployment metadata; the notebook does not guess it.
-- **Agent setup spans carry diagnostic metadata**: resolved model publisher/name/version/deployment, a deterministic SHA-256 configuration fingerprint, and allowlisted service/API Management request IDs when supplied by the response. Backend mode emits `resolve_agent` spans and records the verified identity and active version; project mode retains `create_agent` spans. Neither simulates Foundry service spans.
+- **Agent setup spans carry diagnostic metadata**: resolved model publisher/name/version/deployment, a deterministic SHA-256 configuration fingerprint, and allowlisted service/API Management request IDs when supplied by the response. Backend mode emits `sync_agent` or `resolve_agent` according to its version policy and records the verified identity and active version; project mode retains `create_agent`. None simulates Foundry service spans.
 - **Persistence is run-correlated**: `persist_story` explicitly records the run, session and agent identity with `app.interaction=persistence`. Section 6 requires exactly one persistence span in addition to the story/facts/Sentinel response coverage.
 
 Content capture is enabled by default for this controlled demo: prompts, responses and tool payloads may be exported to Application Insights, including sensitive Sentinel data. Set the environment variable to `false` before initialization when this is not appropriate. Restarting a previously initialized kernel is necessary to pick up the new default; an inherited explicit `false` still takes precedence. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
@@ -258,7 +292,7 @@ SigninLogs
           Location, LocationDetails, AppDisplayName, ResourceDisplayName
 ```
 
-The selected SDL workspace must expose `SigninLogs` to the connected identity. If the table or required columns are unavailable, the error is surfaced rather than switching tables or treating it as an empty result. In **project mode**, rerun Section 4 to apply changed system instructions. In **backend mode**, release and pin a tested candidate separately, update the local version, then rerun Section 4 to verify it and Section 5.1 in a new conversation. The existing Sentinel user-passthrough connection is retained; see [validation evidence](observability.md#direct-sentinel-table-routing--2026-09-15).
+The selected SDL workspace must expose `SigninLogs` to the connected identity. If the table or required columns are unavailable, the error is surfaced rather than switching tables or treating it as an empty result. Rerun Section 4 to apply changed instructions in project or backend **sync** mode, then Section 5.1 in a new conversation. Backend **pinned** mode still requires a separate tested release and local version update. The existing Sentinel user-passthrough connection is retained; see [validation evidence](observability.md#direct-sentinel-table-routing--2026-09-15).
 
 ---
 
@@ -317,8 +351,9 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Telemetry cell fails after dependency changes | Restart kernel, rerun from **Section 1** through **Section 3.1** |
 | Telemetry configuration changed or partial setup failed | Restart the kernel and rerun in order; do not reset the initialization flags to bypass the guard |
 | Sentinel cell cannot resolve a project connection | Verify the Foundry project still contains the Sentinel MCP connection and rerun **Section 3.3** |
-| Sentinel `query_lake` returns KQL validation errors | Check the specialist's supplied-table and plain-KQL instructions. In project mode rerun Section 4; in backend mode explicitly test/release a candidate before changing the pin. Do not treat a tool error as a successful answer. |
-| Backend definition or pin differs | Section 4 fails rather than promoting or falling back. Align the notebook with the pinned version, or explicitly release a tested version and update both the endpoint selector and local version setting. |
+| Sentinel `query_lake` returns KQL validation errors | Check the specialist's supplied-table and plain-KQL instructions. Rerun Section 4 in project/sync mode, or explicitly release a candidate in strict pinned mode. Do not treat a tool error as a successful answer. |
+| Backend definition differs | Use the demo's `sync` policy to create/reuse and activate the matching version. Strict `pinned` policy deliberately requires a separate release. |
+| Version activated but local save failed | Fix the reported build-file problem and rerun sync. It reads the actual endpoint and repairs the checkpoint without duplicating the version. |
 | `SigninLogs` cannot be resolved | Verify the table in Data lake exploration with the same workspace and identity used by MCP. The sign-in demo explicitly targets `SigninLogs` and does not call `search_tables` or substitute another table. |
 | Section 6 reports missing telemetry | Confirm workspace query permissions, exporter connectivity and the current run ID; the cell waits up to 3 minutes between ingestion checks and fails rather than accepting historical/empty results |
 

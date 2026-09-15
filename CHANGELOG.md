@@ -7,6 +7,22 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Automatic backend version synchronization for the demo
+
+- Add explicit `sync` and `pinned` backend version policies; opt this demo into
+  sync while retaining strict pinned behavior for configurations without a policy.
+- Handle notebook definition changes by reusing a matching active/latest version
+  or calling `create_version`, verifying the definition, and activating a concrete
+  version on the same endpoint. Preserve identities, protocols, authorization and
+  older versions; never silently switch to `@latest` or project mode.
+- Save the verified selected version atomically to local build metadata and update
+  the in-memory runtime. Surface partial activation/save errors and reconcile
+  stale checkpoints on the next run without duplicating versions.
+- Validate both real edited agents advancing from version 1 to 2, all 10 runtime
+  cells and live telemetry assertions, followed by two unchanged sync rounds per
+  agent with cloud writes blocked. Add lifecycle/failure/concurrency regressions:
+  80 tests pass. No dependency installation or interactive authentication needed.
+
 ## Unreleased — Backend agent identity and endpoint migration
 
 - Create separate main/Sentinel backend agents from the existing definitions,

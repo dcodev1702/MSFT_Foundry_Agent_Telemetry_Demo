@@ -6,8 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
 from unittest.mock import Mock, patch
+from copy import deepcopy
+from tempfile import TemporaryDirectory
 
-from azure.ai.projects.models import MCPTool, PromptAgentDefinition
+from azure.ai.projects.models import AgentIdentity, MCPTool, PromptAgentDefinition
 from azure.monitor.opentelemetry._utils.configurations import _get_configurations
 from opentelemetry import context, trace
 from opentelemetry.sdk.resources import Resource
@@ -17,7 +19,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import SpanKind, Status, StatusCode
 from notebook_agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, get_pinned_agent,
-    response_options, responses_url,
+    prepare_backend_agent, response_options, responses_url, sync_agent_version,
 )
 
 
@@ -251,7 +253,7 @@ class SentinelTableRoutingTests(unittest.TestCase):
 
     def test_discovery_and_fallback_table_search_are_prohibited(self):
         self.assertIn("Do not call search_tables", self.instructions)
-        self.assertRegex(self.instructions, r"without searching for or substituting another (?:SDL )?table")
+        self.assertRegex(self.instructions, r"without searching for or substituting another (?:SDL\s*)?table")
         self.assertNotIn("requires it after schema discovery", self.cells["586f0511"])
         self.assertNotIn("column names returned by schema discovery", self.cells["586f0511"])
 
@@ -757,6 +759,211 @@ class AgentEndpointRoutingTests(unittest.TestCase):
             self.assertIn('"agent_invocation_mode": agent_runtime.mode', cells[cell_id])
         self.assertIn('Name endswith "/responses"', cells["6e3dcab6"])
         self.assertIn('tostring(Properties["gen_ai.operation.name"]) == "responses.create"', cells["6e3dcab6"])
+
+
+class AgentVersionSyncTests(unittest.TestCase):
+    def setUp(self):
+        self.definition = PromptAgentDefinition(model="alias", instructions="original", tools=[])
+        self.changed = PromptAgentDefinition(model="alias", instructions="updated", tools=[])
+        self.versions = {"1": SimpleNamespace(version="1", definition=self.definition)}
+        self.latest = "1"
+        self.configuration = {
+            "version_selector": {"version_selection_rules": [
+                {"type": "FixedRatio", "agent_version": "1", "traffic_percentage": 100}
+            ]},
+            "protocol_configuration": {"responses": {}},
+            "authorization_schemes": [{"type": "Entra"}],
+        }
+        self.identity = AgentIdentity({"principal_id": "principal", "client_id": "client"})
+        self.client = Mock()
+        self.client.agents.get.side_effect = self.get_agent
+        self.client.agents.get_version.side_effect = lambda *, agent_name, agent_version, **kw: self.versions[agent_version]
+        self.client.agents.create_version.side_effect = self.create_version
+        self.client.agents.update_details.side_effect = self.activate
+        self.target = AgentTarget("main-backend", "1")
+        self.build = {
+            "agent_invocation_mode": "agent_endpoint", "backend_version_policy": "sync",
+            "foundry_project_endpoint": "https://example.invalid/project", "untouched": {"value": 42},
+            "backend_agents": {
+                "main": {"name": "main-backend", "version": "1"},
+                "sentinel": {"name": "sentinel-backend", "version": "1"},
+            },
+        }
+        self.runtime = AgentRuntimeConfig.from_build_info(self.build, {})
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.path = Path(temporary.name) / "build_info-test.json"
+        self.path.write_text(json.dumps(self.build), encoding="utf-8")
+
+    def get_agent(self, **kwargs):
+        configuration = deepcopy(self.configuration)
+        return SimpleNamespace(
+            state="enabled", instance_identity=self.identity,
+            agent_endpoint=SimpleNamespace(as_dict=lambda: configuration),
+            versions=SimpleNamespace(latest=self.versions[self.latest]),
+        )
+
+    def create_version(self, *, agent_name, definition, **kwargs):
+        version = str(max(map(int, self.versions)) + 1)
+        self.versions[version] = SimpleNamespace(version=version, definition=definition)
+        self.latest = version
+        return self.versions[version]
+
+    def activate(self, *, agent_name, agent_endpoint, **kwargs):
+        update = agent_endpoint.as_dict()
+        self.assertEqual(set(update), {"version_selector"})
+        self.configuration.update(update)
+        return self.get_agent()
+
+    def prepare(self, definition=None):
+        return prepare_backend_agent(
+            self.client, self.runtime, "main", definition or self.changed,
+            build_info=self.build, build_info_path=self.path,
+        )
+
+    def test_sync_is_explicit_and_pinned_remains_the_compatible_default(self):
+        self.assertEqual(self.runtime.version_policy, "sync")
+        old = {key: value for key, value in self.build.items() if key != "backend_version_policy"}
+        self.assertEqual(AgentRuntimeConfig.from_build_info(old, {}).version_policy, "pinned")
+        for policy in ("", "unknown", None, {}):
+            with self.subTest(policy=policy), self.assertRaises(ValueError):
+                AgentRuntimeConfig.from_build_info({**self.build, "backend_version_policy": policy}, {})
+
+    def test_changed_definition_creates_activates_and_saves_version(self):
+        selected, updated = self.prepare()
+        self.assertEqual(selected.version, "2")
+        self.assertEqual(updated.target("main").version, "2")
+        self.assertEqual(self.configuration["version_selector"]["version_selection_rules"][0]["agent_version"], "2")
+        self.assertEqual(self.configuration["authorization_schemes"], [{"type": "Entra"}])
+        self.assertEqual(self.configuration["protocol_configuration"], {"responses": {}})
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["backend_agents"]["main"]["version"], "2")
+        self.assertEqual(saved["backend_agents"]["sentinel"]["version"], "1")
+        self.assertEqual(saved["untouched"], {"value": 42})
+        self.assertEqual(self.build["backend_agents"]["main"]["version"], "2")
+        self.assertIn("1", self.versions)
+
+    def test_unchanged_rerun_does_not_create_or_activate_again(self):
+        _, self.runtime = self.prepare()
+        self.client.reset_mock()
+        before = self.path.read_bytes()
+        selected, _ = self.prepare()
+        self.assertEqual(selected.version, "2")
+        self.client.agents.create_version.assert_not_called()
+        self.client.agents.update_details.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_matching_latest_candidate_is_reused(self):
+        self.versions["2"] = SimpleNamespace(version="2", definition=self.changed)
+        self.latest = "2"
+        selected, _ = self.prepare()
+        self.assertEqual(selected.version, "2")
+        self.client.agents.create_version.assert_not_called()
+        self.client.agents.update_details.assert_called_once()
+
+    def test_stale_local_version_is_reconciled_to_matching_active_version(self):
+        self.versions["2"] = SimpleNamespace(version="2", definition=self.changed)
+        self.latest = "2"
+        self.configuration["version_selector"]["version_selection_rules"][0]["agent_version"] = "2"
+        selected, updated = self.prepare()
+        self.assertEqual(selected.version, updated.target("main").version)
+        self.assertEqual(updated.target("main").version, "2")
+        self.client.agents.create_version.assert_not_called()
+        self.client.agents.update_details.assert_not_called()
+
+    def test_create_failure_does_not_change_routing_or_local_selection(self):
+        self.client.agents.create_version.side_effect = RuntimeError("create denied")
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "create denied"):
+            self.prepare()
+        self.client.agents.update_details.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_activation_failure_is_not_reported_as_success(self):
+        self.client.agents.update_details.side_effect = RuntimeError("activation denied")
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "activation denied"):
+            self.prepare()
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.configuration["version_selector"]["version_selection_rules"][0]["agent_version"], "1")
+
+    def test_mismatching_created_version_is_never_activated(self):
+        self.client.agents.create_version.side_effect = None
+        self.client.agents.create_version.return_value = SimpleNamespace(version="2", definition=self.definition)
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            self.prepare()
+        self.client.agents.update_details.assert_not_called()
+
+    def test_unverified_activation_does_not_update_local_file(self):
+        self.client.agents.update_details.side_effect = None
+        before = self.path.read_bytes()
+        with self.assertRaisesRegex(RuntimeError, "Could not verify"):
+            self.prepare()
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_concurrent_routing_change_is_not_overwritten(self):
+        original_create = self.create_version
+
+        def concurrent_create(**kwargs):
+            result = original_create(**kwargs)
+            self.configuration["authorization_schemes"].append({"type": "BotServiceRbac"})
+            return result
+
+        self.client.agents.create_version.side_effect = concurrent_create
+        with self.assertRaisesRegex(RuntimeError, "changed during synchronization"):
+            self.prepare()
+        self.client.agents.update_details.assert_not_called()
+
+    def test_split_or_latest_routing_requires_a_deliberate_policy_change(self):
+        self.configuration["version_selector"]["version_selection_rules"][0]["agent_version"] = "@latest"
+        with self.assertRaisesRegex(RuntimeError, "single fixed version"):
+            self.prepare()
+        self.client.agents.create_version.assert_not_called()
+        self.client.agents.update_details.assert_not_called()
+
+    def test_local_save_failure_is_explicit_and_next_run_repairs_selection(self):
+        original = self.path.read_bytes()
+        with patch("notebook_agent_endpoints.os.replace", side_effect=OSError("read only")):
+            with self.assertRaisesRegex(RuntimeError, "active on version 2.*could not be saved"):
+                self.prepare()
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertFalse(list(self.path.parent.glob("*.tmp")))
+        self.client.reset_mock()
+        selected, _ = self.prepare()
+        self.assertEqual(selected.version, "2")
+        self.assertEqual(json.loads(self.path.read_text())["backend_agents"]["main"]["version"], "2")
+        self.client.agents.create_version.assert_not_called()
+        self.client.agents.update_details.assert_not_called()
+
+    def test_invalid_build_file_stops_before_any_cloud_changes(self):
+        self.path.write_text("[]", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "JSON object"):
+            self.prepare()
+        self.client.agents.get.assert_not_called()
+        self.client.agents.create_version.assert_not_called()
+
+    def test_concurrent_local_edits_are_not_overwritten_after_activation(self):
+        def activate_and_edit(**kwargs):
+            result = self.activate(**kwargs)
+            edited = json.loads(self.path.read_text())
+            edited["user_note"] = "preserve this edit"
+            self.path.write_text(json.dumps(edited), encoding="utf-8")
+            return result
+
+        self.client.agents.update_details.side_effect = activate_and_edit
+        with self.assertRaisesRegex(RuntimeError, "active on version 2.*could not be saved"):
+            self.prepare()
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved["user_note"], "preserve this edit")
+        self.assertEqual(saved["backend_agents"]["main"]["version"], "1")
+        self.assertFalse(list(self.path.parent.glob("*.tmp")))
+
+    def test_notebook_wires_both_roles_and_keeps_updated_runtime(self):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        source = "".join(next(cell["source"] for cell in notebook["cells"] if cell["id"] == "586f0511"))
+        self.assertIn("main_agent, agent_runtime = prepare_backend_agent(", source)
+        self.assertIn("sentinel_project_agent, agent_runtime = prepare_backend_agent(", source)
+        self.assertEqual(source.count("build_info=build_info, build_info_path=build_info_path"), 2)
 
 
 class TelemetryPolicyTests(unittest.TestCase):
