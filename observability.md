@@ -110,9 +110,34 @@ Section 6 is a validation gate, not just a query display:
 5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each interaction, GenAI chat spans, zero failed spans, and service version `2026.09.14`. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`; HTTP dependency names include the full project path, so the gate matches their `/openai/v1/responses` suffix.
 6. Reject API errors and partial results. Display the end-to-end rows and a runs-only trend; include `sentinel-agent-query` in both scenarios.
 
-The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist requires schema discovery and plain KQL, addressing the live `query_lake` backtick/syntax failure encountered during validation.
+The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist uses the supplied `SigninLogs` schema and plain KQL; it no longer requires table discovery.
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
+
+### Direct Sentinel Table Routing — 2026-09-15
+
+To avoid the reported approximately six-second `execute_tool mcp_microsoft-sentinel-data.search_tables` step, system and user prompts share a known-table policy:
+
+- Resolve the workspace with `list_sentinel_workspaces`, then call `query_lake` directly.
+- Query only `SigninLogs`, filtering `IsInteractive == true` and the signed-in `UserPrincipalName` case-insensitively; select `top 1 by TimeGenerated desc`.
+- Use the supplied exact KQL template and column types, including the boolean `IsInteractive` and dynamic `LocationDetails`. This table selection was explicitly requested, not a fallback.
+- Map `LocationDetails.city`, `.state` and `.countryOrRegion` to display fields, with `Location` as the country-code fallback. Map `AppDisplayName` (or `ResourceDisplayName` when empty) to the application. Do not invent top-level city/state/country columns.
+- Do not call `search_tables`, rediscover the schema or silently substitute another table.
+
+All **34 local regression tests** pass, including the explicit table, boolean filter, schema/output mappings, shared prompts, canonical query and unchanged MCP connection.
+
+The fresh targeted notebook run `981ede37-56db-437a-bb29-6b1062000647` succeeded on **2026-09-15 UTC** through the existing Foundry project connection with interactive authentication blocked by test-only guards. The actual MCP request used `SigninLogs`, the interactive/identity filters and the expected workspace. Its dataset completed without errors and returned **one interactive sign-in record**. The returned identity, valid IP/timestamp and location agreed with the final answer; the completed result and Marp output were persisted. Raw sign-in values are not included here.
+
+Current-run Application Insights telemetry confirmed these successful tool spans under the same Sentinel operation:
+
+| Tool | Duration | Success |
+|---|---|---|
+| `query_lake` | 4,028.57 ms | true |
+| `list_sentinel_workspaces` | 2,933.00 ms | true |
+
+There was **no `search_tables` call or span**. These are measured tool durations from one run, not a guarantee of end-to-end latency or six-second savings. This was a targeted Sentinel run, not a rerun of the independent story/Learn interactions. Notebook outputs remain cleared.
+
+The earlier `EntraIdSignInEvents` attempt failed table resolution in SDL despite its visibility in Advanced Hunting. That blocked configuration is superseded by the explicitly selected and successfully validated `SigninLogs` path; no Graph API or custom MCP collection is used.
 
 ### Trace-Only Policy Follow-up — 2026-09-14
 

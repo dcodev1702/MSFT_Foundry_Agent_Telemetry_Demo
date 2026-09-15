@@ -126,7 +126,22 @@ See [observability.md](observability.md) for the full environment variable refer
 
 Section 3.2 creates an `azure.ai.projects.models.MCPTool` with server label `msft-learn` and the Microsoft Learn endpoint. The query cells explicitly handle MCP approval requests, with a bounded approval loop. Running these cells authorizes those tool calls; review the prompts and connected tools first.
 
-The notebook keeps the Microsoft Sentinel MCP dependency on the Foundry project-connection path by design. That Sentinel-specific setup remains separate from the public MCP tool used for Microsoft Learn. Sentinel discovers the workspace/schema before querying, and its instructions require plain KQL without Markdown fences or backtick-quoted identifiers.
+The notebook keeps the Microsoft Sentinel MCP dependency on the Foundry project-connection path by design. That Sentinel-specific setup remains separate from the public MCP tool used for Microsoft Learn. Sentinel resolves the workspace, then queries **`SigninLogs`** directly with **`IsInteractive == true`** and the signed-in `UserPrincipalName`, selecting the latest event by `TimeGenerated`. The shared system/user instructions supply the schema and an exact KQL template, and prohibit `search_tables` or fallback table discovery. Plain KQL and raw output columns avoid formatting and alias errors.
+
+The [SigninLogs schema](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/signinlogs) uses a boolean `IsInteractive`, `UserPrincipalName` for identity, `AppDisplayName` for the application, and the dynamic `LocationDetails` object for city/state/country. `Location` supplies a country-code fallback. This is an explicit SDL table selection, not an Advanced Hunting query; no Microsoft Graph permission or custom MCP collection is required. The query returns the latest interactive event, not only successful sign-ins.
+
+To reproduce the lookup in SDL, use the same workspace and identity as the MCP connection, replacing the example UPN:
+
+```kusto
+SigninLogs
+| where IsInteractive == true
+| where UserPrincipalName =~ 'user@your-domain.example'
+| top 1 by TimeGenerated desc
+| project TimeGenerated, UserPrincipalName, IsInteractive, IPAddress,
+          Location, LocationDetails, AppDisplayName, ResourceDisplayName
+```
+
+The selected SDL workspace must expose `SigninLogs` to the connected identity. If the table or required columns are unavailable, the error is surfaced rather than switching tables or treating it as an empty result. Rerun **Section 4** to apply changed system instructions to the Foundry agent version, then **Section 5.1** in a new conversation. The targeted live validation reused the existing authentication and project connection with interactive authentication blocked; see [validation evidence](observability.md#direct-sentinel-table-routing--2026-09-15).
 
 ---
 
@@ -185,7 +200,8 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Telemetry cell fails after dependency changes | Restart kernel, rerun from **Section 1** through **Section 3.1** |
 | Telemetry configuration changed or partial setup failed | Restart the kernel and rerun in order; do not reset the initialization flags to bypass the guard |
 | Sentinel cell cannot resolve a project connection | Verify the Foundry project still contains the Sentinel MCP connection and rerun **Section 3.3** |
-| Sentinel `query_lake` returns KQL validation errors | Rerun Section 4 to update the specialist's schema-discovery and plain-KQL instructions, then Section 5.1; do not treat a tool error as a successful answer |
+| Sentinel `query_lake` returns KQL validation errors | Rerun Section 4 to update the specialist's supplied-table and plain-KQL instructions, then Section 5.1; do not treat a tool error as a successful answer |
+| `SigninLogs` cannot be resolved | Verify the table in Data lake exploration with the same workspace and identity used by MCP. The sign-in demo explicitly targets `SigninLogs` and does not call `search_tables` or substitute another table. |
 | Section 6 reports missing telemetry | Confirm workspace query permissions, exporter connectivity and the current run ID; the cell waits up to 3 minutes between ingestion checks and fails rather than accepting historical/empty results |
 
 ---

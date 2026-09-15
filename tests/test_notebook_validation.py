@@ -198,6 +198,88 @@ class SentinelCorrelationTests(unittest.TestCase):
             provider.shutdown()
 
 
+class SentinelTableRoutingTests(unittest.TestCase):
+    def setUp(self):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        self.cells = {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
+        self.agent_tree = ast.parse(self.cells["586f0511"])
+        assignment = next(
+            node for node in self.agent_tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "sentinel_signin_instructions"
+                    for target in node.targets)
+        )
+        self.instructions = ast.literal_eval(assignment.value)
+
+    def test_known_table_interactive_filter_and_latest_event_are_explicit(self):
+        self.assertIn("query_lake directly on SigninLogs only", self.instructions)
+        self.assertIn("IsInteractive == true", self.instructions)
+        self.assertIn("UserPrincipalName case-insensitively", self.instructions)
+        self.assertIn("top 1 by TimeGenerated desc", self.instructions)
+
+    def test_interactive_filter_uses_the_signinlogs_boolean(self):
+        self.assertIn("IsInteractive (bool)", self.instructions)
+        self.assertIn("IsInteractive == true", self.instructions)
+        self.assertNotIn("IsInteractive == 'true'", self.instructions)
+        self.assertNotIn("LogonType", self.instructions)
+        self.assertNotIn("ResultType ==", self.instructions)
+
+    def test_canonical_query_uses_only_signinlogs_columns(self):
+        self.assertIn(
+            "SigninLogs | where IsInteractive == true "
+            "| where UserPrincipalName =~ '<signed-in UPN>' | top 1 by TimeGenerated desc "
+            "| project TimeGenerated, UserPrincipalName, IsInteractive, IPAddress, "
+            "Location, LocationDetails, AppDisplayName, ResourceDisplayName",
+            self.instructions,
+        )
+
+    def test_ah_route_is_removed_without_changing_the_mcp_connection(self):
+        self.assertNotIn("EntraIdSignInEvents", self.instructions)
+        self.assertNotIn("runHuntingQuery", self.instructions)
+        self.assertIn(
+            'sentinel_mcp_url = "https://sentinel.microsoft.com/mcp/data-exploration"',
+            self.cells["377478c3"],
+        )
+        self.assertIn("project_connection_id=sentinel_project_connection_id", self.cells["377478c3"])
+
+    def test_discovery_and_fallback_table_search_are_prohibited(self):
+        self.assertIn("Do not call search_tables", self.instructions)
+        self.assertIn("without searching for or substituting another table", self.instructions)
+        self.assertNotIn("requires it after schema discovery", self.cells["586f0511"])
+        self.assertNotIn("column names returned by schema discovery", self.cells["586f0511"])
+
+    def test_schema_and_output_mappings_use_signinlogs_columns(self):
+        for name in ("TimeGenerated", "UserPrincipalName", "IsInteractive", "IPAddress",
+                     "Location", "LocationDetails", "AppDisplayName", "ResourceDisplayName"):
+            with self.subTest(column=name):
+                self.assertIn(name, self.instructions)
+        for name in ("Timestamp", "AccountUpn", "LogonType"):
+            self.assertNotIn(name, self.instructions)
+        self.assertIn("LocationDetails.city", self.instructions)
+        self.assertIn("LocationDetails.state", self.instructions)
+        self.assertIn("LocationDetails.countryOrRegion", self.instructions)
+        self.assertIn("do not invent top-level City, State or Country columns", self.instructions)
+        self.assertIn("TimeGenerated to Date, UserPrincipalName to UPN", self.instructions)
+
+    def test_system_and_user_prompts_share_the_same_routing_instructions(self):
+        for cell_id, target_name in (
+            ("586f0511", "sentinel_agent_instructions"),
+            ("ef551c01", "sentinel_prompt"),
+        ):
+            with self.subTest(prompt=target_name):
+                tree = ast.parse(self.cells[cell_id])
+                assignment = next(
+                    node for node in tree.body
+                    if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == target_name
+                            for target in node.targets)
+                )
+                self.assertTrue(any(
+                    isinstance(node, ast.Name) and node.id == "sentinel_signin_instructions"
+                    for node in ast.walk(assignment.value)
+                ))
+
+
 class TelemetryPolicyTests(unittest.TestCase):
     def setUp(self):
         self.environment = patch.dict(os.environ, {

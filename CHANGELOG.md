@@ -7,6 +7,43 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Explicit SigninLogs SDL routing
+
+- Switch the shared Sentinel system/user policy and exact query template to
+  `SigninLogs`, as explicitly requested. Filter `IsInteractive == true` and
+  `UserPrincipalName` case-insensitively, then select the latest `TimeGenerated`.
+- Supply the correct SDL schema and output mappings, including `LocationDetails`
+  and `AppDisplayName`. Keep table discovery prohibited and preserve the existing
+  MCP connection, authentication, approvals and telemetry.
+- Update notebook notes, README troubleshooting and a reproducible SDL query;
+  record the successful targeted run and measured tool timings in observability
+  guidance, distinguishing the earlier failed table-selection attempt.
+- Update the seven routing regressions; all 34 notebook regression tests pass.
+- Validate a fresh targeted Sentinel run with interactive authentication blocked:
+  one matching interactive record, final answer and persisted Marp output verified.
+  Current-run telemetry reports successful `query_lake` (4,028.57 ms) and workspace
+  listing (2,933.00 ms), with no `search_tables` call/span. No end-to-end latency
+  guarantee is claimed. Notebook outputs remain cleared.
+
+## Earlier work — Direct EntraIdSignInEvents SDL attempt
+
+- Pin Sentinel system and user instructions to `EntraIdSignInEvents` with
+  `LogonType has 'interactiveUser'`, signed-in `AccountUpn` filtering and latest
+  `Timestamp` ordering. Supply the column schema and output mappings directly.
+- Correct the initial equality filter for array-formatted `LogonType` strings.
+  Supply an exact KQL template and prohibit substring, case-sensitive and OR
+  alternatives after a live attempt showed the agent rewriting the predicate.
+- Prohibit `search_tables` and fallback table discovery while preserving workspace
+  resolution, OAuth, approvals and telemetry.
+- Add seven routing regressions (34 tests pass). On 2026-09-15, eight synthetic
+  cases passed in live KQL; the old equality filter failed three cases.
+- Verify the actual MCP request used the corrected predicate and skipped table
+  search. That live attempt exited 1 because SDL could not resolve
+  `EntraIdSignInEvents` in the selected workspace. Advanced Hunting visibility
+  was not proof of SDL workspace availability. This attempt was superseded by
+  the explicitly requested SigninLogs path above; no runtime success or
+  six-second savings was claimed for the earlier attempt.
+
 ## Unreleased — Demo content recording enabled by default
 
 - Default `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true` for the
