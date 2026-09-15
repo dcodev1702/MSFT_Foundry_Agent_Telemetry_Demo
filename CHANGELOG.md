@@ -7,6 +7,38 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Telemetry policy and dependency simplification
+
+- Enforce trace-only export using `OTEL_LOGS_EXPORTER=none`,
+  `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False` and disabled performance
+  counters. Azure Monitor 1.8.10 overwrites the old `disable_logging` /
+  `disable_metrics` arguments; the previous trace-only description was inaccurate.
+- Use one strict, normalized content-recording flag for SDK and custom spans;
+  remove the obsolete Azure flag and the unrelated Agent Framework GenAI opt-in.
+- Fix sampling at 100% despite inherited sampler settings. Reject disabled tracing
+  and changed/partially failed setup; reuse providers only for identical reruns.
+- Let Azure Monitor own HTTPX/HTTPX2 instrumentation. Correct the earlier claim
+  that HTTPX instrumentation 0.65b0 lacked HTTPX2 support.
+- Replace the Agent Framework resource helper with native OpenTelemetry resources,
+  preserving identity and additional resource attributes while adding
+  `deployment.environment.name`.
+- Split minimal runtime, optional shared packages and validation requirements;
+  add a reviewed 100-package Windows/Python 3.14 constraints snapshot. The minimal
+  runtime resolves to 82 packages, down from 92. Existing shared packages remain
+  installed; tested SDK versions, including Azure Identity, are unchanged.
+- Tighten Sentinel instructions after observed KQL errors: return datetime values
+  unchanged and use projection aliases without spaces; apply display labels in
+  the final answer instead.
+- Pass 25 regression tests in both the existing and a clean minimal environment.
+  Run all 13 notebook code cells successfully; verify 55 correlated spans, eight
+  response dependencies, 13 GenAI spans and zero failed spans. Also verify that
+  SDK log/metric providers and Live Metrics/performance-counter processors are
+  absent, SDK/custom content capture is off, and HTTPX2 is instrumented.
+- Recheck the reduced 82-package runtime against PyPI advisory metadata: no
+  reported advisories or unavailable metadata entries.
+- Update notebook notes, README and observability guidance; leave the notebook
+  outputs cleared.
+
 ## 2026-09-14 — Windows dependency and telemetry validation
 
 - Improve spacing and readability in the first three code cells of

@@ -1,6 +1,6 @@
 # Windows Notebook Observability and Validation
 
-This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-14**. Agent execution uses Azure AI Projects and the Foundry Responses API; Agent Framework supplies the shared OpenTelemetry resource helper.
+This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-14**. Agent execution uses Azure AI Projects and the Foundry Responses API, with native OpenTelemetry resource metadata. Agent Framework is not a runtime dependency of this notebook.
 
 The notebook exports client-side traces to Azure Monitor through the Foundry project's Application Insights connection. Foundry instrumentation supplies GenAI spans, while explicit notebook-side HTTP dependency spans preserve Service Map edges across transport-library changes.
 
@@ -8,7 +8,7 @@ The notebook exports client-side traces to Azure Monitor through the Foundry pro
 
 The highest-value enhancements that are now applied are:
 
-1. Add the newer GenAI semantic-convention opt-in used by the macOS notebook.
+1. Enforce trace-only export using controls honored by the installed Azure Monitor distro.
 2. Enable baggage propagation for the notebook's safe correlation keys.
 3. Add an explicit content-recording policy instead of relying on defaults.
 4. Harden initialization order for notebook reruns in a reused kernel.
@@ -22,22 +22,22 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-wi
 | --- | --- | --- |
 | OpenTelemetry as the Azure SDK tracing backend | `settings.tracing_implementation = "opentelemetry"` | Makes Azure SDK operations emit spans through OTEL instead of using no-op tracing. |
 | Azure Monitor export | `configure_azure_monitor(...)` with the project's Application Insights connection string | Sends notebook traces to Azure Monitor so they land in Application Insights and Log Analytics. |
-| Foundry client-side tracing | `AIProjectInstrumentor().instrument()` after `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING=true` | Emits client-side GenAI spans for Foundry project and Responses API activity. |
-| HTTP dependency tracing | `HTTPXClientInstrumentor().instrument()` | Covers HTTPX 0.x clients. OpenAI 3.x uses HTTPX2, which this instrumentor does not cover; Foundry instrumentation and explicit client spans cover Responses calls. |
+| Foundry client-side tracing | `AIProjectInstrumentor().instrument(...)` with explicit content, trace-context and baggage booleans | Emits client-side GenAI spans with the same content policy as custom notebook spans. |
+| HTTP dependency tracing | Azure Monitor auto-instruments HTTPX and HTTPX2 when installed | The HTTPX instrumentation 0.65b0 package contains both instrumentors. OpenAI 3.x uses HTTPX2; no second package or manual re-wrapping is needed. |
 | Explicit Responses API dependency spans | Manual `POST /openai/v1/responses` client spans later in the notebook | Ensures Azure Monitor has concrete dependency rows that correlate cleanly in Service Map and KQL. |
 | Custom notebook orchestration spans | Manual spans such as `create_agent`, `invoke_agent`, `persist_story`, and Sentinel-specific spans | Makes the notebook's orchestration layer observable rather than only the SDK internals. |
-| Resource identity | `OTEL_SERVICE_NAME`, `OTEL_SERVICE_VERSION`, `OTEL_RESOURCE_ATTRIBUTES` | Gives every span service identity, environment, instance, and Foundry project metadata. |
-| GenAI semantic conventions | `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` | Uses the latest experimental GenAI span attributes and events supported by the current OTEL guidance. |
+| Resource identity | Native `Resource.create(attributes)` with explicit service, session, environment and project values | Preserves existing identity and additional `OTEL_RESOURCE_ATTRIBUTES`; adds `deployment.environment.name` alongside the legacy environment attribute. |
+| GenAI semantic conventions | Owned by Azure AI Projects' installed preview instrumentor | The Agent Framework `gen_ai_latest_experimental` opt-in does not select the Projects SDK's schema and is no longer set here. |
 | Baggage propagation | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE=true` | Lets the notebook's run, agent, and interaction baggage keys flow with downstream trace context. |
-| Explicit content-recording policy | Both message-content flags default to `false`; custom prompt/completion/target-identity attributes use the same opt-in | Keeps payload capture off by default. The target UPN is not placed in propagated baggage. Local notebook outputs, saved stories and generated decks can still contain personal data. |
-| Safer kernel reruns | Azure Monitor is configured before Azure SDK tracing is switched back to OpenTelemetry | Reduces the chance of a reused notebook kernel inheriting a stale tracer provider. |
-| Trace-only local export posture | `disable_logging=True`, `disable_metrics=True`, `enable_performance_counters=False` | Keeps the notebook focused on traces and avoids local startup noise and platform-specific performance-counter issues. |
+| Explicit content-recording policy | One strict `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` boolean, default `false` | SDK and custom content agree. The obsolete Azure flag has no effect. UPN is not propagated in baggage; error diagnostics and local output still need sensitive-data handling. |
+| Safer kernel reruns | Identical configurations reuse the provider; changed identity/backend/content or partial failure requires a restart | Prevents duplicate exporters and misleading status after configuration changes. |
+| Trace-only local export posture | `OTEL_LOGS_EXPORTER=none`, `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False`, `enable_performance_counters=False` | Unlike the former `disable_logging`/`disable_metrics` arguments, these controls take effect in Azure Monitor 1.8.10. |
 
 ## How the Telemetry Flows
 
 The telemetry path for this repo is:
 
-1. The notebook creates spans through OpenTelemetry, Azure SDK instrumentation, HTTPX instrumentation, and explicit custom spans.
+1. The notebook creates spans through OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and explicit custom spans.
 2. `configure_azure_monitor(...)` registers Azure Monitor exporters for the signals that remain enabled.
 3. The notebook retrieves the Application Insights connection string from the Foundry project at runtime by calling `project_client.telemetry.get_application_insights_connection_string()`.
 4. Azure Monitor sends the exported trace data to Application Insights.
@@ -66,7 +66,7 @@ Agent observability is useful only if it answers more than "did the call succeed
 | --- | --- |
 | Agent execution layer | Foundry client-side spans and Foundry Traces show agent creation and Responses API activity. |
 | Notebook orchestration layer | Custom spans show where the notebook invoked, persisted, or branched into Sentinel-specific paths. |
-| Dependency layer | HTTPX plus explicit client spans create dependency rows for the actual outbound calls. |
+| Dependency layer | Automatically instrumented HTTPX2 plus explicit client spans create dependency rows for the actual outbound calls. |
 | Run correlation layer | Resource attributes and baggage context let a single notebook run be grouped and traced across surfaces. |
 
 That is the correct model for agent observability: agent actions, orchestration decisions, outbound dependencies, and correlation identifiers all need to exist in the same trace story.
@@ -77,8 +77,6 @@ The Python **3.14.7** environment was resolved on **2026-09-14** using its confi
 
 | Package | Installed | Notes |
 | --- | --- | --- |
-| `agent-framework-core` | `1.17.0` | Provides `create_resource`; not the execution engine for this notebook. |
-| `agent-framework-openai` | `1.14.2` | Shared-environment compatibility; accepts OpenAI 3.x. |
 | `azure-ai-projects` | `2.6.0` | Project agents, MCP and client-side preview instrumentation. |
 | `openai` | `3.8.0` | Responses/conversations API, using HTTPX2. |
 | `httpx2` | `2.12.0` | Fixes the published HTTPX2 2.10.0 advisories found during dependency review. |
@@ -87,11 +85,19 @@ The Python **3.14.7** environment was resolved on **2026-09-14** using its confi
 | `azure-monitor-opentelemetry-exporter` | `1.0.0b57` | Transitive Azure Monitor exporter. |
 | `azure-core-tracing-opentelemetry` | `1.0.0b13` | Azure Core tracing bridge. |
 | `opentelemetry-api` / `opentelemetry-sdk` | `1.44.0` | Aligned with Azure Monitor, not upgraded independently. |
-| `opentelemetry-instrumentation-httpx` | `0.65b0` | Matches SDK 1.44; does not instrument HTTPX2. |
-| `opentelemetry-exporter-otlp-proto-grpc` | `1.44.0` | The old optional exporter 1.43 rejected SDK 1.44; upgraded to keep `pip check` clean. |
+| `opentelemetry-instrumentation-httpx` | `0.65b0` | Matches SDK 1.44 and includes separate HTTPX/HTTPX2 instrumentors. |
 | `ipykernel` | `7.3.0` | Python 3.14 notebook kernel. |
 
 Install the matrix together, run `pip check`, then restart the kernel if SDKs were already imported. The former `azure-ai-projects<2.5` / OpenAI 2.x restriction is no longer needed. This matrix does not upgrade the bot runtime, macOS notebook or standalone Agent Framework PoC.
+
+### Runtime, Shared and Validation Profiles
+
+- [requirements-notebook.txt](requirements-notebook.txt) contains only runtime requirements (82 resolved dependencies, excluding pip).
+- [requirements-notebook-shared.txt](requirements-notebook-shared.txt) adds optional Agent Framework core 1.17.0, OpenAI provider 1.14.2 and OTLP gRPC exporter 1.44.0. These remain compatible with an existing shared environment, but this notebook neither imports Agent Framework nor configures an OTLP exporter.
+- [requirements-notebook-validation.txt](requirements-notebook-validation.txt) adds `nbclient==0.11.0` and `nbformat==5.11.0` for automated execution.
+- [constraints-notebook-win11.txt](constraints-notebook-win11.txt) captures 100 direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
+
+The constrained runtime plus validation profile installs cleanly without Agent Framework or OTLP. Existing shared packages were not uninstalled. The tested Azure Identity preview line was retained; moving to stable credentials remains a separate compatibility exercise.
 
 ## Current-Run Telemetry Gate (Section 6)
 
@@ -108,9 +114,21 @@ The Sentinel orchestration span now carries both `demo.run_id` and `app.interact
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
 
-### Validation Evidence — 2026-09-14
+### Trace-Only Policy Follow-up — 2026-09-14
+
+Run `419d2a78-eda0-4168-be3f-65e1afe5baf6` executed all **13 notebook code cells** successfully, plus private validation assertions. The current-run gate observed **55 correlated spans**, **eight response dependencies** covering story/facts/Sentinel, **13 GenAI spans**, and **zero failures**, with the expected role and version.
+
+Unlike the initial trace-only claim, this run also checked actual runtime objects: **no SDK log or metric providers**, **no Live Metrics or performance-counter span processors**, **SDK and custom content capture both off**, and **HTTPX2 auto-instrumentation enabled**.
+
+All **25 regression tests** passed in the existing environment and in a clean runtime-plus-validation environment without Agent Framework or OTLP. The clean install passed `pip check`; the optional shared profile also resolved against the same constraints. Earlier live attempts surfaced Sentinel-generated datetime-format and unquoted projection-alias errors; the specialist instructions now keep datetime values raw and aliases space-free. These remain model-generated queries, so service/tool failures still raise rather than being silently retried or presented as success.
+
+The reduced runtime closure contains **82 packages**, all checked against PyPI version advisory metadata with **zero reported advisories** and no missing metadata entries. This is not a comprehensive security audit. Notebook code in the cleared working copy was compared byte-for-byte per cell with the successful execution.
+
+### Initial Dependency-Upgrade Evidence — 2026-09-14
 
 The final fresh-kernel run executed **all 13 code cells** successfully, followed by an additional local assertion cell. It verified completed story and Microsoft Learn responses, an actual Learn MCP call and Learn URL, a completed Sentinel response without terminal tool errors, both persisted record types, and generated Marp files.
+
+This initial run verified traces only. A subsequent configuration sanity check established that the old log/metric-disable arguments were overwritten by the distro and Live Metrics was enabled by default. The implementation described above corrects that; the initial counts below are not proof that those other signals were disabled.
 
 For run `73b57ebd-8d96-4a42-a5dc-d7475b127bf7`, the ingestion gate observed:
 
@@ -144,16 +162,16 @@ These are the important environment variables used in the Windows notebook's cur
 | --- | --- | --- | --- |
 | `OTEL_SERVICE_NAME` | Yes | Sets the OTEL service identity. | Used to stamp notebook-generated spans as coming from the Foundry agent demo service. |
 | `OTEL_SERVICE_VERSION` | Yes | Sets service version metadata. | Used to distinguish notebook build/version posture in traces. |
-| `OTEL_RESOURCE_ATTRIBUTES` | Yes | Adds resource-level attributes to every span. | Used for `service.namespace`, `service.instance.id`, `deployment.environment`, and `foundry.project.name`. |
+| `OTEL_RESOURCE_ATTRIBUTES` | Optional, preserved | Adds resource-level attributes to every span. | Explicit notebook service/project/session/environment attributes take precedence. Supply `cloud.region` only from verified deployment metadata, not a guessed location. |
 | `AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING` | Yes | Explicitly opts the Azure AI Projects SDK into preview GenAI tracing. | Must be set before `AIProjectInstrumentor().instrument()` or Foundry client-side GenAI spans will not be emitted. |
 | `AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION` | Yes | Enables W3C trace-context propagation for OpenAI clients returned by `get_openai_client()`. | Helps correlate client-side notebook spans with downstream Azure-side work. |
 | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE` | Yes | Includes the `baggage` header with propagated trace context. | Used because the notebook's baggage keys are limited to safe correlation metadata such as run ID, agent ID, interaction name, and session ID. |
 | `AZURE_TRACING_GEN_AI_INSTRUMENT_RESPONSES_API` | Yes | Enables Responses API instrumentation in the Foundry tracing path. | Used so `responses.create(...)` activity is observable in preview client-side traces. |
-| `OTEL_SEMCONV_STABILITY_OPT_IN` | Yes | Selects the semantic-convention profile used for GenAI spans. | Set to `gen_ai_latest_experimental` so the notebook emits the latest experimental GenAI attributes and events. |
-| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Yes | Controls whether prompt, response, tool-argument, and tool-result contents are captured in traces. | Set to `false` by default so payload capture is opt-in instead of implicit. |
-| `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED` | Yes | Companion flag for content recording in the Azure tracing path. | Also set to `false` by default to keep debugging content capture an explicit choice. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Yes | Controls SDK and custom prompt/completion capture. | Defaults to `false`; accepts case-insensitive `true`/`false`, normalized once and passed explicitly to the instrumentor. Invalid values fail before provider setup. |
+| `OTEL_LOGS_EXPORTER` / `OTEL_METRICS_EXPORTER` | Yes | Select signals to export. | Both set to `none`; these are the effective signal-disable controls in Azure Monitor 1.8.10. |
+| `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | Yes | Select the trace sampler. | Set to `microsoft.fixed_percentage` / `1.0` so inherited settings cannot reduce demo coverage. |
+| `OTEL_TRACES_EXPORTER` | Checked | Can disable tracing when set to `none`. | `none` is rejected with an actionable error instead of silently producing no traces. |
 | `OTEL_EXPERIMENTAL_RESOURCE_DETECTORS` | Yes, only for local/non-Azure runs | Controls which OTEL resource detectors are active. | Set to `otel` locally to avoid Azure-host detector behavior when running outside Azure. |
-| `OTEL_RESOURCE_DETECTORS` | Yes, only for local/non-Azure runs | Similar detector control for newer OTEL behavior. | Also set to `otel` locally so notebook metadata is predictable on developer machines. |
 | `APPLICATIONINSIGHTS_STATSBEAT_DISABLED_ALL` | Yes, only for local/non-Azure runs | Disables Statsbeat telemetry from the Application Insights exporter path. | Reduces local-noise telemetry and keeps the notebook trace-only. |
 
 ## Environment Variables to Keep in Mind
@@ -162,25 +180,18 @@ These are the main variables to understand when operating Section 3.1.
 
 | Variable | Recommendation | Why it helps |
 | --- | --- | --- |
-| `OTEL_SEMCONV_STABILITY_OPT_IN=gen_ai_latest_experimental` | Keep enabled | Ensures the notebook uses the latest experimental GenAI semantic conventions. |
 | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE=true` | Keep enabled while baggage remains limited to safe correlation keys | Makes the notebook's run and agent identifiers available across downstream trace context. |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` | Turn on only for short-lived debugging sessions | Allows prompt, response, tool-argument, and tool-result content to appear in traces, which is valuable for debugging but carries data-exposure risk. |
-| `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED=true` | Turn on only when content recording is intentionally approved | Companion content-recording control for the Azure tracing path. |
-| `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` | Optional, but useful if you want env-driven sampling policy | Current code already forces `sampling_ratio=1.0`, which is fine for demos. Adding explicit sampler env vars makes the policy portable and easier to externalize later. |
+| `AZURE_TRACING_GEN_AI_INCLUDE_BINARY_DATA` | Leave unset/off | Binary payload recording is unnecessary for this text-only demo. |
+| `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` | Fixed at 100% for this demo | Changing sampling for production requires revisiting the complete-trace validation gate. |
 
 ## Enhancements Applied to 3.1 & 3.3
 
 These are the main changes applied to the Windows 3.1 & 3.3 cells.
 
-### 1. Add the latest GenAI semantic-convention opt-in
+### 1. Use Settings Honored by the Actual SDK
 
-This is the most obvious gap. The macOS notebook already sets:
-
-```python
-os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = "gen_ai_latest_experimental"
-```
-
-This is now enabled in the Windows 3.1 cell so the notebook emits the latest experimental GenAI attributes and events supported by the current OTEL guidance.
+The Windows notebook does not set the Agent Framework-specific GenAI opt-in or the obsolete `AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED` flag. Azure AI Projects 2.6.0 uses its installed preview span schema and reads `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`. HTTP instrumentation has its own semantic-convention behavior; there is no global switch that upgrades every emitted span schema.
 
 ### 2. Make baggage propagation an explicit decision
 
@@ -196,14 +207,9 @@ That choice is safe here because the current baggage keys are limited to correla
 
 The Windows 3.1 path now makes message-content capture an explicit policy decision. That matters for agent debugging because content recording is the difference between seeing only operation shape versus seeing the actual prompt/tool payload that drove the result.
 
-Recommended pattern:
+Set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` only for approved debugging before initialization. The helper parses it once, uses the same boolean for SDK and custom spans, and rejects ambiguous values such as `1`. A pre-existing `true` is an explicit opt-in, not overridden. Changing it later requires restarting the kernel; the notebook refuses to display a new policy while retaining an old provider configuration.
 
-```python
-os.environ.setdefault("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "false")
-os.environ.setdefault("AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED", "false")
-```
-
-The notebook now documents and displays this default so operators know to flip it only for short-lived debugging sessions.
+This setting is not a universal redaction filter. Exception messages, MCP diagnostics, saved stories and generated decks may contain sensitive information independently of normal prompt/completion capture.
 
 ### 4. Harden the initialization order for notebook reruns
 
@@ -215,7 +221,9 @@ For a notebook, I recommend this order:
 2. Resolve the Application Insights connection string from the Foundry project.
 3. Call `configure_azure_monitor(...)`.
 4. Then switch `settings.tracing_implementation` to `"opentelemetry"`.
-5. Then run `AIProjectInstrumentor().instrument()` and `HTTPXClientInstrumentor().instrument()`.
+5. Apply the content/propagation booleans to `AIProjectInstrumentor`, then verify its state and the distro-owned HTTPX2 instrumentor. Do not uninstrument or manually re-wrap HTTP clients.
+
+The helper remembers its backend/resource/content configuration. Identical reruns do not call Azure Monitor again. Changed configuration or a prior partially failed setup requires a fresh kernel.
 
 ### 5. Add a span processor for agent metadata
 
@@ -233,7 +241,7 @@ Good candidates include:
 
 ### 6. Keep traces on, keep logs and metrics off by default for the notebook
 
-This is not a bug; it is a good default for a demo notebook. The current `configure_azure_monitor(...)` call disables logs and metrics, which keeps the signal focused.
+The trace-only policy uses exporter environment variables, not the old `disable_logging` and `disable_metrics` keyword arguments. Live Metrics is independently disabled because it defaults to on in Azure Monitor 1.8.10. Performance counters stay disabled. This is a notebook trace-demo policy, not a claim that logs or metrics are undesirable in production.
 
 I would keep that default, and only add logs later if you want:
 
@@ -246,7 +254,7 @@ I would keep that default, and only add logs later if you want:
 If you want the best improvement-to-effort ratio beyond the current notebook state, do these next:
 
 1. Add a lightweight custom span processor for cross-cutting agent metadata.
-2. Externalize sampling policy if you need lower-cost long-running telemetry.
+2. Deliberately redesign sampling and the validation gate if you need lower-cost long-running telemetry.
 3. Keep reviewing which baggage keys are safe to propagate as the notebook evolves.
 4. Turn on content recording only for controlled debugging windows.
 

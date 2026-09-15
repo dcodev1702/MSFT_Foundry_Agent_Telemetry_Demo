@@ -1,6 +1,6 @@
 # 🤖 Microsoft Foundry — Agent Framework Observability PoC
 
-Jupyter notebooks that configure and query Microsoft Foundry agents with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 notebook uses Azure AI Projects + the Responses API for execution and Agent Framework's resource helper for telemetry. It requires Python 3.14+; the separate macOS notebook supports Python 3.13+.
+Jupyter notebooks that configure and query Microsoft Foundry agents with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 notebook uses Azure AI Projects + the Responses API and native OpenTelemetry resource metadata; it does not require Agent Framework. It requires Python 3.14+; the separate macOS notebook supports Python 3.13+.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
@@ -43,18 +43,32 @@ Reviewed on **2026-09-14** using the configured package index. Versions can lag 
 | Package | Version | Role |
 |---|---|---|
 | `ipykernel` | `7.3.0` | Notebook kernel |
-| `agent-framework-core` | `1.17.0` | OpenTelemetry resource helper |
-| `agent-framework-openai` | `1.14.2` | Keeps the shared environment's provider compatible with OpenAI 3.x |
 | `azure-ai-projects` | `2.6.0` | Foundry project agents, MCP definitions and Responses client |
 | `openai` | `3.8.0` | Responses and conversations API; HTTPX2 transport |
 | `httpx2` | `2.12.0` | Patched transport; replaces vulnerable 2.10.0 |
 | `azure-identity` | `1.26.0b2` | Existing preview credential line retained |
 | `azure-monitor-opentelemetry` | `1.8.10` | Azure Monitor exporter configuration |
 | `azure-core-tracing-opentelemetry` | `1.0.0b13` | Azure SDK tracing bridge |
-| `opentelemetry-instrumentation-httpx` | `0.65b0` | HTTPX 0.x instrumentation, not HTTPX2 |
-| `opentelemetry-exporter-otlp-proto-grpc` | `1.44.0` | Aligns the shared environment's optional OTLP exporter with the SDK |
+| `opentelemetry-api` / `opentelemetry-sdk` | `1.44.0` | Tracing APIs, native resources and the telemetry runtime |
+| `opentelemetry-instrumentation-httpx` | `0.65b0` | Includes both HTTPX and HTTPX2 instrumentors, managed by Azure Monitor |
 
-Azure Monitor resolves OpenTelemetry API/SDK **1.44.0** and Azure Monitor exporter **1.0.0b57**. The former `azure-ai-projects<2.5` restriction is removed because the updated Agent Framework provider accepts OpenAI 3.x. Do not independently upgrade the OpenTelemetry runtime or instrumentation train.
+Azure Monitor resolves exporter **1.0.0b57** on the matching OpenTelemetry train. The former `azure-ai-projects<2.5` restriction is removed. Keep the tested SDK versions together rather than independently upgrading the runtime or instrumentation.
+
+### Dependency Profiles
+
+- [requirements-notebook.txt](requirements-notebook.txt): minimal Windows runtime, with **82 resolved dependencies** excluding pip.
+- [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional Agent Framework core **1.17.0**, OpenAI provider **1.14.2**, and OTLP gRPC exporter **1.44.0**. Use only when those packages are needed by other work in the shared environment.
+- [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.0` for automated execution and validation.
+- [constraints-notebook-win11.txt](constraints-notebook-win11.txt): 100 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
+
+Section 0 also constrains the bootstrap kernel version. Installing the smaller profile does **not** uninstall existing shared packages. Do not prune the shared environment blindly; use a separate environment for a minimal installation. Azure Identity's previously validated preview version is retained, not silently downgraded.
+
+For local validation tooling and the regression suite:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r .\requirements-notebook-validation.txt
+.\.venv\Scripts\python.exe -m unittest discover -s .\tests -p test_notebook_validation.py -v
+```
 
 ---
 
@@ -65,8 +79,8 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 | # | Section | What It Does |
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Validates Python 3.14 on Win11, creates `.venv`, installs `ipykernel`, and registers the Jupyter kernel |
-| **1** | Install Dependencies | Installs the current validated Agent Framework, Foundry, Azure identity, and Azure Monitor/OpenTelemetry package matrix used by the notebook |
-| **2** | Import Libraries | Verifies imports for `DefaultAzureCredential`, `AIProjectClient`, `MCPTool`, `PromptAgentDefinition`, and Agent Framework observability helpers |
+| **1** | Install Dependencies | Installs the constrained Foundry, Azure Identity and Azure Monitor/OpenTelemetry runtime profile |
+| **2** | Import Libraries | Verifies `DefaultAzureCredential`, `AIProjectClient`, `MCPTool`, `PromptAgentDefinition`, and native OpenTelemetry `Resource` imports |
 | **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures the Foundry project client plus Responses API settings |
 | **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry, Foundry client-side tracing, HTTP dependency telemetry, and trace propagation controls |
 | **3.2** | Configure MSFT Learn MCP Tool | Attaches the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) directly to the Foundry project agent |
@@ -97,9 +111,14 @@ Section **3.1** configures the notebook's observability path end to end:
 
 - **Azure Monitor + Application Insights** receive exported OpenTelemetry traces.
 - **Microsoft Foundry client-side tracing** is enabled for project-backed agent and Responses API activity.
-- **Foundry instrumentation and explicit notebook-side client spans** make OpenAI 3.x / HTTPX2 calls visible in Application Insights and Log Analytics. The HTTPX instrumentor covers HTTPX 0.x clients only.
+- **Azure Monitor owns HTTPX/HTTPX2 auto-instrumentation**. Foundry instrumentation adds GenAI spans; explicit notebook spans retain the demo's orchestration and dependency context. The notebook no longer uninstalls/re-wraps HTTP instrumentors.
 - **Trace context and baggage propagation** are enabled so notebook correlation identifiers flow with downstream requests.
-- **GenAI semantic conventions** use the experimental profile supported by the installed SDKs. **Message content recording is off by default**, including custom prompt/completion attributes. Enable only for approved debugging; generated notebook outputs and Marp decks can still contain personal data.
+- **GenAI span semantics** are controlled by the installed Projects preview instrumentor. The unrelated Agent Framework semantic-convention opt-in has been removed.
+- **One content policy** controls SDK and custom spans: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `false`, accepts only `true`/`false` (case-insensitive), and is passed as an explicit boolean to Projects. The obsolete Azure content flag is ignored. Changing policy requires a kernel restart.
+- **Trace-only export is enforced** with `OTEL_LOGS_EXPORTER=none`, `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False`, and `enable_performance_counters=False`. Sampling is explicitly fixed at 100%, overriding inherited sampling settings for this demo. `OTEL_TRACES_EXPORTER=none` is rejected.
+- **Native resources preserve service/session/project identity**, add `deployment.environment.name`, and retain additional `OTEL_RESOURCE_ATTRIBUTES`. Supply `cloud.region` only from verified deployment metadata; the notebook does not guess it.
+
+Enable content capture only for approved debugging. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
 
 See [observability.md](observability.md) for the full environment variable reference, version posture, and design notes.
 
@@ -161,9 +180,10 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 
 | Issue | Fix |
 |---|---|
-| Agent Framework or Azure Monitor import errors | Install the Windows matrix in **Section 1**, check `pip check`, then restart the kernel; the Agent Framework packages in this matrix are stable releases |
+| Foundry or Azure Monitor import errors | Install the Windows runtime in **Section 1**, check `pip check`, then restart the kernel; install optional shared requirements only if another demo needs them |
 | Signed-in account shows as unavailable | Rerun **Section 3 — Configure the Project Client** (uses `az.cmd` on Windows) |
 | Telemetry cell fails after dependency changes | Restart kernel, rerun from **Section 1** through **Section 3.1** |
+| Telemetry configuration changed or partial setup failed | Restart the kernel and rerun in order; do not reset the initialization flags to bypass the guard |
 | Sentinel cell cannot resolve a project connection | Verify the Foundry project still contains the Sentinel MCP connection and rerun **Section 3.3** |
 | Sentinel `query_lake` returns KQL validation errors | Rerun Section 4 to update the specialist's schema-discovery and plain-KQL instructions, then Section 5.1; do not treat a tool error as a successful answer |
 | Section 6 reports missing telemetry | Confirm workspace query permissions, exporter connectivity and the current run ID; the cell waits up to 3 minutes between ingestion checks and fails rather than accepting historical/empty results |
@@ -173,6 +193,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 ## ✅ Validation Checklist
 
 - [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
+- [ ] **Section 3.1** reports HTTPX2 enabled, 100% sampling, the intended content policy, and disabled log/metric/Live Metrics/performance-counter export
 - [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)
 - [ ] **Section 3.3** resolves or prints the Sentinel MCP project connection details
 - [ ] **Section 4** configures both Foundry project agents for a full run

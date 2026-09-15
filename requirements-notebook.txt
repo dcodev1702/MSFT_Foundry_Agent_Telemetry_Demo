@@ -1,8 +1,6 @@
-# Windows notebook matrix, resolved from the configured package index on 2026-09-14.
+# Windows notebook runtime; optional shared packages and validation tools are separate.
+-c constraints-notebook-win11.txt
 ipykernel==7.3.0
-agent-framework-core==1.17.0
-# Keep the shared environment's OpenAI provider compatible with OpenAI 3.x.
-agent-framework-openai==1.14.2
 azure-ai-projects==2.6.0
 openai==3.8.0
 # Patched HTTPX2 transport; 2.10.0 has published security advisories.
@@ -10,6 +8,6 @@ httpx2==2.12.0
 azure-identity==1.26.0b2
 azure-monitor-opentelemetry==1.8.10
 azure-core-tracing-opentelemetry==1.0.0b13
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
 opentelemetry-instrumentation-httpx==0.65b0
-# Keep the shared environment's optional OTLP exporter on the same SDK train.
-opentelemetry-exporter-otlp-proto-grpc==1.44.0

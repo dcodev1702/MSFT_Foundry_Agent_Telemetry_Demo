@@ -1,11 +1,15 @@
 import ast
 import json
+import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
+from unittest.mock import Mock, patch
 
+from azure.monitor.opentelemetry._utils.configurations import _get_configurations
 from opentelemetry import context, trace
+from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -192,6 +196,139 @@ class SentinelCorrelationTests(unittest.TestCase):
             self.assertEqual(dependency.context.trace_id, parent.get_span_context().trace_id)
         finally:
             provider.shutdown()
+
+
+class TelemetryPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.environment = patch.dict(os.environ, {
+            "OTEL_SERVICE_NAME": "foundry-agent-framework-demo",
+            "OTEL_SERVICE_VERSION": "2026.09.14",
+            "OTEL_EXPERIMENTAL_RESOURCE_DETECTORS": "otel",
+        }, clear=True)
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        self.instrumentor = Mock()
+        self.instrumentor.is_instrumented.return_value = True
+        self.instrumentor.is_content_recording_enabled.side_effect = (
+            lambda: self.instrumentor.instrument.call_args.kwargs["enable_content_recording"]
+        )
+        self.httpx2 = SimpleNamespace(is_instrumented_by_opentelemetry=True)
+        self.configurations = []
+
+        def capture_configuration(**kwargs):
+            self.configurations.append(_get_configurations(**kwargs))
+
+        self.configure = Mock(side_effect=capture_configuration)
+        self.scope = load_functions("3c78effc", [
+            "get_content_recording_policy", "configure_notebook_telemetry",
+        ], {
+            "os": os, "Resource": Resource, "settings": SimpleNamespace(),
+            "configure_azure_monitor": self.configure,
+            "AIProjectInstrumentor": lambda: self.instrumentor,
+            "HTTPX2ClientInstrumentor": lambda: self.httpx2,
+        })
+
+    def initialize(self, **overrides):
+        arguments = {"connection_string": "test-only", "project": "test-project", "session": "test-session"}
+        return self.scope["configure_notebook_telemetry"](**(arguments | overrides))
+
+    def test_actual_distro_configuration_is_trace_only(self):
+        self.assertFalse(self.initialize())
+        config = self.configurations[0]
+        self.assertFalse(config["disable_tracing"])
+        self.assertTrue(config["disable_logging"])
+        self.assertTrue(config["disable_metrics"])
+        self.assertFalse(config["enable_live_metrics"])
+        self.assertFalse(config["enable_performance_counters"])
+
+    def test_inherited_sampler_cannot_reduce_demo_coverage(self):
+        os.environ["OTEL_TRACES_SAMPLER"] = "microsoft.fixed_percentage"
+        os.environ["OTEL_TRACES_SAMPLER_ARG"] = "0.1"
+        self.initialize()
+        self.assertEqual(self.configurations[0]["sampling_ratio"], 1.0)
+
+    def test_old_content_flag_does_not_enable_custom_content(self):
+        os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
+        self.assertFalse(self.initialize())
+        self.instrumentor.instrument.assert_called_once_with(
+            enable_content_recording=False,
+            enable_trace_context_propagation=True,
+            enable_baggage_propagation=True,
+        )
+
+    def test_single_content_policy_is_normalized_and_passed_to_sdk(self):
+        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = " TRUE "
+        self.assertTrue(self.initialize())
+        self.assertEqual(os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"], "true")
+        self.assertTrue(self.instrumentor.instrument.call_args.kwargs["enable_content_recording"])
+
+    def test_invalid_content_values_fail_before_provider_setup(self):
+        for value in ("1", "0", "", "yes"):
+            with self.subTest(value=value):
+                os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = value
+                with self.assertRaisesRegex(ValueError, "must be"):
+                    self.initialize()
+        self.configure.assert_not_called()
+
+    def test_resource_identity_is_preserved_without_agent_framework(self):
+        os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "custom.label=retained,service.version=wrong"
+        self.initialize()
+        attributes = self.configurations[0]["resource"].attributes
+        self.assertEqual(attributes["service.name"], "foundry-agent-framework-demo")
+        self.assertEqual(attributes["service.version"], "2026.09.14")
+        self.assertEqual(attributes["service.namespace"], "foundry-agent-demo")
+        self.assertEqual(attributes["service.instance.id"], "test-session")
+        self.assertEqual(attributes["foundry.project.name"], "test-project")
+        self.assertEqual(attributes["deployment.environment"], "demo")
+        self.assertEqual(attributes["deployment.environment.name"], "demo")
+        self.assertEqual(attributes["custom.label"], "retained")
+        self.assertNotIn("cloud.region", attributes)
+
+    def test_repeated_setup_does_not_add_duplicate_providers(self):
+        self.initialize()
+        self.initialize()
+        self.configure.assert_called_once()
+        self.instrumentor.instrument.assert_called_once()
+
+    def test_changed_content_policy_requires_kernel_restart(self):
+        self.initialize()
+        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
+        with self.assertRaisesRegex(RuntimeError, "Restart the kernel"):
+            self.initialize()
+        self.configure.assert_called_once()
+
+    def test_changed_project_or_backend_requires_restart(self):
+        self.initialize()
+        for override in ({"project": "other-project"}, {"connection_string": "other-backend"}):
+            with self.subTest(override=override):
+                with self.assertRaisesRegex(RuntimeError, "Restart the kernel"):
+                    self.initialize(**override)
+
+    def test_old_notebook_initialization_requires_restart(self):
+        self.scope["_project_otel_initialized"] = True
+        with self.assertRaisesRegex(RuntimeError, "Restart the kernel"):
+            self.initialize()
+        self.configure.assert_not_called()
+
+    def test_explicit_trace_disable_is_not_silently_ignored(self):
+        os.environ["OTEL_TRACES_EXPORTER"] = "none"
+        with self.assertRaisesRegex(RuntimeError, "disables this demo"):
+            self.initialize()
+        self.configure.assert_not_called()
+
+    def test_missing_httpx2_instrumentation_is_reported(self):
+        self.httpx2.is_instrumented_by_opentelemetry = False
+        with self.assertRaisesRegex(RuntimeError, "HTTPX2 instrumentation is disabled"):
+            self.initialize()
+        with self.assertRaisesRegex(RuntimeError, "previous telemetry setup failed"):
+            self.initialize()
+        self.configure.assert_called_once()
+
+    def test_sdk_content_policy_mismatch_is_reported(self):
+        self.instrumentor.is_content_recording_enabled.side_effect = None
+        self.instrumentor.is_content_recording_enabled.return_value = True
+        with self.assertRaisesRegex(RuntimeError, "requested content policy"):
+            self.initialize()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+# Optional compatibility packages for the existing shared demo environment.
+-r requirements-notebook.txt
+agent-framework-core==1.17.0
+agent-framework-openai==1.14.2
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
