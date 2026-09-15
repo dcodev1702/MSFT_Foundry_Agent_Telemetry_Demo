@@ -15,6 +15,10 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, Status, StatusCode
+from notebook_agent_endpoints import (
+    AgentRuntimeConfig, AgentTarget, get_agent_openai_client, get_pinned_agent,
+    response_options, responses_url,
+)
 
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "zolab-ai-agent-demo-win11.ipynb"
@@ -86,6 +90,7 @@ class ResponseValidationTests(unittest.TestCase):
             "otel_context": SimpleNamespace(attach=lambda context: None, detach=lambda token: None),
             "tracer": SimpleNamespace(start_as_current_span=lambda *args, **kwargs: self.span),
             "SpanKind": SpanKind, "Status": Status, "StatusCode": StatusCode,
+            "agent_runtime": AgentRuntimeConfig(mode="project"), "response_options": response_options,
         }
         self.scope = load_functions(
             "2692d274",
@@ -176,6 +181,7 @@ class SentinelCorrelationTests(unittest.TestCase):
         tracer = provider.get_tracer("notebook-correlation-test")
         scope = load_functions("ef551c01", ["create_agent_response"], {
             "tracer": tracer, "SpanKind": SpanKind, "Status": Status,
+            "agent_runtime": AgentRuntimeConfig(mode="project"), "response_options": response_options,
             "StatusCode": StatusCode, "urlparse": urlparse,
             "otel_context": context, "context": context.get_current(),
             "sentinel_agent_display_name": "test-sentinel",
@@ -245,7 +251,7 @@ class SentinelTableRoutingTests(unittest.TestCase):
 
     def test_discovery_and_fallback_table_search_are_prohibited(self):
         self.assertIn("Do not call search_tables", self.instructions)
-        self.assertIn("without searching for or substituting another SDL table", self.instructions)
+        self.assertRegex(self.instructions, r"without searching for or substituting another (?:SDL )?table")
         self.assertNotIn("requires it after schema discovery", self.cells["586f0511"])
         self.assertNotIn("column names returned by schema discovery", self.cells["586f0511"])
 
@@ -367,6 +373,7 @@ class MarpModelMetadataTests(unittest.TestCase):
         common = {
             "Path": Path, "format_model_footer": self.scope["format_model_footer"],
             "generated_at_display": "2026-09-15 03:12:00Z",
+            "agent_runtime_label": "responses.create + agent_reference",
             "main_agent_display_name": "main-agent",
             "sentinel_agent_display_name": "sentinel-agent",
             "sentinel_workspace_name": "test-workspace",
@@ -524,6 +531,7 @@ class CreationSpanEnrichmentTests(unittest.TestCase):
             "main_tool_labels": ["test-tool"], "sentinel_tool_labels": ["test-tool"],
             "mcp_tool_spec": self.definition.tools[0], "sentinel_tool": self.definition.tools[0],
             "content_recording_enabled": False, "demo_run_id": "test-run", "telemetry_session_id": "test-session",
+            "agent_runtime": AgentRuntimeConfig(mode="project"), "agent_setup_operation": "create_agent",
         }
         compiled = compile(ast.Module(body=[block], type_ignores=[]), str(NOTEBOOK), "exec")
         if fail:
@@ -570,6 +578,7 @@ class PersistenceSpanTests(unittest.TestCase):
         append = Mock(side_effect=OSError("disk full")) if fail else Mock(return_value=140)
         scope = {
             "tracer": provider.get_tracer("persist-test"), "persist_context": None,
+            "agent_runtime": AgentRuntimeConfig(mode="project"),
             "run_id": "test-run", "session_id": "test-session", "main_agent_display_name": "main",
             "main_agent_id": "main:9", "main_agent_version": "9", "model_name": "alias",
             "generated_at_iso": "2026-09-15T00:00:00Z", "main_model_metadata": {},
@@ -613,6 +622,141 @@ class PersistenceSpanTests(unittest.TestCase):
         self.assertIn('PersistenceSpans=countif(Name == "persist_story" and RootInteraction == "persistence")', source)
         self.assertIn('coverage["PersistenceSpans"] == 1', source)
         self.assertNotIn('expected_interactions.add("persistence")', source)
+
+
+class AgentEndpointRoutingTests(unittest.TestCase):
+    def setUp(self):
+        self.build = {
+            "agent_invocation_mode": "agent_endpoint",
+            "backend_agents": {
+                "main": {"name": "main-backend", "version": "1"},
+                "sentinel": {"name": "sentinel-backend", "version": "1"},
+            },
+        }
+        self.runtime = AgentRuntimeConfig.from_build_info(self.build, {})
+        self.definition = PromptAgentDefinition(model="model-alias", instructions="instructions", tools=[])
+        self.endpoint_config = {
+            "version_selector": {"version_selection_rules": [
+                {"type": "FixedRatio", "agent_version": "1", "traffic_percentage": 100}
+            ]},
+            "protocol_configuration": {"responses": {}},
+            "authorization_schemes": [{"type": "Entra"}],
+        }
+        self.details = SimpleNamespace(
+            state="enabled", instance_identity=SimpleNamespace(principal_id="principal", client_id="client"),
+            agent_endpoint=SimpleNamespace(as_dict=lambda: self.endpoint_config),
+        )
+        self.version = SimpleNamespace(version="1", definition=self.definition)
+        self.client = Mock()
+        self.client.agents.get.return_value = self.details
+        self.client.agents.get_version.return_value = self.version
+
+    def test_project_default_and_explicit_rollback_need_no_endpoint_configuration(self):
+        self.assertEqual(AgentRuntimeConfig.from_build_info({}, {}).mode, "project")
+        self.assertEqual(
+            AgentRuntimeConfig.from_build_info(self.build, {"FOUNDRY_AGENT_INVOCATION_MODE": "project"}).mode,
+            "project",
+        )
+
+    def test_invalid_mode_or_missing_endpoint_targets_fail_explicitly(self):
+        for mode in ("", "typo", None, {}):
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                AgentRuntimeConfig.from_build_info({"agent_invocation_mode": mode}, {})
+        with self.assertRaisesRegex(ValueError, "backend_agents"):
+            AgentRuntimeConfig.from_build_info({"agent_invocation_mode": "agent_endpoint"}, {})
+
+    def test_dynamic_versions_invalid_names_and_shared_agents_are_rejected(self):
+        for version in ("@latest", "", "0", 1):
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                AgentRuntimeConfig.from_build_info({
+                    **self.build, "backend_agents": {
+                        **self.build["backend_agents"], "main": {"name": "main-backend", "version": version},
+                    },
+                }, {})
+        for name in ("../agent", "name/other", "a" * 64, "sentinel-backend"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                AgentRuntimeConfig.from_build_info({
+                    **self.build, "backend_agents": {
+                        **self.build["backend_agents"], "main": {"name": name, "version": "1"},
+                    },
+                }, {})
+
+    def test_pinned_agent_is_read_only_and_preserves_response_hook(self):
+        hook = Mock()
+        result = get_pinned_agent(self.client, self.runtime.target("main"), self.definition, raw_response_hook=hook)
+        self.assertIs(result, self.version)
+        self.client.agents.get.assert_called_once_with(agent_name="main-backend", raw_response_hook=hook)
+        self.client.agents.get_version.assert_called_once_with(
+            agent_name="main-backend", agent_version="1", raw_response_hook=hook,
+        )
+        self.client.agents.create_version.assert_not_called()
+        self.client.agents.update_details.assert_not_called()
+
+    def test_missing_identity_or_disabled_agent_blocks_cutover(self):
+        self.details.instance_identity = None
+        with self.assertRaisesRegex(RuntimeError, "identity"):
+            get_pinned_agent(self.client, self.runtime.target("main"), self.definition)
+        self.details.state = "disabled"
+        with self.assertRaisesRegex(RuntimeError, "enabled"):
+            get_pinned_agent(self.client, self.runtime.target("main"), self.definition)
+
+    def test_pin_drift_does_not_silently_promote(self):
+        self.endpoint_config["version_selector"]["version_selection_rules"][0]["agent_version"] = "@latest"
+        with self.assertRaisesRegex(RuntimeError, "not pinned"):
+            get_pinned_agent(self.client, self.runtime.target("main"), self.definition)
+        self.client.agents.update_details.assert_not_called()
+        self.client.agents.create_version.assert_not_called()
+
+    def test_notebook_edits_require_an_explicit_release(self):
+        changed = PromptAgentDefinition(model="model-alias", instructions="changed", tools=[])
+        with self.assertRaisesRegex(RuntimeError, "differs from pinned"):
+            get_pinned_agent(self.client, self.runtime.target("main"), changed)
+        self.client.agents.create_version.assert_not_called()
+
+    def test_missing_responses_or_entra_authorization_is_rejected(self):
+        for field in ("protocol_configuration", "authorization_schemes"):
+            with self.subTest(field=field):
+                original = self.endpoint_config[field]
+                self.endpoint_config[field] = {} if field == "protocol_configuration" else []
+                with self.assertRaisesRegex(RuntimeError, "Responses protocol"):
+                    get_pinned_agent(self.client, self.runtime.target("main"), self.definition)
+                self.endpoint_config[field] = original
+
+    def test_client_is_bound_to_configured_agent_only_in_endpoint_mode(self):
+        get_agent_openai_client(self.client, self.runtime, "main-backend")
+        self.client.get_openai_client.assert_called_once_with(agent_name="main-backend")
+        self.client.reset_mock()
+        get_agent_openai_client(self.client, AgentRuntimeConfig(mode="project"), "main")
+        self.client.get_openai_client.assert_called_once_with()
+        with self.assertRaises(ValueError):
+            get_agent_openai_client(self.client, self.runtime, "unconfigured-agent")
+
+    def test_endpoint_requests_do_not_send_project_agent_references(self):
+        payload = {"agent_reference": {"name": "main"}}
+        self.assertEqual(response_options(self.runtime, payload), {})
+        self.assertEqual(response_options(AgentRuntimeConfig(mode="project"), payload), {"extra_body": payload})
+
+    def test_both_response_url_shapes_avoid_duplicate_path_segments(self):
+        for path in (
+            "/api/projects/demo/openai/v1/",
+            "/api/projects/demo/agents/main-backend/endpoint/protocols/openai/",
+        ):
+            with self.subTest(path=path):
+                client = SimpleNamespace(base_url="https://example.invalid" + path)
+                self.assertEqual(responses_url(client), "https://example.invalid" + path + "responses")
+        with self.assertRaises(ValueError):
+            responses_url(SimpleNamespace(base_url="https://example.invalid/unrecognized/"))
+
+    def test_both_notebook_cells_and_gate_use_runtime_aware_routing(self):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        cells = {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
+        for cell_id in ("2692d274", "ef551c01"):
+            self.assertIn("get_agent_openai_client(project_client, agent_runtime,", cells[cell_id])
+            self.assertIn("**response_options(agent_runtime,", cells[cell_id])
+            self.assertIn("return responses_url(openai_client)", cells[cell_id])
+            self.assertIn('"agent_invocation_mode": agent_runtime.mode', cells[cell_id])
+        self.assertIn('Name endswith "/responses"', cells["6e3dcab6"])
+        self.assertIn('tostring(Properties["gen_ai.operation.name"]) == "responses.create"', cells["6e3dcab6"])
 
 
 class TelemetryPolicyTests(unittest.TestCase):

@@ -1,6 +1,93 @@
 # OpenTelemetry Agent Spans
 
-## Current instrumentation: creation diagnostics and persistence
+## Backend agent endpoint migration
+
+The Windows notebook now supports an explicit **`agent_endpoint`** mode through
+[notebook_agent_endpoints.py](notebook_agent_endpoints.py). This uses separate
+new-model backend agents with unique identities and fixed version pins, not
+Teams/M365 publishing. The original agents and **`project`** mode are retained
+for rollback.
+
+| Role | Original agent | New backend agent | Active version |
+|---|---|---|---|
+| Story / Learn | `ZoDEfendersAgent-1702` | `ZoDEfendersAgent-1702-backend` | `1` |
+| Sentinel | `ZoDEfendersAgent-1702-sentinel` | `ZoDEfendersAgent-1702-sentinel-backend` | `1` |
+
+Both backend agents use the existing Terra deployment and unchanged MCP
+definitions. They expose Responses with Entra authorization. A direct two-turn
+test verified conversation continuation on the new endpoint; unauthenticated
+requests to both endpoints were rejected with HTTP 401. No additional role
+assignments or OAuth consent were needed for the tested caller/tool path.
+
+### Telemetry changes
+
+- **Section 4:** in backend mode, `resolve_agent` wraps reads of the agent and
+  selected version. It verifies unique identity, enabled state, Responses/Entra
+  configuration, 100% fixed-version routing and equality with the notebook
+  definition. It never creates a version or changes routing. The shared model
+  metadata, request IDs and configuration fingerprint remain present.
+- **Identity metadata:** setup spans also record
+  `app.agent.identity.principal_id`, `app.agent.identity.client_id` and
+  `app.agent.active_version`. These are agent identities, not the caller's UPN.
+- **Sections 5/5.1:** each flow uses a client bound to its agent's stable endpoint.
+  The request contains no project-dispatch `agent_reference`. The client SDK
+  may name its inner span `responses`; the service still identifies the actual
+  agent/version in its own spans.
+- **HTTP dependency URLs:** now end in
+  `/agents/{agent}/endpoint/protocols/openai/responses`. The shared URL builder
+  also supports `/openai/v1/responses` for explicit rollback without duplicating
+  path segments.
+- **Section 6:** counts a Responses wrapper only when its name ends with
+  `/responses` and its `gen_ai.operation.name` is `responses.create`. The old
+  project-only suffix test would have missed valid backend requests.
+- **Records and decks:** record `agent_invocation_mode`; Marp runtime labels say
+  `responses.create + agent endpoint` in backend mode. Persistence correlation,
+  model version footers and privacy controls are retained.
+
+The 49/50-span inventories below are historical **project-endpoint** runs.
+They remain valid audit evidence, but are not fixed expected counts or exact
+span names for backend mode. See [observability.md](observability.md#backend-endpoint-migration)
+and [runtime configuration / rollback](README.md#backend-agent-endpoints).
+
+### Backend validation snapshot
+
+Run `b4591fc5-2289-4527-8e81-a9e97e153f34` used the saved local backend
+configuration, with no injected candidate settings. All **10 runtime cells** and
+the live data/model/identity/pin/persistence checks completed with **exit code 0**.
+All **65 regression tests** passed. Existing environment setup cells were skipped;
+there were no dependency installs or interactive authentication prompts.
+
+| Cell / work | Observed spans |
+|---|---:|
+| `586f0511`: main pinned-agent setup | 5 |
+| `586f0511`: Sentinel pinned-agent setup | 5 |
+| `2692d274`: story | 6 |
+| `2692d274`: Learn | 18 |
+| `2692d274`: persistence | 1 |
+| `ef551c01`: Sentinel | 19 |
+| **Total** | **54** |
+
+Each five-span setup operation consists of one explicit `resolve_agent` span,
+one SDK agent-detail GET span and its HTTP dependency, and one SDK version GET
+span and its HTTP dependency. Model/request-ID/fingerprint metadata is on the
+explicit setup span. The setup introduces no model call or version promotion.
+
+The snapshot contained **7 Responses dependencies**, **11 service chat spans**,
+**1 correlated persistence span**, **zero failures**, and **no `search_tables`**.
+The actual dependencies used the configured agents' stable endpoint paths.
+The main and Sentinel answers, real tool calls, sign-in identity/IP and saved
+Marp metadata were checked. Both replacement agents stayed pinned at version 1;
+the original agent definitions/versions were preserved.
+The agent identity/client IDs and active version were also verified on the
+actual setup spans. Both exported deck types passed browser checks: correct
+backend runtime label and unclipped model metadata footers on all seven slides.
+
+This is four more spans than the comparable 50-span project-mode run because
+setup performs two reads per agent rather than one creation request. It is not
+a fixed backend span-count requirement. In the earlier candidate rehearsal,
+additional model/tool work produced a different total.
+
+## Shared diagnostics and project-mode baseline
 
 Updated September 15, 2026. The existing main/Sentinel creation spans are now
 enriched, and `persist_story` is explicitly run-correlated. **No synthetic
@@ -12,7 +99,7 @@ describe that earlier execution, not the corrected current implementation.
 
 ### Creation attributes
 
-Both explicit `create_agent` spans in Section 4 / cell `586f0511` add the
+In project mode, both explicit `create_agent` spans in Section 4 / cell `586f0511` add the
 following attributes while preserving their existing GenAI/run/tool attributes:
 
 | Attribute | Purpose / source |
@@ -56,7 +143,7 @@ version are not included. A fingerprint is a comparison aid, not encryption:
 existing prompt/content capture is unchanged and may still export sensitive
 content when enabled.
 
-The actual definition used to compute the fingerprint is also sent to the SDK:
+In project mode, the actual definition used to compute the fingerprint is also sent to the SDK:
 
 ```python
 main_agent_definition = PromptAgentDefinition(

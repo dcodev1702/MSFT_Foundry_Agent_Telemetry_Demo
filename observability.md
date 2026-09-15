@@ -107,16 +107,70 @@ Section 6 is a validation gate, not just a query display:
 2. Flush the OpenTelemetry provider before querying.
 3. Scope to the current `demo.run_id`, then follow `OperationId` to include SDK and HTTP child spans that do not carry that custom attribute themselves.
 4. Poll for ingestion at 15-second intervals, up to 12 waits. Empty or old results cannot produce a pass.
-5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (`2026.09.15` for the latest run). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`; HTTP dependency names include the full project path, so the gate matches their `/openai/v1/responses` suffix.
+5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (`2026.09.15` for the latest run). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`. Responses wrappers are identified by `gen_ai.operation.name=responses.create` and a `/responses` name suffix, supporting both project and stable agent endpoints.
 6. Reject API errors and partial results. Display the end-to-end rows and a runs-only trend; include `sentinel-agent-query` in both scenarios.
 
 The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist uses the supplied `SigninLogs` schema and plain KQL; it no longer requires table discovery.
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
 
+### Backend Endpoint Migration
+
+The current Windows runtime can select the new backend endpoint mode through
+its local build metadata. New agents `ZoDEfendersAgent-1702-backend` and
+`ZoDEfendersAgent-1702-sentinel-backend` were created alongside the legacy agents,
+each with a distinct instance identity/blueprint and version **1** pinned at 100%.
+Only Responses and Entra authorization are enabled; there is no Teams publishing.
+
+In backend mode:
+
+- Section 4 emits **`resolve_agent`** setup spans around read-only agent/version
+  checks instead of creating versions on every rerun. SDK `AgentsOperations.get`,
+  `AgentsOperations.get_version` and GET dependency spans replace creation POSTs.
+- The setup spans retain the model/request-ID/fingerprint attributes described
+  below and add `app.agent.identity.principal_id`, `app.agent.identity.client_id`
+  and `app.agent.active_version`.
+- Each flow gets its own agent-bound client. Request URLs end in
+  `/agents/{name}/endpoint/protocols/openai/responses`; no `agent_reference`
+  override is sent to those endpoints.
+- Explicit interaction roots add `app.agent.invocation_mode=agent_endpoint`.
+  Persisted records also identify the invocation mode, and Marp runtime labels
+  distinguish the endpoint mode from project dispatch.
+- The client SDK can emit a generic `responses` span rather than an unversioned
+  `invoke_agent` span. Service-side agent/model/tool spans and notebook roots
+  remain correlated. Do not assert a fixed span count or require the old URL.
+
+The stable endpoint's selected version, unique identity and enabled state are
+verified before invocation. The notebook fails on pin/definition drift rather
+than publishing changed instructions, routing to `@latest`, or silently falling
+back. The model-definition fingerprint remains separate from endpoint routing.
+Use [the README rollback setting](README.md#backend-agent-endpoints) to explicitly
+return to the retained project endpoint path.
+
+**Live validation:** a candidate rehearsal passed before cutover. After saving
+the local backend settings, run `b4591fc5-2289-4527-8e81-a9e97e153f34` completed
+all 10 runtime cells plus response/data/metadata/telemetry assertions with exit
+code 0, without configuration injection, dependency installation or interactive
+authentication. The detailed snapshot contained **54 unique spans**:
+**10 setup**, **24 story/Learn**, **1 persistence**, **19 Sentinel**.
+There were **7 endpoint Responses dependencies**, **11 chat spans**, no failed
+spans and no `search_tables` call. All 65 local regression tests passed.
+The agent principal/client IDs and active version on both setup spans were
+compared directly with live agent metadata. Exported main/Sentinel Marp decks
+passed browser checks for runtime labels and footer fit on all seven slides.
+
+The four additional spans relative to the comparable 50-span project-mode run
+come from reading both agent details and the pinned version during setup, rather
+than one creation request per agent. This comparison applies to these measured
+runs; additional tool calls or asynchronous ingestion can change the totals.
+Both candidates stayed pinned to version 1. A separate two-turn endpoint test
+confirmed conversation continuity, and anonymous calls to both were rejected
+with HTTP 401. No claim is made that old project conversation IDs are portable.
+
 ### Creation Diagnostics and Persistence Correlation
 
-The existing main/Sentinel **client creation spans** now include:
+The main/Sentinel **client setup spans** (`create_agent` in project mode,
+`resolve_agent` in backend mode) include:
 
 - `app.model.publisher`, `app.model.name`, `app.model.version` and
   `app.model.deployment`, using the resolved deployment metadata.

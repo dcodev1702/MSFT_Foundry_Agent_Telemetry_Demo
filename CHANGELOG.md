@@ -7,6 +7,28 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Backend agent identity and endpoint migration
+
+- Create separate main/Sentinel backend agents from the existing definitions,
+  verify distinct unique instance identities and blueprints, and pin each stable
+  endpoint to version 1. Retain the original agents unchanged for rollback.
+- Add explicit `agent_endpoint` / `project` runtime configuration. Backend setup
+  reads and validates the identity, fixed pin and definition; ordinary notebook
+  reruns cannot create/promote backend versions or silently fall back.
+- Route each flow through its agent-bound Responses client without an
+  `agent_reference` override. Share correct URL construction and make dependency
+  coverage work for both endpoint shapes.
+- Preserve Terra, Learn MCP, the Sentinel user-passthrough connection, interactive
+  SigninLogs filtering, model metadata and persistence. Label runtime mode in
+  traces/records/Marp output and report backend setup as `resolve_agent`.
+- Keep this migration backend-only: no Teams/M365 publishing, bot resources,
+  containerization, dependency installations or new interactive authentication.
+- Validate 65 passing regressions, a candidate rehearsal, and a full 10-runtime-cell
+  run using the saved backend configuration. The final run observed 54 correlated
+  spans, seven endpoint Responses dependencies, one persistence span, zero failures
+  and no table discovery. Verify conversation continuation and HTTP 401 rejection
+  of unauthenticated requests while retaining the old agents and fixed version pins.
+
 ## Unreleased — Creation diagnostics and persistence correlation
 
 - Enrich the existing main and Sentinel creation spans with authoritative model
