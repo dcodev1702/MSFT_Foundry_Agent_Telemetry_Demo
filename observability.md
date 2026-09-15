@@ -107,12 +107,63 @@ Section 6 is a validation gate, not just a query display:
 2. Flush the OpenTelemetry provider before querying.
 3. Scope to the current `demo.run_id`, then follow `OperationId` to include SDK and HTTP child spans that do not carry that custom attribute themselves.
 4. Poll for ingestion at 15-second intervals, up to 12 waits. Empty or old results cannot produce a pass.
-5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each interaction, GenAI chat spans, zero failed spans, and service version `2026.09.14`. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`; HTTP dependency names include the full project path, so the gate matches their `/openai/v1/responses` suffix.
+5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (`2026.09.15` for the latest run). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`; HTTP dependency names include the full project path, so the gate matches their `/openai/v1/responses` suffix.
 6. Reject API errors and partial results. Display the end-to-end rows and a runs-only trend; include `sentinel-agent-query` in both scenarios.
 
 The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist uses the supplied `SigninLogs` schema and plain KQL; it no longer requires table discovery.
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
+
+### Creation Diagnostics and Persistence Correlation
+
+The existing main/Sentinel **client creation spans** now include:
+
+- `app.model.publisher`, `app.model.name`, `app.model.version` and
+  `app.model.deployment`, using the resolved deployment metadata.
+- `app.agent.config.sha256`, computed from canonical UTF-8 JSON containing the
+  agent definition and resolved model snapshot. Object keys are sorted; array
+  order is retained. Changing instructions, tools or the resolved model version
+  changes the fingerprint. Run/session/request IDs and returned agent versions
+  are not inputs.
+- `app.azure.request_id` and `app.azure.request_id_header`, taken only from
+  allowlisted HTTP response headers. Preference order is `x-request-id`,
+  `x-ms-request-id`, `apim-request-id`, then `request-id`.
+  `app.azure.apim_request_id` also retains the gateway ID when present.
+- `app.azure.request_id_available`: `false` until a response supplies an ID.
+  A response without one emits `create_agent.request_id_unavailable`; no ID is
+  fabricated. Error responses are inspected too, while exceptions still propagate
+  and mark the creation span failed.
+
+The fingerprint adds no raw definition payload and the response hook does not
+export arbitrary headers. This does not redact the pre-existing content-capture
+feature: prompts/instructions may still be recorded when that feature is enabled.
+A SHA-256 fingerprint is a comparison aid, not encryption or proof of secrecy.
+
+No extra creation wrapper or synthetic server span was added. The separate
+`persist_story` span now explicitly carries `demo.run_id`, `app.session.id`,
+`app.interaction=persistence`, agent identity/version and runtime. It remains an
+internal span in its own operation, discoverable through the same run-ID filter.
+Write failures propagate, retain the run attributes and record `error.type`.
+The automatic span context manager records the exception and error status.
+
+See [OTEL-Agent-Spans.md](OTEL-Agent-Spans.md) for the verified enhanced run and
+the historical 49-span baseline. Counts can vary with tool use and approvals;
+the validation gate does not hardcode a total span count.
+
+Validation on **2026-09-15 UTC**: **53 regression tests passed**, and fresh run
+`2855bde8-64be-45fd-b58f-5db1dbde25ce` completed all 10 runtime cells plus live
+assertions with **exit code 0**. Both creation spans contained real service/gateway
+request IDs and independently recomputed configuration fingerprints. The
+`persist_story` span carried the run/session/agent/record identifiers and passed
+the new gate. No library install or interactive authentication was required.
+
+After asynchronous ingestion settled, the read-only inventory contained
+**50 unique spans**: **6 creation**, **24 story/Learn**, **1 persistence** and
+**19 Sentinel**; **7 Responses dependencies**, **11 chat spans**, zero failures
+and no table-discovery call. The earlier gate snapshot had 43 rows; it checks
+coverage rather than complete ingestion. The span guide preserves both facts.
+The first enhanced-run test needed a query-only normalization after Kusto exposed
+the date-shaped model version as a datetime; the full rerun then passed.
 
 ### Marp Model Identity
 

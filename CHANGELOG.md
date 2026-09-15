@@ -7,6 +7,30 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Creation diagnostics and persistence correlation
+
+- Enrich the existing main and Sentinel creation spans with authoritative model
+  publisher/name/version/deployment and deterministic SHA-256 fingerprints of
+  the agent definition plus resolved model snapshot.
+- Capture allowlisted service and API Management response request IDs through
+  the SDK response hook and on HTTP errors; explicitly report unavailable IDs
+  without exporting arbitrary headers or fabricating backend spans.
+- Add explicit run/session/agent/interaction attributes to `persist_story`,
+  preserve exception propagation and error typing, and require exactly one
+  persistence span in the ingestion gate without requiring it to call Responses.
+- Add regression coverage for canonical hashing, changed configuration, request-ID
+  handling, both creation paths and persistence success/failure. Preserve the
+  user's explicit "another SDL table" instruction in the routing regression.
+- Validate 53 passing tests and a fresh 10-runtime-cell execution (exit 0) with
+  actual request IDs, independently recomputed fingerprints and correlated
+  persistence. The settled inventory contains 50 unique spans with zero failures,
+  including the newly visible persistence span; no `search_tables` call.
+- Account for date-shaped version values in Kusto validation and distinguish
+  the initial ingestion-gate snapshot from the later complete inventory.
+- Add the per-cell [span guide](OTEL-Agent-Spans.md), distinguish the original
+  49-span baseline from current coverage, and retain Git exclusion of all generated
+  Marp decks and exports.
+
 ## Unreleased — Visible model metadata in both Marp decks
 
 - Add an every-slide footer with model type/provider, underlying name and version

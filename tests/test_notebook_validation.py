@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from urllib.parse import urlparse
 from unittest.mock import Mock, patch
 
+from azure.ai.projects.models import MCPTool, PromptAgentDefinition
 from azure.monitor.opentelemetry._utils.configurations import _get_configurations
 from opentelemetry import context, trace
 from opentelemetry.sdk.resources import Resource
@@ -244,7 +245,7 @@ class SentinelTableRoutingTests(unittest.TestCase):
 
     def test_discovery_and_fallback_table_search_are_prohibited(self):
         self.assertIn("Do not call search_tables", self.instructions)
-        self.assertIn("without searching for or substituting another table", self.instructions)
+        self.assertIn("without searching for or substituting another SDL table", self.instructions)
         self.assertNotIn("requires it after schema discovery", self.cells["586f0511"])
         self.assertNotIn("column names returned by schema discovery", self.cells["586f0511"])
 
@@ -398,6 +399,220 @@ class MarpModelMetadataTests(unittest.TestCase):
                 self.assertIn("gpt-5.6-terra-2026-07-09", deck)
                 self.assertEqual(deck.count("\n---\n"), slide_count)
                 self.assertIn("footer {", deck)
+
+
+class CreationSpanEnrichmentTests(unittest.TestCase):
+    def setUp(self):
+        self.provider = TracerProvider()
+        self.exporter = InMemorySpanExporter()
+        self.provider.add_span_processor(SimpleSpanProcessor(self.exporter))
+        self.addCleanup(self.provider.shutdown)
+        self.tracer = self.provider.get_tracer("creation-enrichment-test")
+        self.metadata = {
+            "type": "OpenAI", "name": "gpt-5.6-terra",
+            "version": "2026-07-09", "deployment": "deployment-alias",
+        }
+        self.definition = PromptAgentDefinition(
+            model="deployment-alias", instructions="private instructions",
+            tools=[MCPTool(server_label="test-tool", server_url="https://example.invalid/mcp")],
+        )
+        self.scope = load_functions("586f0511", [
+            "add_agent_creation_metadata", "record_creation_request_id", "make_creation_response_hook",
+        ])
+
+    def fingerprint(self, definition=None, metadata=None):
+        with self.tracer.start_as_current_span("create") as span:
+            self.scope["add_agent_creation_metadata"](
+                span, definition or self.definition, metadata or self.metadata,
+            )
+        return self.exporter.get_finished_spans()[-1].attributes
+
+    def test_resolved_model_fields_and_digest_are_recorded_without_payload(self):
+        attributes = self.fingerprint()
+        self.assertEqual(attributes["app.model.name"], "gpt-5.6-terra")
+        self.assertEqual(attributes["app.model.version"], "2026-07-09")
+        self.assertEqual(attributes["app.model.publisher"], "OpenAI")
+        self.assertEqual(attributes["app.model.deployment"], "deployment-alias")
+        self.assertRegex(attributes["app.agent.config.sha256"], r"^[0-9a-f]{64}$")
+        self.assertFalse(attributes["app.azure.request_id_available"])
+        self.assertNotIn("private instructions", str(dict(attributes)))
+
+    def test_fingerprint_is_stable_across_object_key_order(self):
+        content = self.definition.as_dict()
+        reordered = SimpleNamespace(as_dict=lambda: dict(reversed(list(content.items()))))
+        self.assertEqual(
+            self.fingerprint()["app.agent.config.sha256"],
+            self.fingerprint(reordered, dict(reversed(list(self.metadata.items()))))["app.agent.config.sha256"],
+        )
+
+    def test_instruction_tool_and_resolved_version_changes_change_digest(self):
+        baseline = self.fingerprint()["app.agent.config.sha256"]
+        for field, value in (
+            ("instructions", "changed instructions"),
+            ("tools", [MCPTool(server_label="other", server_url="https://example.invalid/other").as_dict()]),
+        ):
+            with self.subTest(field=field):
+                data = {**self.definition.as_dict(), field: value}
+                changed = self.fingerprint(SimpleNamespace(as_dict=lambda: data))
+                self.assertNotEqual(changed["app.agent.config.sha256"], baseline)
+        changed = self.fingerprint(metadata={**self.metadata, "version": "2026-08-01"})
+        self.assertNotEqual(changed["app.agent.config.sha256"], baseline)
+
+    def test_request_id_and_gateway_id_are_allowlisted(self):
+        with self.tracer.start_as_current_span("create") as span:
+            response = SimpleNamespace(http_response=SimpleNamespace(headers={
+                "X-Request-ID": " service-request ",
+                "APIM-Request-ID": "gateway-request",
+                "Authorization": "must-not-be-exported",
+            }))
+            self.assertIs(self.scope["make_creation_response_hook"](span)(response), response)
+        attributes = self.exporter.get_finished_spans()[-1].attributes
+        self.assertEqual(attributes["app.azure.request_id"], "service-request")
+        self.assertEqual(attributes["app.azure.apim_request_id"], "gateway-request")
+        self.assertEqual(attributes["app.azure.request_id_header"], "x-request-id")
+        self.assertTrue(attributes["app.azure.request_id_available"])
+        self.assertNotIn("must-not-be-exported", str(dict(attributes)))
+
+    def test_request_id_header_fallbacks(self):
+        for header in ("x-ms-request-id", "apim-request-id", "request-id"):
+            with self.subTest(header=header):
+                with self.tracer.start_as_current_span("create") as span:
+                    self.scope["record_creation_request_id"](span, SimpleNamespace(headers={header: "id"}))
+                attributes = self.exporter.get_finished_spans()[-1].attributes
+                self.assertEqual(attributes["app.azure.request_id"], "id")
+                self.assertEqual(attributes["app.azure.request_id_header"], header)
+
+    def test_missing_request_id_is_explicit_not_fabricated(self):
+        with self.tracer.start_as_current_span("create") as span:
+            self.scope["add_agent_creation_metadata"](span, self.definition, self.metadata)
+            self.scope["record_creation_request_id"](span, SimpleNamespace(headers={}))
+        exported = self.exporter.get_finished_spans()[-1]
+        self.assertFalse(exported.attributes["app.azure.request_id_available"])
+        self.assertNotIn("app.azure.request_id", exported.attributes)
+        self.assertIn("create_agent.request_id_unavailable", [event.name for event in exported.events])
+
+    def run_creation_block(self, agent_variable, fail=False):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        source = "".join(next(cell["source"] for cell in notebook["cells"] if cell["id"] == "586f0511"))
+        block = next(
+            node for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.With) and any(
+                isinstance(name, ast.Name) and name.id == agent_variable
+                for name in ast.walk(node.items[0].context_expr.args[0])
+            )
+        )
+        error = RuntimeError("creation rejected")
+        error.response = SimpleNamespace(headers={"x-request-id": "failed-request"})
+
+        def create_version(*, agent_name, definition, raw_response_hook):
+            self.assertEqual(definition.model, "deployment-alias")
+            if fail:
+                raise error
+            raw_response_hook(SimpleNamespace(http_response=SimpleNamespace(headers={
+                "x-request-id": "successful-request",
+            })))
+            return SimpleNamespace(id=f"{agent_name}:9", version="9")
+
+        scope = {
+            **self.scope, "tracer": self.tracer, "SpanKind": SpanKind,
+            "Status": Status, "StatusCode": StatusCode, "PromptAgentDefinition": PromptAgentDefinition,
+            "project_client": SimpleNamespace(agents=SimpleNamespace(create_version=create_version)),
+            "main_agent_name": "main", "sentinel_agent_name": "sentinel",
+            "main_agent_creation_context": None, "sentinel_creation_context": None,
+            "main_agent_instructions": "private instructions", "sentinel_agent_instructions": "private instructions",
+            "model_name": "deployment-alias", "model_deployment_metadata": self.metadata,
+            "main_tool_labels": ["test-tool"], "sentinel_tool_labels": ["test-tool"],
+            "mcp_tool_spec": self.definition.tools[0], "sentinel_tool": self.definition.tools[0],
+            "content_recording_enabled": False, "demo_run_id": "test-run", "telemetry_session_id": "test-session",
+        }
+        compiled = compile(ast.Module(body=[block], type_ignores=[]), str(NOTEBOOK), "exec")
+        if fail:
+            with self.assertRaisesRegex(RuntimeError, "creation rejected"):
+                exec(compiled, scope)
+        else:
+            exec(compiled, scope)
+        return self.exporter.get_finished_spans()[-1]
+
+    def test_both_existing_creation_spans_receive_metadata_and_hook(self):
+        for variable in ("main_agent_name", "sentinel_agent_name"):
+            with self.subTest(agent=variable):
+                span = self.run_creation_block(variable)
+                self.assertEqual(span.kind, SpanKind.CLIENT)
+                self.assertEqual(span.attributes["demo.run_id"], "test-run")
+                self.assertEqual(span.attributes["app.azure.request_id"], "successful-request")
+                self.assertEqual(span.attributes["app.model.version"], "2026-07-09")
+                self.assertRegex(span.attributes["app.agent.config.sha256"], r"^[0-9a-f]{64}$")
+                self.assertNotIn("private instructions", str(dict(span.attributes)))
+
+    def test_both_creation_failures_keep_request_id_and_error_status(self):
+        for variable in ("main_agent_name", "sentinel_agent_name"):
+            with self.subTest(agent=variable):
+                span = self.run_creation_block(variable, fail=True)
+                self.assertEqual(span.status.status_code, StatusCode.ERROR)
+                self.assertEqual(span.attributes["app.azure.request_id"], "failed-request")
+                self.assertEqual(span.attributes["error.type"], "RuntimeError")
+
+
+class PersistenceSpanTests(unittest.TestCase):
+    def run_persistence(self, fail=False):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        source = "".join(next(cell["source"] for cell in notebook["cells"] if cell["id"] == "2692d274"))
+        block = next(
+            node for node in ast.parse(source).body
+            if isinstance(node, ast.With)
+            and node.items[0].context_expr.args
+            and isinstance(node.items[0].context_expr.args[0], ast.Constant)
+            and node.items[0].context_expr.args[0].value == "persist_story"
+        )
+        provider = TracerProvider()
+        exporter = InMemorySpanExporter()
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        append = Mock(side_effect=OSError("disk full")) if fail else Mock(return_value=140)
+        scope = {
+            "tracer": provider.get_tracer("persist-test"), "persist_context": None,
+            "run_id": "test-run", "session_id": "test-session", "main_agent_display_name": "main",
+            "main_agent_id": "main:9", "main_agent_version": "9", "model_name": "alias",
+            "generated_at_iso": "2026-09-15T00:00:00Z", "main_model_metadata": {},
+            "story_prompt": "prompt", "story_text": "story", "facts_text": "facts", "assistant_text": "answer",
+            "main_tool_labels": ["learn"], "conversation_id_map": {"story": "a", "facts": "b"},
+            "build_info": {"foundry_project_endpoint": "https://example.invalid", "rg": "group"},
+            "marp_output_path": Path("marp") / "test.md", "stories_file": Path("stories.json"),
+            "append_story": append,
+        }
+        compiled = compile(ast.Module(body=[block], type_ignores=[]), str(NOTEBOOK), "exec")
+        try:
+            if fail:
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    exec(compiled, scope)
+            else:
+                exec(compiled, scope)
+            append.assert_called_once()
+            return exporter.get_finished_spans()[0]
+        finally:
+            provider.shutdown()
+
+    def test_persistence_is_run_queryable_with_its_own_interaction(self):
+        span = self.run_persistence()
+        self.assertEqual(span.kind, SpanKind.INTERNAL)
+        self.assertEqual(span.attributes["demo.run_id"], "test-run")
+        self.assertEqual(span.attributes["app.session.id"], "test-session")
+        self.assertEqual(span.attributes["app.interaction"], "persistence")
+        self.assertEqual(span.attributes["gen_ai.agent.id"], "main:9")
+        self.assertEqual(span.attributes["app.story.id"], 140)
+
+    def test_persistence_failure_is_recorded_and_propagated(self):
+        span = self.run_persistence(fail=True)
+        self.assertEqual(span.status.status_code, StatusCode.ERROR)
+        self.assertEqual(span.attributes["demo.run_id"], "test-run")
+        self.assertEqual(span.attributes["error.type"], "OSError")
+        self.assertIn("exception", [event.name for event in span.events])
+
+    def test_ingestion_gate_waits_for_persistence(self):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        source = "".join(next(cell["source"] for cell in notebook["cells"] if cell["id"] == "6e3dcab6"))
+        self.assertIn('PersistenceSpans=countif(Name == "persist_story" and RootInteraction == "persistence")', source)
+        self.assertIn('coverage["PersistenceSpans"] == 1', source)
+        self.assertNotIn('expected_interactions.add("persistence")', source)
 
 
 class TelemetryPolicyTests(unittest.TestCase):

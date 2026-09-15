@@ -2,9 +2,9 @@
 __pycache__/
 *.pyc
 stories.json
-# Generated notebook decks can contain prompts, responses and sign-in details.
-marp/main-project-agent-*.md
-marp/sentinel-project-agent-*.md
+# Generated decks and exports can contain prompts, responses and sign-in details.
+/marp/*
+!/marp/.gitkeep
 .ipynb_checkpoints/
 .DS_Store
 *.jpg

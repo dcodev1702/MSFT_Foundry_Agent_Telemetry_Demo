@@ -169,10 +169,14 @@ Section **3.1** configures the notebook's observability path end to end:
 - **One content policy** controls SDK and custom spans: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `true` for this demo, accepts only `true`/`false` (case-insensitive), and is passed as an explicit boolean to Projects. Set it explicitly to `false` to opt out. The obsolete Azure content flag is ignored. Changing policy requires a kernel restart.
 - **Trace-only export is enforced** with `OTEL_LOGS_EXPORTER=none`, `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False`, and `enable_performance_counters=False`. Sampling is explicitly fixed at 100%, overriding inherited sampling settings for this demo. `OTEL_TRACES_EXPORTER=none` is rejected.
 - **Native resources preserve service/session/project identity**, add `deployment.environment.name`, and retain additional `OTEL_RESOURCE_ATTRIBUTES`. Supply `cloud.region` only from verified deployment metadata; the notebook does not guess it.
+- **Agent creation spans carry diagnostic metadata**: resolved model publisher/name/version/deployment, a deterministic SHA-256 configuration fingerprint, and allowlisted service/API Management request IDs when supplied by the response. These enrich existing client spans; they do not simulate Foundry service spans.
+- **Persistence is run-correlated**: `persist_story` explicitly records the run, session and agent identity with `app.interaction=persistence`. Section 6 requires exactly one persistence span in addition to the story/facts/Sentinel response coverage.
 
 Content capture is enabled by default for this controlled demo: prompts, responses and tool payloads may be exported to Application Insights, including sensitive Sentinel data. Set the environment variable to `false` before initialization when this is not appropriate. Restarting a previously initialized kernel is necessary to pick up the new default; an inherited explicit `false` still takes precedence. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
 
-See [observability.md](observability.md) for the full environment variable reference, version posture, and design notes.
+See [observability.md](observability.md) for the full environment variable reference,
+version posture and design notes, and [OTEL-Agent-Spans.md](OTEL-Agent-Spans.md)
+for per-cell span inventories, code examples and validation evidence.
 
 ### MCP Tool Setup
 
