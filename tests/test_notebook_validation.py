@@ -122,7 +122,7 @@ class ResponseValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "did not complete"):
             self.run_responses([response("not a success", status="failed")])
 
-    def test_content_is_not_recorded_by_default(self):
+    def test_content_is_not_recorded_when_disabled(self):
         self.run_responses([response("private completion")])
         self.assertNotIn("app.prompt", self.span.attributes)
         self.assertNotIn("app.completion", self.span.attributes)
@@ -233,7 +233,7 @@ class TelemetryPolicyTests(unittest.TestCase):
         return self.scope["configure_notebook_telemetry"](**(arguments | overrides))
 
     def test_actual_distro_configuration_is_trace_only(self):
-        self.assertFalse(self.initialize())
+        self.assertTrue(self.initialize())
         config = self.configurations[0]
         self.assertFalse(config["disable_tracing"])
         self.assertTrue(config["disable_logging"])
@@ -247,7 +247,23 @@ class TelemetryPolicyTests(unittest.TestCase):
         self.initialize()
         self.assertEqual(self.configurations[0]["sampling_ratio"], 1.0)
 
-    def test_old_content_flag_does_not_enable_custom_content(self):
+    def test_content_recording_defaults_to_enabled(self):
+        self.assertTrue(self.initialize())
+        self.assertEqual(os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"], "true")
+        self.instrumentor.instrument.assert_called_once_with(
+            enable_content_recording=True,
+            enable_trace_context_propagation=True,
+            enable_baggage_propagation=True,
+        )
+
+    def test_explicit_false_opts_out_of_content_recording(self):
+        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = " FALSE "
+        self.assertFalse(self.initialize())
+        self.assertEqual(os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"], "false")
+        self.assertFalse(self.instrumentor.instrument.call_args.kwargs["enable_content_recording"])
+
+    def test_old_content_flag_does_not_override_explicit_opt_out(self):
+        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "false"
         os.environ["AZURE_TRACING_GEN_AI_CONTENT_RECORDING_ENABLED"] = "true"
         self.assertFalse(self.initialize())
         self.instrumentor.instrument.assert_called_once_with(
@@ -292,7 +308,7 @@ class TelemetryPolicyTests(unittest.TestCase):
 
     def test_changed_content_policy_requires_kernel_restart(self):
         self.initialize()
-        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "true"
+        os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = "false"
         with self.assertRaisesRegex(RuntimeError, "Restart the kernel"):
             self.initialize()
         self.configure.assert_called_once()
@@ -326,7 +342,7 @@ class TelemetryPolicyTests(unittest.TestCase):
 
     def test_sdk_content_policy_mismatch_is_reported(self):
         self.instrumentor.is_content_recording_enabled.side_effect = None
-        self.instrumentor.is_content_recording_enabled.return_value = True
+        self.instrumentor.is_content_recording_enabled.return_value = False
         with self.assertRaisesRegex(RuntimeError, "requested content policy"):
             self.initialize()
 

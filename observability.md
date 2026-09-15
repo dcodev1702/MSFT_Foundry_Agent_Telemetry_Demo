@@ -29,7 +29,7 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-wi
 | Resource identity | Native `Resource.create(attributes)` with explicit service, session, environment and project values | Preserves existing identity and additional `OTEL_RESOURCE_ATTRIBUTES`; adds `deployment.environment.name` alongside the legacy environment attribute. |
 | GenAI semantic conventions | Owned by Azure AI Projects' installed preview instrumentor | The Agent Framework `gen_ai_latest_experimental` opt-in does not select the Projects SDK's schema and is no longer set here. |
 | Baggage propagation | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE=true` | Lets the notebook's run, agent, and interaction baggage keys flow with downstream trace context. |
-| Explicit content-recording policy | One strict `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` boolean, default `false` | SDK and custom content agree. The obsolete Azure flag has no effect. UPN is not propagated in baggage; error diagnostics and local output still need sensitive-data handling. |
+| Explicit content-recording policy | One strict `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` boolean, default `true` for this demo | SDK and custom content agree. Prompts, responses and tool payloads may contain sensitive data; set the flag to `false` before initialization to opt out. The obsolete Azure flag has no effect. UPN is not propagated in baggage. |
 | Safer kernel reruns | Identical configurations reuse the provider; changed identity/backend/content or partial failure requires a restart | Prevents duplicate exporters and misleading status after configuration changes. |
 | Trace-only local export posture | `OTEL_LOGS_EXPORTER=none`, `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False`, `enable_performance_counters=False` | Unlike the former `disable_logging`/`disable_metrics` arguments, these controls take effect in Azure Monitor 1.8.10. |
 
@@ -167,7 +167,7 @@ These are the important environment variables used in the Windows notebook's cur
 | `AZURE_TRACING_GEN_AI_ENABLE_TRACE_CONTEXT_PROPAGATION` | Yes | Enables W3C trace-context propagation for OpenAI clients returned by `get_openai_client()`. | Helps correlate client-side notebook spans with downstream Azure-side work. |
 | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE` | Yes | Includes the `baggage` header with propagated trace context. | Used because the notebook's baggage keys are limited to safe correlation metadata such as run ID, agent ID, interaction name, and session ID. |
 | `AZURE_TRACING_GEN_AI_INSTRUMENT_RESPONSES_API` | Yes | Enables Responses API instrumentation in the Foundry tracing path. | Used so `responses.create(...)` activity is observable in preview client-side traces. |
-| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Yes | Controls SDK and custom prompt/completion capture. | Defaults to `false`; accepts case-insensitive `true`/`false`, normalized once and passed explicitly to the instrumentor. Invalid values fail before provider setup. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Yes | Controls SDK and custom prompt/completion capture. | Defaults to `true` for this demo; explicit `false` opts out. Accepts case-insensitive `true`/`false`, normalized once and passed explicitly to the instrumentor. Invalid values fail before provider setup. |
 | `OTEL_LOGS_EXPORTER` / `OTEL_METRICS_EXPORTER` | Yes | Select signals to export. | Both set to `none`; these are the effective signal-disable controls in Azure Monitor 1.8.10. |
 | `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` | Yes | Select the trace sampler. | Set to `microsoft.fixed_percentage` / `1.0` so inherited settings cannot reduce demo coverage. |
 | `OTEL_TRACES_EXPORTER` | Checked | Can disable tracing when set to `none`. | `none` is rejected with an actionable error instead of silently producing no traces. |
@@ -181,7 +181,7 @@ These are the main variables to understand when operating Section 3.1.
 | Variable | Recommendation | Why it helps |
 | --- | --- | --- |
 | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE=true` | Keep enabled while baggage remains limited to safe correlation keys | Makes the notebook's run and agent identifiers available across downstream trace context. |
-| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` | Turn on only for short-lived debugging sessions | Allows prompt, response, tool-argument, and tool-result content to appear in traces, which is valuable for debugging but carries data-exposure risk. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` | Demo default; explicitly set `false` outside approved content-capture scenarios | Allows prompt, response, tool-argument, and tool-result content to appear in traces, which carries data-exposure risk. |
 | `AZURE_TRACING_GEN_AI_INCLUDE_BINARY_DATA` | Leave unset/off | Binary payload recording is unnecessary for this text-only demo. |
 | `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` | Fixed at 100% for this demo | Changing sampling for production requires revisiting the complete-trace validation gate. |
 
@@ -207,9 +207,11 @@ That choice is safe here because the current baggage keys are limited to correla
 
 The Windows 3.1 path now makes message-content capture an explicit policy decision. That matters for agent debugging because content recording is the difference between seeing only operation shape versus seeing the actual prompt/tool payload that drove the result.
 
-Set `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` only for approved debugging before initialization. The helper parses it once, uses the same boolean for SDK and custom spans, and rejects ambiguous values such as `1`. A pre-existing `true` is an explicit opt-in, not overridden. Changing it later requires restarting the kernel; the notebook refuses to display a new policy while retaining an old provider configuration.
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `true` for this controlled demo. Set it explicitly to `false` before initialization to opt out of recording potentially sensitive prompts, responses and tool payloads. The helper parses it once, uses the same boolean for SDK and custom spans, and rejects ambiguous values such as `1`. Explicit environment values take precedence over the default, including a `false` left by a previous run. Restart the kernel to pick up the changed default; if `false` is inherited from the launching environment, change or remove that override as well. The notebook refuses to display a new policy while retaining an old provider configuration.
 
 This setting is not a universal redaction filter. Exception messages, MCP diagnostics, saved stories and generated decks may contain sensitive information independently of normal prompt/completion capture.
+
+The live-run evidence above records the earlier content-off policy. The later default-on change is covered by local regression tests for the default, explicit opt-out, SDK agreement and restart guard; that historical content-off result is not a claim about the new default.
 
 ### 4. Harden the initialization order for notebook reruns
 

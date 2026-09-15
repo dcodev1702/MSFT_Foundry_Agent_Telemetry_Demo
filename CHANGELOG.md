@@ -7,6 +7,18 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Demo content recording enabled by default
+
+- Default `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true` for the
+  controlled Windows demo, while respecting an explicit `false` opt-out.
+- Add comments warning that prompts, responses and tool payloads may be sensitive,
+  and explain the kernel restart needed when changing the policy.
+- Update the HTML status, notebook notes and documentation to distinguish the
+  enabled demo default from an explicit opt-out.
+- Add regression coverage for default-on SDK/custom policy and explicit opt-out;
+  retain strict validation and restart guards. Historical live-run evidence still
+  describes the earlier content-off configuration.
+
 ## Unreleased — Telemetry policy and dependency simplification
 
 - Enforce trace-only export using `OTEL_LOGS_EXPORTER=none`,
