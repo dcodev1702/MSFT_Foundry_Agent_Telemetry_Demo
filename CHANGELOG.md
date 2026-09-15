@@ -7,6 +7,36 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased — Visible model metadata in both Marp decks
+
+- Add an every-slide footer with model type/provider, underlying name and version
+  to the story/Learn and Sentinel decks. Keep deployment aliases and response
+  model identifiers on the run-metadata slide, separate from agent versions.
+- Resolve metadata once during agent setup with the existing Foundry SDK and
+  credentials; validate final response identities and persist the snapshot in
+  generated records. Do not infer a version from an alias or hide lookup errors.
+- Add eight metadata/rendering regressions (42 tests pass). Export and visually
+  validate private previews of both deck types using saved responses: all seven
+  slides show the footer without clipping or overlap. Preserve the active run's
+  outputs and records; no new model inference was needed for preview generation.
+
+## Unreleased — GPT-5.6 Terra notebook deployment
+
+- Add a separate `gpt-5.6-terra` deployment (OpenAI model version `2026-07-09`,
+  GlobalStandard, capacity 250) to the existing East US 2 Foundry account and
+  select it through the local Git-ignored `genai_model` metadata value.
+  Preserve the previous `gpt-5.4` deployment and the current chat model.
+- Document deployment-name versus underlying-model identity, how to switch an
+  existing notebook deployment, and the scope of the unchanged deployment menu.
+  Keep the notebook code metadata-driven rather than hardcoding Terra.
+- Validate all 10 runtime cells on Terra: completed story, actual Learn and
+  SigninLogs MCP calls, persisted records/decks, and current-run telemetry with
+  55 spans, 8 Responses API dependencies, 13 GenAI spans and zero failures.
+  No table-discovery call or new interactive authentication was required.
+- Correct a test-only model-name expectation to accept the verified alias and
+  versioned model name; re-query the same run to confirm Terra telemetry.
+  Environment setup cells were not rerun and dependencies were unchanged.
+
 ## Unreleased — Explicit SigninLogs SDL routing
 
 - Switch the shared Sentinel system/user policy and exact query template to

@@ -16,7 +16,7 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
 | **Telemetry Read Access** | Log Analytics Reader (or equivalent query permissions) on the workspace linked to Application Insights; activate required PIM roles before the run |
 | **Sentinel MCP** | Existing Foundry project connection, OAuth consent, and Sentinel/data-lake access for the signed-in identity; required to run every cell including Section 5.1 |
 | **Microsoft Foundry Project** | Connected to an **Application Insights** instance backed by a **Log Analytics workspace** |
-| **Model Deployment** | One allowed model (`gpt-4.1-mini`, `gpt-5.3`, `gpt-5.4`, or `grok-4-1-fast-reasoning`) is selected during deployment and auto-deployed — no manual setup needed |
+| **Model Deployment** | The deployment script offers `gpt-4.1-mini`, `gpt-5.3`, `gpt-5.4`, or `grok-4-1-fast-reasoning`. The notebook can also use an existing compatible deployment, such as `gpt-5.6-terra`, through its local build metadata (see below). |
 | **Python** | Python 3.14+ for Win11 or Python 3.13+ for macOS, with `venv` support |
 | **Jupyter Notebook** | VS Code with Jupyter extension or JupyterLab |
 
@@ -92,6 +92,21 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 
 For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](deployment/run-smoke-checks.sh) and then exercise the manual Teams smoke sequence from [deployment/OPERATIONS-RUNBOOK.md](deployment/OPERATIONS-RUNBOOK.md).
 
+### Model Metadata in Marp Outputs
+
+Both the main story/Learn deck and the Sentinel deck display a footer on every
+slide with **LLM type/provider**, **model name**, and **model version**. For the
+current deployment, these are `OpenAI`, `gpt-5.6-terra`, and `2026-07-09`.
+The run-metadata slide lists the deployment alias and response model identifiers
+separately; neither is confused with the agent version.
+
+Section 4 resolves the underlying model metadata once through
+`project_client.deployments.get`. Sections 5 and 5.1 validate the response model
+against that snapshot and persist it with each record's `model_metadata`.
+Missing deployment metadata or an unexpected response model raises an explicit
+error rather than displaying guessed values. Rerun **Section 4**, then **5 and
+5.1**, to regenerate both decks with the footer after updating the notebook.
+
 ---
 
 ## 🔑 Key Configuration
@@ -101,9 +116,46 @@ For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](
 The deployment script writes a repo-local `build_info-<suffix>.json` file at build time. The notebooks read the latest matching file in the **Confirm Existing Deployment** section and reuse it in **Section 3** to populate:
 
 - `foundry_proj_ep` → the Microsoft Foundry project endpoint
-- `genai_model` → the model name used when creating the agent
+- `genai_model` → the model deployment name used when creating both notebook agents
 
 This removes the need to hardcode the Foundry project endpoint in the notebook or store it in source control.
+
+### Switching the Notebook Model
+
+The current local demo configuration selects **`gpt-5.6-terra`**, backed by the
+OpenAI model **`gpt-5.6-terra` version `2026-07-09`** on **GlobalStandard** in the
+existing East US 2 Foundry account. It is a separate deployment; the previous
+`gpt-5.4` deployment is retained. That older deployment name is an alias for
+`gpt-5.4-mini`, not proof that the underlying model is GPT-5.4.
+
+To select an already-provisioned deployment, update only `genai_model` in the
+local `build_info-<suffix>.json` read by the notebook:
+
+```json
+{
+  "genai_model": "gpt-5.6-terra"
+}
+```
+
+This illustrates one field; preserve all other fields in your existing file.
+
+Use the **deployment name**, and ensure its model supports the Responses API and
+the notebook's MCP tools. Editing this field does not provision a model. The
+build metadata is intentionally Git-ignored; this example does not automatically
+switch another user's environment or change the deployment script's model menu.
+Other notebooks that read the same build metadata will also see the selected
+deployment on their next run.
+
+Restart the kernel and rerun the runtime cells from **Confirm Existing Deployment**
+through **Section 6**. Sections 3 and 4 use the selected deployment for both agents,
+model environment variables and request telemetry. No SDK update, chat-model
+change or new authentication flow is required when the existing credentials and
+Sentinel connection remain authorized.
+
+The [Terra validation evidence](observability.md#gpt-56-terra-notebook-validation--2026-09-15)
+covers all 10 runtime cells, real Learn/Sentinel tool calls and model metadata in
+current-run telemetry. The three environment/dependency setup cells were not
+rerun because the dependency set did not change.
 
 ### Observability
 

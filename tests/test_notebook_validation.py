@@ -280,6 +280,126 @@ class SentinelTableRoutingTests(unittest.TestCase):
                 ))
 
 
+class MarpModelMetadataTests(unittest.TestCase):
+    def setUp(self):
+        self.scope = load_functions("586f0511", [
+            "resolve_model_metadata", "capture_model_metadata", "format_model_footer",
+        ])
+        self.metadata = {
+            "type": "OpenAI", "name": "gpt-5.6-terra",
+            "version": "2026-07-09", "deployment": "demo-model-alias",
+        }
+        self.deployment = SimpleNamespace(
+            name="demo-model-alias", model_publisher="OpenAI",
+            model_name="gpt-5.6-terra", model_version="2026-07-09",
+        )
+        self.client = SimpleNamespace(deployments=Mock())
+        self.client.deployments.get.return_value = self.deployment
+
+    def test_metadata_uses_underlying_model_not_deployment_alias(self):
+        metadata = self.scope["resolve_model_metadata"](self.client, "demo-model-alias")
+        self.assertEqual(metadata, self.metadata)
+        self.client.deployments.get.assert_called_once_with(name="demo-model-alias")
+
+    def test_missing_metadata_is_not_invented(self):
+        for value in (None, "", " ", 37):
+            with self.subTest(version=value):
+                self.deployment.model_version = value
+                with self.assertRaisesRegex(ValueError, "version"):
+                    self.scope["resolve_model_metadata"](self.client, "demo-model-alias")
+
+    def test_metadata_lookup_errors_propagate(self):
+        self.client.deployments.get.side_effect = RuntimeError("lookup failed")
+        with self.assertRaisesRegex(RuntimeError, "lookup failed"):
+            self.scope["resolve_model_metadata"](self.client, "demo-model-alias")
+
+    def test_response_alias_name_and_version_are_supported(self):
+        for model in ("demo-model-alias", "gpt-5.6-terra", "gpt-5.6-terra-2026-07-09"):
+            with self.subTest(response_model=model):
+                result = self.scope["capture_model_metadata"](
+                    self.metadata, SimpleNamespace(model=model),
+                )
+                self.assertEqual(result["response_model"], model)
+                self.assertEqual(result["version"], "2026-07-09")
+                self.assertNotIn("response_model", self.metadata)
+
+    def test_unexpected_response_model_cannot_be_mislabeled(self):
+        for model in (None, "", "gpt-5.4", "gpt-5.6-terra-2026-08-01"):
+            with self.subTest(response_model=model):
+                with self.assertRaisesRegex(ValueError, "model"):
+                    self.scope["capture_model_metadata"](self.metadata, SimpleNamespace(model=model))
+
+    def test_footer_escapes_html(self):
+        metadata = {**self.metadata, "name": "<model>&"}
+        footer = self.scope["format_model_footer"](metadata)
+        self.assertIn("&lt;model&gt;&amp;", footer)
+        self.assertNotIn("<model>", footer)
+
+    def test_model_metadata_is_persisted_and_passed_to_both_builders(self):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        cells = {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
+        for cell_id, metadata_name in (
+            ("2692d274", "main_model_metadata"), ("ef551c01", "sentinel_model_metadata"),
+        ):
+            with self.subTest(cell=cell_id):
+                tree = ast.parse(cells[cell_id])
+                record = next(
+                    node.value for node in ast.walk(tree)
+                    if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == "story_record"
+                            for target in node.targets)
+                )
+                metadata_value = next(
+                    value for key, value in zip(record.keys, record.values)
+                    if isinstance(key, ast.Constant) and key.value == "model_metadata"
+                )
+                self.assertEqual(metadata_value.id, metadata_name)
+                call = next(
+                    node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name) and node.func.id == "build_marp_deck"
+                )
+                argument = next(kw.value for kw in call.keywords if kw.arg == "model_metadata")
+                self.assertEqual(argument.id, metadata_name)
+
+    def test_both_decks_show_metadata_without_changing_slide_counts(self):
+        metadata = {**self.metadata, "response_model": "gpt-5.6-terra-2026-07-09"}
+        common = {
+            "Path": Path, "format_model_footer": self.scope["format_model_footer"],
+            "generated_at_display": "2026-09-15 03:12:00Z",
+            "main_agent_display_name": "main-agent",
+            "sentinel_agent_display_name": "sentinel-agent",
+            "sentinel_workspace_name": "test-workspace",
+            "sentinel_subscription_name": "test-subscription",
+            "sentinel_target_upn": "user@example.invalid",
+        }
+        for cell_id, names, kwargs, slide_count in (
+            ("2692d274", ["strip_heading", "normalize_marp_text", "build_marp_deck"],
+             {"story_text": "Story.", "facts_text": "MSFT Learn Insights\nFacts.",
+              "conversation_map": {"story": "one", "facts": "two"},
+              "model_metadata": {"story": metadata, "facts": metadata}}, 4),
+            ("ef551c01", ["normalize_marp_text", "build_marp_deck"],
+             {"response_text": "Sentinel result.", "conversation_id": "three",
+              "model_metadata": metadata}, 3),
+        ):
+            with self.subTest(cell=cell_id):
+                builder = load_functions(cell_id, names, common)["build_marp_deck"]
+                deck = builder(
+                    **kwargs, story_id=1, marp_path=Path("marp") / "test.md",
+                    stories_path=Path("stories.json"),
+                )
+                footer = json.loads(next(
+                    line.removeprefix("footer: ") for line in deck.splitlines()
+                    if line.startswith("footer: ")
+                ))
+                self.assertIn("LLM type/provider: OpenAI", footer)
+                self.assertIn("Model name: gpt-5.6-terra", footer)
+                self.assertIn("Model version: 2026-07-09", footer)
+                self.assertIn("Model deployment: `demo-model-alias`", deck)
+                self.assertIn("gpt-5.6-terra-2026-07-09", deck)
+                self.assertEqual(deck.count("\n---\n"), slide_count)
+                self.assertIn("footer {", deck)
+
+
 class TelemetryPolicyTests(unittest.TestCase):
     def setUp(self):
         self.environment = patch.dict(os.environ, {

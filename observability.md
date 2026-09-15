@@ -114,6 +114,60 @@ The Sentinel orchestration span now carries both `demo.run_id` and `app.interact
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
 
+### Marp Model Identity
+
+The main story/Learn deck and Sentinel deck now show the model's publisher/type,
+underlying name and publisher-specific version in a visible footer on every
+slide. Section 4 obtains these values from the Foundry deployment API, not from
+the deployment alias, model-name string parsing, or agent version. Each final
+response must match the verified deployment alias, model name or versioned name.
+The run-metadata slide retains the deployment and response identifiers separately.
+
+The same snapshot is saved under `model_metadata` in each generated record;
+the main record keeps separate story/facts response identifiers. This describes
+the deployed LLM, not the client-side `service.version` or `app.session.id`.
+The new lookup uses the existing project credentials and does not add a package
+or authentication flow. Lookup/metadata errors remain explicit.
+
+All **42 local regression tests** pass. Private previews generated from the saved
+Terra responses were exported to HTML with Marp and checked in the browser:
+the four-slide main deck and three-slide Sentinel deck both show the footer on
+every slide, without footer clipping or content overlap. No fresh model inference
+was needed for this layout check. The active notebook run's decks and saved
+records were left untouched; rerun Section 4, then Sections 5 and 5.1, to regenerate
+those outputs with the updated generators.
+
+### GPT-5.6 Terra Notebook Validation — 2026-09-15
+
+The existing East US 2 account now has a separate **`gpt-5.6-terra`** deployment
+using model version **`2026-07-09`**, **GlobalStandard**, capacity **250**.
+The local Git-ignored build metadata selects that deployment. The old `gpt-5.4`
+deployment (backed by `gpt-5.4-mini`) remains intact; the chat model was not changed.
+
+Run **`3ef41db4-2f01-4194-ac78-2562798aac34`** completed all **10 runtime code
+cells** with interactive authentication blocked by test-only guards. The three
+environment/dependency setup cells were skipped; no SDK packages were changed.
+Validation confirmed:
+
+- Completed story, grounded Microsoft Learn MCP and Sentinel responses on Terra.
+- One actual interactive `SigninLogs` record for the requested identity, with
+  valid IP/time values and identity/IP reflected in the final answer.
+- Both persisted record types and their Marp outputs.
+- **55 correlated spans**, **8 Responses API dependencies** covering story,
+  facts and Sentinel, **13 GenAI spans**, and **zero failed spans**.
+- No `search_tables` call or span.
+
+The SDK emits both `gpt-5.6-terra` and `gpt-5.6-terra-2026-07-09` in request and
+response model attributes. An additional test initially expected only the
+unversioned deployment name and failed after the runtime cells and data checks
+had passed. The test was corrected to ignore empty attributes and accept only
+those two verified names; a fresh query of the same run passed. This was a
+validation-expectation correction, not a notebook or service failure.
+
+The source notebook remains cleared, and its runtime code matches the executed
+copy. Deployment selection is local configuration, not a hardcoded notebook
+default or an update to the infrastructure deployment menu.
+
 ### Direct Sentinel Table Routing — 2026-09-15
 
 To avoid the reported approximately six-second `execute_tool mcp_microsoft-sentinel-data.search_tables` step, system and user prompts share a known-table policy:
