@@ -1,5 +1,57 @@
 # OpenTelemetry Agent Spans
 
+## Current Section 6: spans plus GenAI content
+
+The final notebook cell (`6e3dcab6`) now presents an HTML observability report
+using [notebook_observability.py](notebook_observability.py). **`AppGenAIContent`
+enriches the span inventory; it does not replace it or create new spans.**
+
+| View | Purpose |
+|---|---|
+| Span-health summary | Required interaction/Responses coverage, GenAI chat spans, one persistence span, failures and service identity. All counts come from unique `AppDependencies` spans. |
+| Section workflow | Section 4 setup, Section 5 story/Learn/persistence, Section 5.1 Sentinel; root operations/durations, nested span/tool counts, agent versions and models. |
+| Content coverage/index | Conversation IDs, model and agent metadata, instructions, input/output sizes, tool payload availability and optional bounded previews from `AppGenAIContent`. |
+| Enriched inventory | One row per resource/trace/span, with content record IDs and counts. Parent IDs preserve the trace hierarchy. |
+| Root-call trend | Only notebook story/facts/Sentinel orchestration roots; service-side `invoke_agent` children cannot inflate calls or latency. |
+| Failure diagnostics | Failed spans and correlated exception messages; distinguish one failed call from its failed parent/child span chain. |
+
+The important correlation is:
+
+```text
+demo.run_id -> AppDependencies.OperationId
+(_ResourceId, OperationId, Id)
+              equals
+(_ResourceId, TraceId, SpanId) in AppGenAIContent
+```
+
+Deduplicate source rows, aggregate content per span, then left-join it. Preserve
+unmatched spans and report unmatched content separately. Conversation IDs are in
+`Attributes["gen_ai.conversation.id"]`; they may connect multiple traces. A
+content record's `Id` is not a span ID. Prefer `SystemInstructions`, otherwise
+parse structured `system`/`developer` input messages. Do not sum repeated
+client/service snapshots as unique turns.
+
+The last cell keeps its strict whole-run failure policy, including earlier failed
+attempts sharing the run ID. Content availability is a separate status. The
+metadata-only default does not request message previews; opt in with
+`SHOW_GENAI_CONTENT=True` only with local content recording enabled. Previews cap
+each payload at 1,200 characters, and detail views cap at 200 rows/groups.
+Coverage totals remain uncapped. Exception messages may contain sensitive data.
+
+**Read-only validation:** the existing successful run
+`8b2584d2-92d5-4e19-bdcf-37a12d56473f` still has **64 unique dependency spans** after
+enrichment: **34** have content records and **30** do not. All **34** content
+records correlate; **18** include developer instruction messages. The corrected
+trend reports **three notebook root calls**, not nested SDK/service operations.
+The earlier failure run still shows **four failed spans in one operation**, with
+the Sentinel MCP 403 visible in correlated exceptions. No new inference or agent
+versions were needed for this validation.
+
+Microsoft's **September 30, 2026** content-routing migration is covered in the
+[observability guide](observability.md#genai-content-and-the-section-6-report).
+The historical 49/50-span inventories below remain unchanged evidence from their
+original runs, not expected counts for future runs or the new content table.
+
 ## Backend agent endpoint migration
 
 The Windows notebook now supports an explicit **`agent_endpoint`** mode through
@@ -1058,7 +1110,7 @@ Span events such as `create_agent.start`, `create_agent.success`,
 are **not extra dependency spans**. Neither are attributes, response-output items,
 log records, metric points or content-capture payloads.
 
-## Section 6: reproduce the inventory
+## Historical Section 6: reproduce the 49-span inventory
 
 **Cell:** `6e3dcab6` -- **Validate Observability (Traces) in Log Analytics**
 
@@ -1161,5 +1213,7 @@ Microsoft references:
 
 - [Application Insights telemetry data model](https://learn.microsoft.com/en-us/azure/azure-monitor/app/data-model-complete)
 - [AppDependencies table reference](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/appdependencies)
+- [AppGenAIContent table reference](https://learn.microsoft.com/azure/azure-monitor/reference/tables/appgenaicontent)
+- [Dedicated GenAI content migration](https://learn.microsoft.com/azure/azure-monitor/app/data-model-complete#generative-ai-telemetry)
 - [Sentinel MCP data exploration tools](https://learn.microsoft.com/en-us/azure/sentinel/datalake/sentinel-mcp-data-exploration-tool)
 - [SigninLogs table schema](https://learn.microsoft.com/en-us/azure/azure-monitor/reference/tables/signinlogs)

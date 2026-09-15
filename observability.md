@@ -41,8 +41,8 @@ The telemetry path for this repo is:
 2. `configure_azure_monitor(...)` registers Azure Monitor exporters for the signals that remain enabled.
 3. The notebook retrieves the Application Insights connection string from the Foundry project at runtime by calling `project_client.telemetry.get_application_insights_connection_string()`.
 4. Azure Monitor sends the exported trace data to Application Insights.
-5. Because the Application Insights instance is workspace-based, the same telemetry is queryable in Log Analytics.
-6. Agent calls use the Foundry Responses API with `agent_reference`; client-side GenAI spans in the linked Application Insights resource support the Foundry Traces view. Portal rendering is a separate UI check from the Log Analytics assertions.
+5. Because the Application Insights instance is workspace-based, the same telemetry is queryable in Log Analytics. Dependency spans are in `AppDependencies`; captured standard GenAI content is routed to `AppGenAIContent` and correlated by trace/span identifiers.
+6. Agent calls use stable per-agent Responses endpoints in backend mode, or the project Responses API with `agent_reference` in explicit legacy mode. Client/service GenAI spans support the Foundry Traces view. Portal rendering is a separate UI check from the Log Analytics assertions.
 
 ![Pro-code observability stack for the Foundry agent demo](images/foundry-observability-stack.svg)
 
@@ -108,11 +108,129 @@ Section 6 is a validation gate, not just a query display:
 3. Scope to the current `demo.run_id`, then follow `OperationId` to include SDK and HTTP child spans that do not carry that custom attribute themselves.
 4. Poll for ingestion at 15-second intervals, up to 12 waits. Empty or old results cannot produce a pass.
 5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (`2026.09.15` for the latest run). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`. Responses wrappers are identified by `gen_ai.operation.name=responses.create` and a `/responses` name suffix, supporting both project and stable agent endpoints.
-6. Reject API errors and partial results. Display the end-to-end rows and a runs-only trend; include `sentinel-agent-query` in both scenarios.
+6. Reject API errors and partial results. Display an HTML report with stage totals, content availability, conversation snapshots, a joined span inventory, root-call trends and exception drill-downs. Copyable KQL remains available in expandable sections.
 
 The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist uses the supplied `SigninLogs` schema and plain KQL; it no longer requires table discovery.
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
+
+### GenAI Content and the Section 6 Report
+
+[notebook_observability.py](notebook_observability.py) owns the query builders and
+HTML rendering; the notebook retains workspace resolution, credential selection,
+trace flushing, bounded ingestion polling and service-identity validation.
+Rerunning Section 6 only queries existing telemetry; it does not invoke agents,
+change versions, install packages or create additional demo spans.
+
+| Question | Source and interpretation |
+|---|---|
+| Did the required operations reach telemetry? | `AppDependencies`: unique spans, failed spans/operations, Responses wrappers, GenAI chat spans and persistence. |
+| What happened in each notebook section? | Root interaction labels propagate to the trace's SDK/HTTP/service children. Stage totals show orchestration count/duration, tools, agent versions and models. |
+| What messages, instructions and tool payloads were captured? | `AppGenAIContent`: content snapshots, metadata and optional bounded previews. These are not additional spans or distinct agent calls. |
+| What failed? | Failed dependency spans plus `AppExceptions`, grouped by trace and parent span; exception messages are bounded but may contain sensitive data. |
+| How many logical calls and how long did they take? | The 15-minute trend counts only notebook story/facts/Sentinel roots. It excludes nested Foundry `invoke_agent` spans; P95 for a single call is that call's duration. |
+
+#### Correlation and cardinality
+
+1. Validate the run ID as a UUID and select its operations within six hours.
+2. Deduplicate dependency rows by `(_ResourceId, OperationId, Id)` and content
+   records by `(_ResourceId, Id)`, retaining the latest timestamp.
+3. Reduce root interaction context to one row per trace. Conflicting labels
+   produce an explicit ambiguous-correlation validation issue rather than
+   multiplying the span count.
+4. Aggregate content by `(_ResourceId, TraceId, SpanId)` **before** the left join.
+   Match `OperationId = TraceId`, dependency `Id = SpanId`, and the same resource.
+   Spans without content remain visible, while multiple content records can
+   annotate one span without multiplying it. The content index retains distinct
+   record IDs instead of arbitrarily selecting one message snapshot.
+5. Compute health and latency from spans alone. Content rows without matching
+   spans are reported as a warning, not discarded from the content index.
+
+`ConversationId` comes from `Attributes["gen_ai.conversation.id"]`; it can span
+multiple traces/turns. `ContentId` is the content record ID, not a span ID.
+The current pipeline's `Properties["_MS.GenAIContentId"]` also matches content
+`Id`, but the report uses the resource/trace/span relationship for enrichment.
+Client and service records may repeat input history. Do not sum their message
+counts or token attributes as unique conversation turns or total model cost.
+
+Instructions prefer the dedicated `SystemInstructions` field. When absent, the
+query parses `InputMessages` JSON and retains messages with role `system` or
+`developer`, including their structured parts. It does not regex-match legacy
+span properties. Missing agent/model values on SDK records can use the tagged
+root's metadata; unavailable fields remain labelled as not recorded.
+
+#### Reading, privacy and failure behavior
+
+- **Span-health PASS** requires the original strict coverage, failure,
+  persistence and identity checks. It does not independently prove answer
+  correctness, groundedness or successful tool semantics.
+- **Content AVAILABLE** means input/output content exists for every expected
+  interaction in this snapshot, not that every span should contain messages.
+  **WAITING / NOT RECORDED** identifies missing interactions separately. With
+  local recording disabled, content is not required for span health; independently
+  captured service content can still exist. Missing content is not an empty answer.
+- Empty message arrays do not count toward input/output coverage. Invalid JSON
+  message arrays generate an explicit warning and a state label in the index,
+  rather than being accepted as valid content or silently rendered as empty.
+- `SHOW_GENAI_CONTENT=False` is the Section 6 default. The query returns metadata,
+  sizes and instruction-source labels, but does not return message/tool preview
+  fields. Setting it to `True` requests bounded previews and requires the local
+  content-recording policy to be enabled. This display toggle does not change
+  capture settings or require a kernel restart.
+- Previews show at most **1,200 characters per field**, with original lengths
+  and explicit truncation notices. Index, inventory and diagnostic detail views
+  show up to **200 rows/groups**; coverage totals are uncapped. HTML-escape all
+  telemetry and KQL before display. No telemetry is treated as executable markup.
+- Queries are sequential snapshots and ingestion is asynchronous. Rerun the last
+  cell to refresh content. Table/permission/API/partial-result errors still raise;
+  there is no fallback to historical content, legacy pointers or invented values.
+- Exception messages are separate from the message-preview toggle and can contain
+  PII. Treat notebook outputs as sensitive; clear them before sharing. Consider
+  protected-table access for `AppGenAIContent`, with retention/access appropriate
+  to prompts and Sentinel results. Generated Marp content remains Git-ignored.
+- Rerunning an interaction can reuse the existing `demo.run_id`. The strict gate
+  includes earlier failed attempts even after a successful retry. The failure
+  report distinguishes failed span count from failed operation count and provides
+  correlated exception details. To validate a clean logical run, restart the
+  kernel and execute from Confirm Existing Deployment through Section 6, skipping
+  the environment/install cells. No failures are hidden or reclassified.
+
+#### Dedicated-table migration
+
+Microsoft documents that starting **September 30, 2026**, newly ingested values
+for `gen_ai.input.messages`, `gen_ai.output.messages`,
+`gen_ai.system_instructions`, `gen_ai.tool.definitions`,
+`gen_ai.tool.call.arguments`, `gen_ai.tool.call.result` and
+`gen_ai.evaluation.explanation` move out of legacy telemetry tables into
+`AppGenAIContent`. Legacy keys contain pointers; older data remains queryable.
+The report reads content from the dedicated table now. No preview-feature flags,
+RBAC, retention, logging/metrics exporters or SDK versions are changed here.
+
+Sources: [table schema](https://learn.microsoft.com/azure/azure-monitor/reference/tables/appgenaicontent),
+[migration guidance](https://learn.microsoft.com/azure/azure-monitor/app/data-model-complete#generative-ai-telemetry),
+[protected tables](https://learn.microsoft.com/azure/azure-monitor/logs/protected-tables-configure).
+
+#### Read-only validation evidence - 2026-09-15
+
+The enhanced final cell was executed in an isolated validation kernel against
+the previously completed run `8b2584d2-92d5-4e19-bdcf-37a12d56473f`, without
+replaying inference, setup/version synchronization or package installation.
+All generated queries executed successfully: **64 unique spans**, **34 matched
+content records**, **30 spans without content**, **29 input / 29 output records**,
+**18 instruction snapshots** (developer messages), **zero unmatched content**,
+**three notebook root calls**, and **zero failures**. Preview queries respected
+the 1,200-character bounds; the default report did not retrieve payload previews.
+
+The earlier failed run `50a8a785-9e4d-42ba-9b7e-96cb5bcaa9fd` was also queried:
+the new diagnostics correctly report **four failed spans in one operation** and
+the underlying Sentinel MCP **403 Forbidden**, despite the later successful retry.
+These are observations of specific saved runs, not fixed expected future counts.
+The **101 notebook regression tests** pass. Synthetic queries executed in the
+actual KQL engine also verified duplicate span/content deduplication, multiple
+content records per span, cross-resource isolation, absent content, empty and
+invalid message arrays, root-only trends and conflicting interaction labels.
+The HTML report was browser-checked, including its expandable views and layout
+at a 1,100-pixel viewport.
 
 ### Backend Endpoint Migration
 

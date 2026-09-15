@@ -21,6 +21,7 @@ from notebook_agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, get_pinned_agent,
     prepare_backend_agent, response_options, responses_url, sync_agent_version,
 )
+from notebook_observability import build_observability_queries
 
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "zolab-ai-agent-demo-win11.ipynb"
@@ -621,8 +622,9 @@ class PersistenceSpanTests(unittest.TestCase):
     def test_ingestion_gate_waits_for_persistence(self):
         notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
         source = "".join(next(cell["source"] for cell in notebook["cells"] if cell["id"] == "6e3dcab6"))
-        self.assertIn('PersistenceSpans=countif(Name == "persist_story" and RootInteraction == "persistence")', source)
-        self.assertIn('coverage["PersistenceSpans"] == 1', source)
+        query = build_observability_queries("00000000-0000-0000-0000-000000000001")["coverage"]
+        self.assertIn('PersistenceSpans=countif(Name == "persist_story" and RootInteraction == "persistence")', query)
+        self.assertIn("coverage_issues(coverage, expected_interactions)", source)
         self.assertNotIn('expected_interactions.add("persistence")', source)
 
 
@@ -757,8 +759,10 @@ class AgentEndpointRoutingTests(unittest.TestCase):
             self.assertIn("**response_options(agent_runtime,", cells[cell_id])
             self.assertIn("return responses_url(openai_client)", cells[cell_id])
             self.assertIn('"agent_invocation_mode": agent_runtime.mode', cells[cell_id])
-        self.assertIn('Name endswith "/responses"', cells["6e3dcab6"])
-        self.assertIn('tostring(Properties["gen_ai.operation.name"]) == "responses.create"', cells["6e3dcab6"])
+        self.assertIn('kql_coverage = observability_queries["coverage"]', cells["6e3dcab6"])
+        query = build_observability_queries("00000000-0000-0000-0000-000000000001")["coverage"]
+        self.assertIn('Name endswith "/responses"', query)
+        self.assertIn('tostring(Properties["gen_ai.operation.name"]) == "responses.create"', query)
 
 
 class AgentVersionSyncTests(unittest.TestCase):

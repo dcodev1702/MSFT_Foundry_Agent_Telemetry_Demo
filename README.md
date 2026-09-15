@@ -32,7 +32,7 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
 6. Run **Section 6** and inspect telemetry in the Azure Portal:
    - 📊 **Application Insights** — request/dependency traces
    - 🔍 **Microsoft Foundry** — agent execution traces
-   - 📡 **Log Analytics** — `AppDependencies` table queries
+   - 📡 **Log Analytics** — span health in `AppDependencies`, conversation/tool content in `AppGenAIContent`, and correlated exception drill-downs
 
 On Windows, Section 1 installs [requirements-notebook.txt](requirements-notebook.txt) and runs `pip check`. If SDKs were already imported before updating, restart the kernel and rerun from the beginning. The matrix below applies to the Windows notebook only; the macOS notebook and standalone [Agent Framework SDK PoC](agent-framework-demo/README-agent-framework-sdk-poc.md) have separate setup instructions.
 
@@ -266,6 +266,9 @@ Section **3.1** configures the notebook's observability path end to end:
 - **Native resources preserve service/session/project identity**, add `deployment.environment.name`, and retain additional `OTEL_RESOURCE_ATTRIBUTES`. Supply `cloud.region` only from verified deployment metadata; the notebook does not guess it.
 - **Agent setup spans carry diagnostic metadata**: resolved model publisher/name/version/deployment, a deterministic SHA-256 configuration fingerprint, and allowlisted service/API Management request IDs when supplied by the response. Backend mode emits `sync_agent` or `resolve_agent` according to its version policy and records the verified identity and active version; project mode retains `create_agent`. None simulates Foundry service spans.
 - **Persistence is run-correlated**: `persist_story` explicitly records the run, session and agent identity with `app.interaction=persistence`. Section 6 requires exactly one persistence span in addition to the story/facts/Sentinel response coverage.
+- **Section 6 presents an observability report**, not truncated JSON: stage-by-stage span coverage, agent/model/version metadata, conversation/content indexes, a joined span inventory, root-call latency trends, exception diagnostics and expandable current-run KQL.
+- **Content enriches spans rather than replacing them**: `AppGenAIContent` is joined by resource + trace + span after aggregation to prevent duplicate counts. The health gate remains span-based; missing content has its own status. Standard GenAI content moves out of legacy telemetry tables on September 30, 2026, so the report does not read those legacy content attributes.
+- **Message previews are separately opt-in**: set `SHOW_GENAI_CONTENT=True` in Section 6 to request/display up to 1,200 characters per message/tool field, only when local content recording is enabled. The default `False` shows metadata and character counts, without retrieving payload previews. Detail views cap at 200 rows; coverage counts are uncapped. Treat exception messages as potentially sensitive too.
 
 Content capture is enabled by default for this controlled demo: prompts, responses and tool payloads may be exported to Application Insights, including sensitive Sentinel data. Set the environment variable to `false` before initialization when this is not appropriate. Restarting a previously initialized kernel is necessary to pick up the new default; an inherited explicit `false` still takes precedence. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
 
@@ -355,7 +358,10 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Backend definition differs | Use the demo's `sync` policy to create/reuse and activate the matching version. Strict `pinned` policy deliberately requires a separate release. |
 | Version activated but local save failed | Fix the reported build-file problem and rerun sync. It reads the actual endpoint and repairs the checkpoint without duplicating the version. |
 | `SigninLogs` cannot be resolved | Verify the table in Data lake exploration with the same workspace and identity used by MCP. The sign-in demo explicitly targets `SigninLogs` and does not call `search_tables` or substitute another table. |
-| Section 6 reports missing telemetry | Confirm workspace query permissions, exporter connectivity and the current run ID; the cell waits up to 3 minutes between ingestion checks and fails rather than accepting historical/empty results |
+| Section 6 reports missing telemetry | Confirm workspace query permissions, exporter connectivity and the current run ID; the cell waits up to 3 minutes in total for span ingestion and fails rather than accepting historical/empty results |
+| Section 6 reports failed spans after a successful retry | Expand failed spans and correlated exceptions; one failed operation can create several failed spans. Earlier attempts sharing the same run ID remain in the strict gate. Restart the kernel and rerun the runtime cells for a new run ID; do not disable the failure check |
+| Span health passes but content is waiting/not recorded | Content availability is independent of span health. Check the local content policy, service-side capture, table permissions and ingestion; rerun Section 6 to refresh. No content does not mean an empty answer |
+| `AppGenAIContent` query is denied or the table is unavailable | Obtain appropriate read access, including protected-table access when configured, or verify content routing. Errors remain explicit; the notebook does not silently fall back to legacy content attributes |
 
 ---
 
@@ -369,6 +375,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 - [ ] **Section 5** returns a response and appends to `stories.json`
 - [ ] **Section 5.1** returns a Sentinel response when the Foundry project connection is available
 - [ ] **Section 6** reports current-run story, facts and Sentinel coverage, response dependencies, zero failed spans, and the expected service/version
+- [ ] **Section 6 content report** links the available snapshots without increasing the span count, reports input/output availability separately, and keeps sensitive previews hidden unless explicitly requested
 
 ---
 

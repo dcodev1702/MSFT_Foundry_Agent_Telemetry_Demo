@@ -7,6 +7,38 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased - GenAI content and an explanatory observability report
+
+- Enrich Section 6 dependency spans with `AppGenAIContent`, matching resource,
+  trace and span IDs. Deduplicate source records and aggregate content before the
+  left join; preserve spans without content, report unmatched content, and reject
+  ambiguous interaction correlation instead of multiplying counts.
+- Keep coverage, failures, latency and persistence span-based. Correct root-call
+  trends to exclude nested service `invoke_agent` spans. Preserve strict
+  whole-run failure semantics, including earlier failed attempts after retries.
+- Replace truncated JSON dumps with a section-by-section HTML report, content
+  status/index, agent/model/version metadata, trace/parent/content links, root-call
+  trends, exception drill-downs and expandable KQL. Show failed spans separately
+  from failed operation counts.
+- Read conversation IDs from content attributes and instructions from the
+  dedicated field or structured system/developer input messages. Stop reading
+  legacy span content values ahead of the September 30, 2026 routing migration.
+- Hide message/tool previews by default. Explicit preview opt-in requires local
+  content capture; bound fields to 1,200 characters, mark truncation, HTML-escape
+  values and cap detail views at 200 rows without capping coverage totals.
+  Document protected-table access, sensitive exceptions and asynchronous content.
+- Add query/report regressions (101 notebook tests pass). Execute the enhanced
+  final cell against existing telemetry: 64 unique spans, 34 matching content
+  records, 18 instruction snapshots, three root calls and zero failures.
+  Revalidate the earlier four-span/one-operation MCP 403 failure diagnostics.
+  Exercise synthetic KQL cases for duplicate rows, multiple records per span,
+  cross-resource mismatches, missing content, empty/invalid message arrays and
+  conflicting interaction labels. Browser-check the report and expandable views.
+  No inference, agent/version changes, package installs or cloud policy changes.
+- Update notebook notes, README, observability and span guides. Preserve user
+  prompt edits, existing execution outputs and unrelated work; generated Marp
+  decks remain ignored.
+
 ## Unreleased — Automatic backend version synchronization for the demo
 
 - Add explicit `sync` and `pinned` backend version policies; opt this demo into
