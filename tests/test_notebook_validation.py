@@ -2,6 +2,8 @@ import ast
 import json
 import os
 import unittest
+from html import escape
+from html.parser import HTMLParser
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -968,6 +970,88 @@ class AgentVersionSyncTests(unittest.TestCase):
         self.assertIn("main_agent, agent_runtime = prepare_backend_agent(", source)
         self.assertIn("sentinel_project_agent, agent_runtime = prepare_backend_agent(", source)
         self.assertEqual(source.count("build_info=build_info, build_info_path=build_info_path"), 2)
+
+
+class TelemetryStatusOutputTests(unittest.TestCase):
+    class BannerParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.styles = []
+            self.segments = []
+
+        def handle_starttag(self, tag, attrs):
+            self.styles.append(dict(attrs).get("style", ""))
+
+        def handle_endtag(self, tag):
+            self.styles.pop()
+
+        def handle_data(self, data):
+            self.segments.append((data, self.styles[-1] if self.styles else ""))
+
+    def render_banner(self, *, content=True, httpx=True, azure_host=False, identifier="test-id"):
+        notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
+        source = "".join(next(c["source"] for c in notebook["cells"] if c["id"] == "3c78effc"))
+        tree = ast.parse(source)
+        start = next(
+            i for i, node in enumerate(tree.body)
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "accent_style" for target in node.targets)
+        )
+        outputs = []
+        scope = {
+            "escape": escape, "project_name": identifier, "telemetry_session_id": identifier,
+            "os": SimpleNamespace(environ={"OTEL_SERVICE_NAME": identifier}),
+            "running_on_azure_host": azure_host, "content_recording_enabled": content,
+            "HTTPXClientInstrumentor": lambda: SimpleNamespace(is_instrumented_by_opentelemetry=httpx),
+            "HTML": lambda text: text, "display": outputs.append,
+        }
+        exec(compile(ast.Module(body=tree.body[start:], type_ignores=[]), str(NOTEBOOK), "exec"), scope)
+        self.assertEqual(len(outputs), 1)
+        parser = self.BannerParser()
+        parser.feed(outputs[0])
+        return outputs[0], parser.segments
+
+    def test_true_and_enabled_statuses_are_green_in_all_modes(self):
+        for content in (True, False):
+            for httpx in (True, False):
+                for azure_host in (True, False):
+                    with self.subTest(content=content, httpx=httpx, azure_host=azure_host):
+                        _, segments = self.render_banner(content=content, httpx=httpx, azure_host=azure_host)
+                        statuses = [(text, style) for text, style in segments
+                                    if {"true", "enabled"} & set(text.lower().split())]
+                        self.assertGreaterEqual(len(statuses), 4)
+                        for text, style in statuses:
+                            self.assertIn("color: #2EA043;", style, text)
+
+    def test_false_and_disabled_statuses_are_not_green(self):
+        html, segments = self.render_banner(content=False, httpx=False)
+        self.assertIn("False", html)
+        self.assertIn("Disabled (explicit opt-out)", html)
+        for text, style in segments:
+            if {"false", "disabled"} & set(text.lower().split()):
+                self.assertNotIn("#2EA043", style, text)
+
+    def test_session_is_rust_and_only_local_mode_phrase_is_blue(self):
+        _, segments = self.render_banner()
+        rust = [(text, style) for text, style in segments if "--vscode-debugTokenExpression-string" in style]
+        self.assertEqual(len(rust), 1)
+        self.assertEqual(rust[0][0], "test-id")
+        phrase = "Local notebook mode - managed identity excluded"
+        self.assertIn((phrase, "color: #0078D4; font-weight: 700;"), segments)
+        for text, style in segments:
+            if "Azure resource detectors disabled" in text:
+                self.assertNotIn("#0078D4", style)
+
+    def test_azure_mode_does_not_claim_local_identity_exclusion(self):
+        html, _ = self.render_banner(azure_host=True)
+        self.assertNotIn("Local notebook mode", html)
+        self.assertIn("Azure-host environment detected", html)
+
+    def test_dynamic_identifiers_remain_html_escaped(self):
+        identifier = '<img src=x onerror="alert(1)">'
+        html, _ = self.render_banner(identifier=identifier)
+        self.assertNotIn("<img", html)
+        self.assertEqual(html.count(escape(identifier)), 3)
 
 
 class TelemetryPolicyTests(unittest.TestCase):
