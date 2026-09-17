@@ -107,12 +107,20 @@ Section 6 is a validation gate, not just a query display:
 2. Flush the OpenTelemetry provider before querying.
 3. Scope to the current `demo.run_id`, then follow `OperationId` to include SDK and HTTP child spans that do not carry that custom attribute themselves.
 4. Poll for ingestion at 15-second intervals, up to 12 waits. Empty or old results cannot produce a pass.
-5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (`2026.09.15` for the latest run). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-framework-demo`. Responses wrappers are identified by `gen_ai.operation.name=responses.create` and a `/responses` name suffix, supporting both project and stable agent endpoints.
+5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (currently `2026.09.16`). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-fw-demo`. Responses wrappers are identified by `gen_ai.operation.name=responses.create` and a `/responses` name suffix, supporting both project and stable agent endpoints.
 6. Reject API errors and partial results. Display an HTML report with stage totals, content availability, conversation snapshots, a joined span inventory, root-call trends and exception drill-downs. Copyable KQL remains available in expandable sections.
 
 The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist uses the supplied `SigninLogs` schema and plain KQL; it no longer requires table discovery.
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
+
+The current notebook uses `OTEL_SERVICE_NAME=foundry-agent-fw-demo` and
+`OTEL_SERVICE_VERSION=2026.09.16`; Section 6 expects the matching combined role.
+Restart the kernel and rerun the runtime cells after this identity change, since
+an initialized telemetry provider cannot adopt a different resource identity.
+Historical run evidence below retains its original role and version. Queries or
+dashboards hardcoded to the old `foundry-agent-framework-demo` service name must
+include the new name to display subsequent runs.
 
 ### GenAI Content and the Section 6 Report
 

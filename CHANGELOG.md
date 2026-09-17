@@ -7,6 +7,17 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased - Notebook title and telemetry service identity
+
+- Rename "Project Agents" to "AI Agents" in the notebook heading.
+- Set the notebook telemetry service name to `foundry-agent-fw-demo` and service
+  version to `2026.09.16`; align the Section 6 role check with
+  `foundry-agent-demo.foundry-agent-fw-demo`.
+- Update current identity documentation and kernel-restart guidance while
+  retaining historical run evidence under its original service name/version.
+- Keep message previews opt-in in the published notebook; preserve local
+  display preferences and exclude notebook execution outputs from the commit.
+
 ## Unreleased - GenAI content and an explanatory observability report
 
 - Enrich Section 6 dependency spans with `AppGenAIContent`, matching resource,
