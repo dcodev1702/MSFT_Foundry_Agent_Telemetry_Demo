@@ -10,6 +10,14 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-18
 
+### MCP helper documentation and formatting
+
+- Add an author/date header describing the helper's purpose, usage,
+  configuration, telemetry behavior, and regeneration workflow. Format the
+  Python source and long string literals without changing agent instructions
+  or runtime behavior; preserve the header and formatting in the notebook's
+  generated helper.
+
 ### Notebook environment bootstrap
 
 - Clarify first-run creation and reuse of `agent-framework-demo/.venv`, with a

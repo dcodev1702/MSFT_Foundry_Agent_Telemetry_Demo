@@ -450,7 +450,7 @@ class McpNotebookTransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class McpGeneratedHelperTests(unittest.TestCase):
-    def test_notebook_generates_the_checked_in_helper_behavior(self):
+    def generated_scope(self):
         source = notebook_cells()["0a79b228"]
         tree = ast.parse(source)
         prefix = []
@@ -473,6 +473,10 @@ class McpGeneratedHelperTests(unittest.TestCase):
             "service_version": helper.SERVICE_VERSION,
         }
         exec(compile(ast.Module(body=prefix, type_ignores=[]), str(NOTEBOOK_PATH), "exec"), scope)
+        return scope
+
+    def test_notebook_generates_the_checked_in_helper_behavior(self):
+        scope = self.generated_scope()
         generated_tree = ast.parse(scope["script_body"])
         checked_in_tree = ast.parse(HELPER_PATH.read_text(encoding="utf-8"))
         for candidate in (generated_tree, checked_in_tree):
@@ -484,6 +488,40 @@ class McpGeneratedHelperTests(unittest.TestCase):
                 ):
                     node.value = ast.Constant("revision-for-selected-model")
         self.assertEqual(ast.dump(generated_tree), ast.dump(checked_in_tree))
+
+    def test_header_and_formatting_survive_notebook_regeneration(self):
+        scope = self.generated_scope()
+        generated = scope["script_body"].replace(
+            f'AGENT_SPEC_REVISION = "{scope["restaurant_agent_revision"]}"',
+            f'AGENT_SPEC_REVISION = "{helper.AGENT_SPEC_REVISION}"',
+            1,
+        )
+        checked_in = HELPER_PATH.read_text(encoding="utf-8")
+        self.assertEqual(generated, checked_in)
+        header = checked_in.split("\nimport os\n", 1)[0]
+        for label in (
+            "File", "Author", "Purpose", "Description", "Usage",
+            "Configuration", "Maintenance",
+        ):
+            self.assertIn(f"# {label}:", header)
+        self.assertRegex(header, r"(?m)^# Updated: \d{4}-\d{2}-\d{2}$")
+        for number, line in enumerate(checked_in.splitlines(), start=1):
+            self.assertLessEqual(len(line), 88, f"helper line {number}")
+
+    def test_literal_wrapping_preserves_exact_prompt_content(self):
+        formatter = self.generated_scope()["format_python_string"]
+        for value in (
+            "",
+            "Short text",
+            "First line\n\nSecond line\n",
+            "  Leading spaces\tand repeated   spaces\r\n",
+            "Quotes: 'single' and \"double\"; path: C:\\demo\\menu",
+            "\u03a9 and control characters: \x01",
+            "unbroken-" + "x" * 150,
+        ):
+            with self.subTest(value=value):
+                expression = "(\n" + formatter(value, 4) + "\n)"
+                self.assertEqual(ast.literal_eval(expression), value)
 
 
 if __name__ == "__main__":
