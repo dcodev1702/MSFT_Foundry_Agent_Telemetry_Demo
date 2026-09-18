@@ -43,7 +43,7 @@ That makes it a useful contrast to the rest of this repo, which includes Foundry
 - A local virtual-environment and kernel bootstrap flow for notebook-driven Agent Framework work
 - Direct Azure OpenAI configuration using `AzureCliCredential`
 - An Agent Framework agent with local tools
-- An MCP example where an Agent Framework agent is exposed as a stdio MCP server
+- An MCP example where an Agent Framework agent is exposed as a stdio MCP server and invoked by a notebook verification client
 - A basic group-chat workflow using `GroupChatBuilder`
 - OpenTelemetry instrumentation exported to Aspire Dashboard over OTLP
 - Cleanup flows for the MCP subprocess, Aspire container, Aspire image, and Azure credential
@@ -133,15 +133,23 @@ The notebook installs exact direct pins from [requirements.txt](./requirements.t
 ## Quick Start
 
 1. Open [zolab-agent-framework-sdk-win11.ipynb](./zolab-agent-framework-sdk-win11.ipynb).
-2. Run the virtual-environment, dependency, and package-inventory cells first.
-3. Switch the notebook to the registered `agent-framework-demo/.venv` kernel.
-4. Run the Azure OpenAI configuration cell.
-5. Run the Aspire Dashboard startup cell and use the printed browser token or login URL. If Docker Desktop is not already running, the cell waits for the Docker Linux engine and prints a clear fallback status instead of raising a Docker `CalledProcessError`.
-6. Run the observability cell to initialize OTLP export.
-7. Run the basic agent section.
-8. Run the MCP demo.
-9. Run the multi-agent workflow section.
-10. Run every cleanup cell in order when you are done. OpenTelemetry must be shut down before the Aspire receiver is removed; restart the kernel before rerunning the demo after cleanup.
+2. If the demo environment does not exist, select any working Python 3.13+ kernel using **Select Another Kernel > Python Environments**. Run the first setup cell from the repository root or `agent-framework-demo`; it creates `agent-framework-demo/.venv` when its interpreter is missing, otherwise reuses it, and installs/registers the demo kernel without changing the root environment.
+3. Switch to **Select Another Kernel > Jupyter Kernel > Agent Framework SDK Demo (.venv)** and run the kernel verification cell.
+4. Run the dependency installation and package-inventory cells only after verifying the demo kernel.
+5. Run the Azure OpenAI configuration cell.
+6. Run the Aspire Dashboard startup cell and use the printed browser token or login URL. If Docker Desktop is not already running, the cell waits for the Docker Linux engine and prints a clear fallback status instead of raising a Docker `CalledProcessError`.
+7. Run the observability cell to initialize OTLP export.
+8. Run the basic agent section.
+9. Generate the MCP helper, connect the MCP client (5.1), and run the menu verification call (5.2). Inspect the printed trace ID in Aspire and select the MCP service under Metrics.
+10. Run the multi-agent workflow section.
+11. Run every cleanup cell in order when you are done. OpenTelemetry must be shut down before the Aspire receiver is removed; restart the kernel before rerunning the demo after cleanup.
+
+If VS Code reports that the selected Python environment is no longer available,
+the setup cell has not executed: a missing kernel cannot create its own
+environment. Select a working Python kernel, or use the **PowerShell recovery**
+block in the notebook's first setup description from an `agent-framework-demo`
+terminal. That block creates the missing environment and registers the kernel
+without requiring a running notebook. Then continue from step 3.
 
 ## Observability Design Notes
 
@@ -158,6 +166,45 @@ The intended telemetry model is:
 - notebook status panels use the same semantic palette as the main Windows notebook: green for enabled/success, red for disabled/action-required states, rust for session IDs and revisions, blue for endpoints/versions, and magenta for named services/agents
 
 This is deliberately different from a production posture. In production, route OTLP through a collector to Azure Monitor/Application Insights, apply redaction and access-controlled retention, use a specific managed identity, and define sampling plus alerting policies explicitly.
+
+### MCP Request-Response Verification
+
+Section 5.1 uses `MCPStdioTool` to own the server process, initialize the protocol,
+and discover `RestaurantAgent`. Section 5.2 makes one direct MCP `tools/call`
+request asking for today's specials and the price of Clam Chowder. The request
+has a 120-second deadline and fails explicitly if the server errors or the answer
+omits the expected menu facts. There is no extra caller-side model agent.
+On Windows, startup refreshes the active environment's site-package paths if
+`pywin32` was installed after the kernel started; it does not reinstall packages
+or change the repository's root environment.
+The notebook's small `MCPStdioTool` subclass supplies a real temporary stderr file
+to the SDK transport because Jupyter's output stream has no usable file
+descriptor. Diagnostics are replayed to notebook stderr when the connection
+closes, and the temporary file is closed and removed. No event-loop policy or
+SDK internals are patched.
+
+The server extracts the incoming W3C trace context from MCP `_meta`; this bridges
+the current MAF 1.18 server adapter's missing extraction step without replacing its
+tool dispatch. Aspire should show the notebook's
+`agent_framework.mcp_verification` span and the server's `mcp.tools/call`,
+RestaurantAgent, model, and menu-tool spans in the same trace. The services
+`zolab-agent-framework-sdk-demo` and `zolab-agent-framework-mcp-demo` share the
+notebook's `service.instance.id`.
+
+The helper flushes metrics, traces, and logs after each call, rather than waiting
+for the periodic metrics interval. In Aspire Metrics, select
+`zolab-agent-framework-mcp-demo` and inspect
+`agent_framework.function.invocation.duration`, `gen_ai.client.operation.duration`,
+and `gen_ai.client.token.usage`. Flush completion does not prove ingestion; verify
+the printed trace ID and metric data in the dashboard. Without an OTLP endpoint,
+only the request-response check is available; stdout remains reserved for MCP.
+
+The full response and trace ID are retained in `mcp_verification_response` and
+`mcp_verification_trace_id`. Prompt/response telemetry respects the existing
+content-capture option. Each rerun makes another billable model-backed request.
+Cleanup step 7.1 closes the client and its child process before notebook
+OpenTelemetry shutdown and Aspire removal. It also handles the older idle
+launcher when upgrading a running notebook; run that cleanup before reconnecting.
 
 ### Aspire Dashboard Startup Behavior
 
@@ -186,7 +233,7 @@ This notebook PoC is intentionally separate from the Foundry-focused parts of th
 - Foundry project runtime inside this notebook
 - Teams bot hosting as the notebook execution surface
 - Production deployment patterns for the notebook itself
-- Full MCP client-host integration beyond the server demonstration pattern
+- A general-purpose MCP host application beyond the bounded notebook verification client
 
 ## Relationship To The Rest Of The Repo
 
@@ -205,15 +252,13 @@ That split is useful because it lets you compare two approaches:
 
 - The notebook is optimized for learning and inspection, not for minimal package count.
 - The notebook intentionally owns `agent-framework-demo/.venv`; it does not share or constrain the main Foundry notebook's root `.venv`.
-- The MCP demonstration is strongest on the server-exposure side; it is not trying to be a full reusable host product.
+- The MCP demonstration includes a real handshake and request-response verification, but it is not a full reusable host product.
 - The workflow stores a full transcript for inspection, but the visible summary is bounded and the exercise stops after one Architect → Reviewer → Coach pass.
 - The notebook depends on local Docker availability if you want the full Aspire experience.
 
 ## Recommended Next Steps
 
-- Add a small in-notebook MCP client validation step if you want a full request-response MCP proof in the same notebook
 - Add a second workflow example, such as sequential or handoff orchestration, for comparison
-- Add an automated MCP client handshake if you want the notebook to prove the full stdio request-response path.
 - Extract agent definitions, tools, workflow construction, MCP hosting, and telemetry bootstrap into tested modules if the PoC becomes a production seed.
 - Replace notebook-managed stdio with an authenticated, health-checked MCP service only when tools must be shared remotely.
 - Route production telemetry through an OpenTelemetry Collector and Azure Monitor/Application Insights; Aspire Dashboard is a development viewer, not a production monitoring system.

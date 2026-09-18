@@ -8,6 +8,27 @@ formatting edits, and notebook-output refreshes are consolidated. Each
 `## YYYY-MM-DD` heading covers one commit day, with related change groups nested
 under `###` topic headings. Local stash snapshots are excluded.
 
+## 2026-09-18
+
+### Notebook environment bootstrap
+
+- Clarify first-run creation and reuse of `agent-framework-demo/.venv`, with a
+  PowerShell recovery path when the selected notebook kernel no longer exists.
+  Verify creation from both supported working directories, root-environment
+  isolation, reuse, and explicit failures; switch kernels before installing
+  demo dependencies.
+
+### MCP request-response telemetry verification
+
+- Add a managed MCP stdio client, protocol discovery, and a bounded menu
+  verification call. Join client/server telemetry using request trace metadata,
+  flush the MCP signals after each call, preserve optional content capture, and
+  close the managed client before notebook telemetry and Aspire cleanup.
+  Describe the verification cell and the separate MCP resource in Aspire.
+- Handle Windows package-path initialization and Jupyter's stderr file-handle
+  requirements without changing the notebook event-loop policy. Preserve
+  request-response verification when no OTLP destination is configured.
+
 ## 2026-09-17
 
 ### Changelog organization

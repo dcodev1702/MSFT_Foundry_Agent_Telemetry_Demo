@@ -1,10 +1,14 @@
 import ast
 import json
+import os
+import subprocess
+import sys
 import unittest
 from collections import OrderedDict
 from html import escape
 from importlib.metadata import version
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -58,6 +62,152 @@ class DependencyTests(unittest.TestCase):
         )
 
 
+class BootstrapEnvironmentTests(unittest.TestCase):
+    def setUp(self):
+        self.cells = cells_by_id(load_notebook())
+        self.source = compile(self.cells["40b63ed3"], str(NOTEBOOK_PATH), "exec")
+
+    def environment_python(self, demo_dir):
+        if os.name == "nt":
+            return demo_dir / ".venv" / "Scripts" / "python.exe"
+        return demo_dir / ".venv" / "bin" / "python"
+
+    def run_bootstrap(self, working_dir, check_call):
+        scope = {}
+        rendered = []
+        with (
+            patch("pathlib.Path.cwd", return_value=working_dir),
+            patch("subprocess.check_call", side_effect=check_call),
+            patch("IPython.display.display", side_effect=rendered.append),
+        ):
+            exec(self.source, scope)
+        return scope, "\n".join(item.data for item in rendered)
+
+    def test_creates_missing_environment_from_demo_or_repository_directory(self):
+        for use_repository_directory in (False, True):
+            with self.subTest(repository_directory=use_repository_directory):
+                with TemporaryDirectory() as temporary_directory:
+                    repo_dir = Path(temporary_directory)
+                    demo_dir = repo_dir / "agent-framework-demo"
+                    demo_dir.mkdir()
+                    root_environment = repo_dir / ".venv"
+                    root_environment.mkdir()
+                    root_marker = root_environment / "preserve.txt"
+                    root_marker.write_text("unchanged", encoding="utf-8")
+                    environment_python = self.environment_python(demo_dir)
+                    commands = []
+
+                    def check_call(command):
+                        commands.append(command)
+                        if command[1:3] == ["-m", "venv"]:
+                            self.assertEqual(command[-1], str(demo_dir / ".venv"))
+                            environment_python.parent.mkdir(parents=True)
+                            environment_python.touch()
+                        return 0
+
+                    scope, html = self.run_bootstrap(
+                        repo_dir if use_repository_directory else demo_dir,
+                        check_call,
+                    )
+
+                    self.assertEqual(
+                        commands[0],
+                        [sys.executable, "-m", "venv", str(demo_dir / ".venv")],
+                    )
+                    self.assertTrue(environment_python.is_file())
+                    self.assertEqual(scope["environment_action"], "Created")
+                    self.assertIn("Created", html)
+                    self.assertEqual(len(commands), 3)
+                    self.assertEqual(
+                        [command[0] for command in commands[1:]],
+                        [str(environment_python), str(environment_python)],
+                    )
+                    self.assertEqual(commands[1][1:4], ["-m", "pip", "install"])
+                    self.assertIn("ipykernel==7.3.0", commands[1])
+                    self.assertEqual(commands[2][1:4], ["-m", "ipykernel", "install"])
+                    self.assertIn("agent-framework-sdk-demo", commands[2])
+                    self.assertEqual(
+                        root_marker.read_text(encoding="utf-8"), "unchanged"
+                    )
+                    self.assertEqual(list(root_environment.iterdir()), [root_marker])
+
+    def test_reuses_existing_environment_without_recreating_it(self):
+        with TemporaryDirectory() as temporary_directory:
+            demo_dir = Path(temporary_directory) / "agent-framework-demo"
+            environment_python = self.environment_python(demo_dir)
+            environment_python.parent.mkdir(parents=True)
+            environment_python.write_bytes(b"existing interpreter")
+            commands = []
+
+            scope, html = self.run_bootstrap(demo_dir, commands.append)
+
+            self.assertEqual(scope["environment_action"], "Reused")
+            self.assertIn("Reused", html)
+            self.assertEqual(len(commands), 2)
+            self.assertTrue(
+                all(command[0] == str(environment_python) for command in commands)
+            )
+            self.assertTrue(
+                all(command[1:3] != ["-m", "venv"] for command in commands)
+            )
+            self.assertEqual(environment_python.read_bytes(), b"existing interpreter")
+
+    def test_creates_interpreter_when_environment_directory_is_empty(self):
+        with TemporaryDirectory() as temporary_directory:
+            demo_dir = Path(temporary_directory) / "agent-framework-demo"
+            (demo_dir / ".venv").mkdir(parents=True)
+            commands = []
+
+            scope, _ = self.run_bootstrap(demo_dir, commands.append)
+
+            self.assertEqual(
+                commands[0],
+                [sys.executable, "-m", "venv", str(demo_dir / ".venv")],
+            )
+            self.assertEqual(scope["environment_action"], "Created")
+
+    def test_creation_failure_stops_before_package_installation(self):
+        with TemporaryDirectory() as temporary_directory:
+            demo_dir = Path(temporary_directory) / "agent-framework-demo"
+            demo_dir.mkdir()
+            with (
+                patch("pathlib.Path.cwd", return_value=demo_dir),
+                patch(
+                    "subprocess.check_call",
+                    side_effect=subprocess.CalledProcessError(1, "venv"),
+                ) as check_call,
+                patch("IPython.display.display") as display,
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    exec(self.source, {})
+                check_call.assert_called_once_with(
+                    [sys.executable, "-m", "venv", str(demo_dir / ".venv")]
+                )
+                display.assert_not_called()
+
+    def test_rejects_unrelated_working_directory_before_creating_environment(self):
+        with TemporaryDirectory() as temporary_directory:
+            with (
+                patch("pathlib.Path.cwd", return_value=Path(temporary_directory)),
+                patch("subprocess.check_call") as check_call,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "repository root"):
+                    exec(self.source, {})
+                check_call.assert_not_called()
+
+    def test_first_step_explains_missing_kernel_recovery(self):
+        guidance = self.cells["1bc8dbb9"]
+        for expected in (
+            "any working Python 3.13+ kernel",
+            "Python Environments",
+            "demo environment does not need to exist yet",
+            "this code cannot start",
+            "py -3 -m venv .venv",
+            "root environment remains unchanged",
+        ):
+            self.assertIn(expected, guidance)
+
+
 class NotebookStructureTests(unittest.TestCase):
     def setUp(self):
         self.notebook = load_notebook()
@@ -90,6 +240,7 @@ class NotebookStructureTests(unittest.TestCase):
             "8617c67b",
             "0a79b228",
             "91a844a6",
+            "2c86be91",
             "0f3f5f40",
             "4dd2f39c",
             "5d0a3908",
@@ -219,6 +370,7 @@ class NotebookStructureTests(unittest.TestCase):
             "8617c67b",
             "0a79b228",
             "91a844a6",
+            "2c86be91",
             "0f3f5f40",
             "4dd2f39c",
             "aa785fd2",
@@ -292,6 +444,8 @@ class NotebookStructureTests(unittest.TestCase):
         for cell_id, attribute in (
             ("8617c67b", "demo.prompt"),
             ("4dd2f39c", "demo.workflow.task"),
+            ("2c86be91", "demo.mcp.prompt"),
+            ("2c86be91", "demo.mcp.response"),
         ):
             source = self.cells[cell_id]
             self.assertIn("if capture_prompt_content:", source)
@@ -403,6 +557,11 @@ class NotebookStructureTests(unittest.TestCase):
                 "Start the MCP stdio Server",
                 "reused instead of starting a duplicate server",
                 "reserved for MCP traffic",
+            ),
+            "2c86be91": (
+                "Verify an MCP Call and Inspect Its Telemetry",
+                "120-second call deadline",
+                "zolab-agent-framework-mcp-demo",
             ),
             "4dd2f39c": (
                 "Run and Validate the Multi-Agent Workflow",
