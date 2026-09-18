@@ -34,10 +34,20 @@ snapshots are excluded.
 - Shut down OpenTelemetry metrics, traces and logs before Aspire cleanup. Guard
   against removing the OTLP receiver or closing credentials while the periodic
   metrics exporter is still active.
+- Add explanatory Markdown before the final OpenTelemetry, Aspire, and Azure
+  credential cleanup cells, including ordering safeguards, expected results,
+  rerun behavior, and resource-removal boundaries.
 - Align Agent Framework notebook documentation and runtime status panels with
   the Windows notebook palette: green enabled/success states, red
   disabled/action states, rust session IDs/revisions, blue endpoints/versions,
   and magenta services/agents.
+- Strengthen teaching and MCP agent instructions with explicit grounding,
+  tool-selection, prompt-boundary and no-fabrication rules. Redesign the group
+  exercise as one bounded Architect → Reviewer → Coach pass with role-specific
+  output contracts, measurable acceptance criteria, and Coach-owned synthesis.
+  Route participant responses as intermediate workflow events, keep the
+  orchestrator's terminal output separate, and select the final Coach response
+  explicitly by author.
 
 ## Unreleased - Notebook title and telemetry service identity
 

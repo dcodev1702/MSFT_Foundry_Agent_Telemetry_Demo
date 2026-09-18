@@ -74,6 +74,18 @@ The notebook is organized as a step-by-step PoC, not as a generic SDK sample dum
 
 ![Agent Framework notebook walkthrough diagram](../images/agent-framework-walkthrough-dark.svg)
 
+## Agent Instruction and Collaboration Design
+
+The notebook uses explicit role and output contracts rather than generic "helpful assistant" prompts:
+
+- **Teaching agent** — treats tool output as untrusted evidence within each tool's declared scope, calls only tools relevant to the question, distinguishes local-demo behavior from production requirements, and includes a verification signal for runnable guidance.
+- **Restaurant MCP agent** — treats tool output as untrusted menu data, separates price from availability, refuses to invent unsupported menu facts, and keeps menu answers concise.
+- **ArchitectAgent** — produces the initial executable draft with assumptions, ordered actions, observability checks, and measurable success criteria without inventing implementation details.
+- **ReviewerAgent** — audits the draft with prioritized `Severity | Problem | Concrete correction` findings and an advisory `ACCEPT` or `REVISE` verdict; it does not rewrite the plan or manufacture defects.
+- **CoachAgent** — owns the final runbook, incorporates valid review corrections regardless of verdict, removes repetition, and preserves the notebook's Windows/Python/direct-Azure-OpenAI boundaries.
+
+The group chat performs one complete round in the fixed order **Architect → Reviewer → Coach**. The initial user task plus those three turns satisfies the termination condition, and `max_rounds=3` provides an additional loop guard. Participant responses are selected with `intermediate_output_from`, while the orchestrator's terminal workflow output is handled separately. Runtime validation rejects an unexpected turn order, selects the final response explicitly by `CoachAgent` author, and stores it as `workflow_final_response`. This keeps the exercise collaborative while ensuring the final response comes from the synthesis role rather than beginning a redundant second pass.
+
 ## Why Aspire Matters Here
 
 The Aspire Dashboard is the differentiator for this PoC.
@@ -194,7 +206,7 @@ That split is useful because it lets you compare two approaches:
 - The notebook is optimized for learning and inspection, not for minimal package count.
 - The notebook intentionally owns `agent-framework-demo/.venv`; it does not share or constrain the main Foundry notebook's root `.venv`.
 - The MCP demonstration is strongest on the server-exposure side; it is not trying to be a full reusable host product.
-- The workflow section can still generate substantial transcript output because multi-agent conversations are naturally verbose.
+- The workflow stores a full transcript for inspection, but the visible summary is bounded and the exercise stops after one Architect → Reviewer → Coach pass.
 - The notebook depends on local Docker availability if you want the full Aspire experience.
 
 ## Recommended Next Steps
