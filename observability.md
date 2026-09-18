@@ -73,13 +73,19 @@ That is the correct model for agent observability: agent actions, orchestration 
 
 ## Current Package and Version Posture
 
-The Python **3.14.7** environment was resolved on **2026-09-14** using its configured package index. [requirements-notebook.txt](requirements-notebook.txt) is the Windows notebook's reproducible direct-dependency matrix. Public PyPI metadata advertised some newer releases than the configured index; the table records the versions actually installed, not an unqualified "latest" claim.
+The Python **3.14.7** environment was resolved on **2026-09-18** using the
+approved package feed plus wheels built from verified official GitHub release
+commits. [requirements-notebook.txt](requirements-notebook.txt) is the Windows
+notebook's direct-dependency matrix; the table records the tested versions.
+Use [build_notebook_wheels.ps1](build_notebook_wheels.ps1) when the feed has not
+admitted a recent release. The root notebook's wheel cache and virtual
+environment are independent of the standalone Agent Framework demo.
 
 | Package | Installed | Notes |
 | --- | --- | --- |
-| `azure-ai-projects` | `2.6.0` | Project agents, MCP and client-side preview instrumentation. |
-| `openai` | `3.8.0` | Responses/conversations API, using HTTPX2. |
-| `httpx2` | `2.12.0` | Fixes the published HTTPX2 2.10.0 advisories found during dependency review. |
+| `azure-ai-projects` | `2.6.1` | Project agents, MCP and client-side preview instrumentation. |
+| `openai` | `3.16.1` | Responses/conversations API, using HTTPX2. |
+| `httpx2` | `2.13.0` | Paired with HTTPCore2 2.13.0; independently verified with the updated SDK. |
 | `azure-identity` | `1.26.0b2` | Existing preview line retained; no global `--pre` switch. |
 | `azure-monitor-opentelemetry` | `1.8.10` | Resolves the matching exporter and instrumentation train. |
 | `azure-monitor-opentelemetry-exporter` | `1.0.0b57` | Transitive Azure Monitor exporter. |
@@ -93,11 +99,24 @@ Install the matrix together, run `pip check`, then restart the kernel if SDKs we
 ### Runtime, Shared and Validation Profiles
 
 - [requirements-notebook.txt](requirements-notebook.txt) contains only runtime requirements (82 resolved dependencies, excluding pip).
-- [requirements-notebook-shared.txt](requirements-notebook-shared.txt) adds optional Agent Framework core 1.17.0, OpenAI provider 1.14.2 and OTLP gRPC exporter 1.44.0. These remain compatible with an existing shared environment, but this notebook neither imports Agent Framework nor configures an OTLP exporter.
-- [requirements-notebook-validation.txt](requirements-notebook-validation.txt) adds `nbclient==0.11.0` and `nbformat==5.11.0` for automated execution.
-- [constraints-notebook-win11.txt](constraints-notebook-win11.txt) captures 100 direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
+- [requirements-notebook-shared.txt](requirements-notebook-shared.txt) adds optional Agent Framework core 1.19.0, OpenAI provider 1.14.4, orchestrations 1.2.0 and OTLP gRPC exporter 1.44.0. These remain compatible with the root environment, but this notebook neither imports Agent Framework nor configures an OTLP exporter.
+- [requirements-notebook-validation.txt](requirements-notebook-validation.txt) adds `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution.
+- [constraints-notebook-win11.txt](constraints-notebook-win11.txt) captures 102 direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
 
 The constrained runtime plus validation profile installs cleanly without Agent Framework or OTLP. Existing shared packages were not uninstalled. The tested Azure Identity preview line was retained; moving to stable credentials remains a separate compatibility exercise.
+
+The September 18 dependency check uses the real Azure AI Projects/OpenAI clients
+with an in-memory HTTPX2 transport to verify both project and stable-agent
+Responses routes, conversation creation, W3C trace propagation, and GenAI spans.
+This is SDK compatibility validation, not a new live Azure model run. It does
+not create or modify cloud agents, model deployments, or telemetry policy; earlier
+live-run evidence below retains its original dates and versions.
+
+All 119 tests pass against the publication snapshot; the clean runtime/validation
+environment skips only the optional shared-MAF version check. The dependency
+self-check found no active advisories in the PyPI per-version metadata for the
+102 constrained packages. That check is best-effort published-advisory coverage,
+not an independent code security audit or a guarantee about unpublished issues.
 
 ## Current-Run Telemetry Gate (Section 6)
 

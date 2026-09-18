@@ -10,6 +10,28 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-18
 
+### Foundry Windows notebook dependency alignment
+
+- Update the actual notebook runtime to Azure AI Projects 2.6.1, OpenAI 3.16.1,
+  and HTTPX2/HTTPCore2 2.13.0. Align the optional shared profile with MAF 1.19.0,
+  OpenAI provider 1.14.4, and orchestrations 1.2.0; update nbformat to 5.11.1.
+  Retain the validated Azure Identity preview and Azure Monitor/OpenTelemetry line.
+- Refresh the 102-package Windows/Python 3.14 constraint snapshot and add a
+  root-specific, verified GitHub source-wheel manifest/build entry point. Reuse
+  the build engine without sharing or modifying the standalone demo environment.
+- Teach the notebook installer to use its root wheel cache, reject a wrong
+  kernel, and provide explicit recovery guidance when a pinned release is not
+  admitted to the company feed. Preserve the Foundry/MCP workflow and all
+  user-local preview preferences.
+- Validate a clean 90-package runtime/validation installation without MAF or
+  OTLP, the upgraded shared root environment, and real SDK Responses/conversation
+  routing, GenAI spans, and trace propagation through an in-memory transport.
+  Do not alter cloud agents or represent these checks as a new live Azure run.
+- Pass all 119 tests against the publication snapshot, with only the optional
+  MAF installation check skipped in the clean minimal environment. Confirm both
+  environments' dependency consistency, unchanged standalone-demo versions,
+  and zero active published advisories for the constrained dependency set.
+
 ### A2A reviewer and current compatible libraries
 
 - Host ReviewerAgent in a separate loopback A2A service while keeping Architect

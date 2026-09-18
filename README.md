@@ -38,14 +38,17 @@ On Windows, Section 1 installs [requirements-notebook.txt](requirements-notebook
 
 ### Windows Dependency Matrix
 
-Reviewed on **2026-09-14** using the configured package index. Versions can lag public PyPI; these are the resolved versions for this validation, not a promise of the newest release on every index.
+Reviewed on **2026-09-18** using the approved package feed and verified official
+GitHub release sources. Recent SDK wheels are built locally when the company
+feed has not yet admitted a release; no direct PyPI artifact fallback or
+certificate-verification bypass is used.
 
 | Package | Version | Role |
 |---|---|---|
 | `ipykernel` | `7.3.0` | Notebook kernel |
-| `azure-ai-projects` | `2.6.0` | Foundry project agents, MCP definitions and Responses client |
-| `openai` | `3.8.0` | Responses and conversations API; HTTPX2 transport |
-| `httpx2` | `2.12.0` | Patched transport; replaces vulnerable 2.10.0 |
+| `azure-ai-projects` | `2.6.1` | Foundry project agents, MCP definitions and Responses client |
+| `openai` | `3.16.1` | Responses and conversations API; HTTPX2 transport |
+| `httpx2` | `2.13.0` | Current compatible transport; matches HTTPCore2 2.13.0 |
 | `azure-identity` | `1.26.0b2` | Existing preview credential line retained |
 | `azure-monitor-opentelemetry` | `1.8.10` | Azure Monitor exporter configuration |
 | `azure-core-tracing-opentelemetry` | `1.0.0b13` | Azure SDK tracing bridge |
@@ -57,19 +60,56 @@ Azure Monitor resolves exporter **1.0.0b57** on the matching OpenTelemetry train
 ### Dependency Profiles
 
 - [requirements-notebook.txt](requirements-notebook.txt): minimal Windows runtime, with **82 resolved dependencies** excluding pip.
-- [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional Agent Framework core **1.17.0**, OpenAI provider **1.14.2**, and OTLP gRPC exporter **1.44.0**. Use only when those packages are needed by other work in the shared environment.
-- [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.0` for automated execution and validation.
-- [constraints-notebook-win11.txt](constraints-notebook-win11.txt): 100 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
+- [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional Agent Framework core **1.19.0**, OpenAI provider **1.14.4**, orchestrations **1.2.0**, and OTLP gRPC exporter **1.44.0**. Use only when those packages are needed by other work in the shared environment.
+- [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution and validation (90 resolved packages, excluding pip).
+- [constraints-notebook-win11.txt](constraints-notebook-win11.txt): 102 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
 - [agent-framework-demo/requirements.txt](agent-framework-demo/requirements.txt): exact direct pins for the standalone Agent Framework notebook, installed into its independent `agent-framework-demo\.venv` and verified by an in-notebook package inventory.
 
 Section 0 also constrains the bootstrap kernel version. Installing the smaller profile does **not** uninstall existing shared packages. Do not prune the shared environment blindly; use a separate environment for a minimal installation. Azure Identity's previously validated preview version is retained, not silently downgraded.
 
+### GitHub Release Wheels for Restricted Package Feeds
+
+After creating the root `.venv`, run:
+
+```powershell
+.\build_notebook_wheels.ps1
+.\.venv\Scripts\python.exe -m pip install --find-links .\.wheels -r .\requirements-notebook.txt
+.\.venv\Scripts\python.exe -m pip check
+```
+
+[build_notebook_wheels.ps1](build_notebook_wheels.ps1) reuses the verified build
+engine from the standalone demo, with this notebook's own Python interpreter,
+source checkout directory, wheel cache, and
+[notebook-source-releases.json](notebook-source-releases.json). It checks official
+repository URLs, immutable release commits, clean source, and expected wheel
+filenames. SHA-256 hashes and source provenance are written to the ignored root
+`.wheels` directory. The script only builds; it does not install packages into
+either runtime environment.
+
+Section 1 automatically uses the root `.wheels` cache when present and refuses
+to install into the wrong kernel. Restart the **AI Agent Demo (.venv, Python
+3.14)** kernel after upgrades. The two notebooks do not share virtual
+environments; the Foundry runtime does not inherit A2A/MCP server dependencies
+from the standalone demo.
+
 For local validation tooling and the regression suite:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r .\requirements-notebook-validation.txt
-.\.venv\Scripts\python.exe -m unittest discover -s .\tests -p test_notebook_validation.py -v
+.\.venv\Scripts\python.exe -m pip install --find-links .\.wheels -r .\requirements-notebook-validation.txt
+.\.venv\Scripts\python.exe -m unittest discover -s .\tests -p "test_notebook*.py" -v
 ```
+
+Install the optional shared profile with the same `--find-links .\.wheels`
+argument and `-r .\requirements-notebook-shared.txt` when MAF is also needed in
+the root environment. The source-controlled notebook keeps sensitive previews
+off by default; a local `SHOW_GENAI_CONTENT = True` opt-in deliberately differs
+from the regression that checks that publishing default.
+
+The September 18 update passes 119 tests against the publishable notebook in
+the upgraded root environment. A clean runtime/validation environment passes the
+same suite with the one optional-MAF installation check skipped. SDK tests use
+an in-memory HTTP transport; they do not create cloud resources or execute
+paid model calls. Both environments pass `pip check`.
 
 ---
 

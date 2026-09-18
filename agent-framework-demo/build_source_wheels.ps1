@@ -3,22 +3,25 @@
 # Purpose: Build the pinned official release wheels when the package mirror lags.
 # Usage: Run after notebook environment bootstrap; then rerun package installation.
 # Safety: Verify immutable commits, never change upstream source, never delete a
-#         checkout, and never install into the repository's root environment.
+#         checkout, and only build wheels; never install into a runtime environment.
 [CmdletBinding()]
 param(
-    [string]$SourceRoot = (Join-Path $PSScriptRoot '.source-builds')
+    [string]$SourceRoot = (Join-Path $PSScriptRoot '.source-builds'),
+    [string]$PythonPath = (Join-Path $PSScriptRoot '.venv\Scripts\python.exe'),
+    [string]$Wheelhouse = (Join-Path $PSScriptRoot '.wheels'),
+    [string]$ReleaseManifest
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+$python = $PythonPath
 if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     throw 'Run the notebook virtual-environment bootstrap first.'
 }
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw 'Git is required to retrieve the official tagged release sources.'
 }
-$wheelhouse = Join-Path $PSScriptRoot '.wheels'
+$wheelhouse = $Wheelhouse
 New-Item -ItemType Directory -Path $SourceRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $wheelhouse -Force | Out-Null
 $SourceRoot = (Resolve-Path -LiteralPath $SourceRoot).Path
@@ -61,11 +64,31 @@ $releases = @(
     }
 )
 
+if ($ReleaseManifest) {
+    $manifest = Get-Content -LiteralPath $ReleaseManifest -Raw | ConvertFrom-Json
+    $releases = @($manifest.Releases)
+    if ($releases.Count -eq 0 -or @($manifest.ExpectedWheels).Count -eq 0) {
+        throw 'The release manifest must list releases and expected wheel filenames.'
+    }
+}
+
 foreach ($release in $releases) {
     $checkout = Join-Path $SourceRoot $release.Name
     if (-not (Test-Path -LiteralPath $checkout)) {
-        & git clone --depth 1 --branch $release.Tag -- $release.Repository $checkout
+        $cloneOptions = @()
+        $sparsePaths = @()
+        if ($ReleaseManifest -and $release.PSObject.Properties['SparsePaths']) {
+            $sparsePaths = @($release.SparsePaths)
+            if ($sparsePaths.Count) {
+                $cloneOptions = @('--filter=blob:none', '--sparse')
+            }
+        }
+        & git clone --depth 1 --branch $release.Tag @cloneOptions -- $release.Repository $checkout
         if ($LASTEXITCODE -ne 0) { throw "Git checkout failed: $($release.Name)" }
+        if ($sparsePaths.Count) {
+            & git -C $checkout sparse-checkout set -- $sparsePaths
+            if ($LASTEXITCODE -ne 0) { throw "Sparse checkout failed: $($release.Name)" }
+        }
     }
     $head = & git -C $checkout rev-parse HEAD
     if ($LASTEXITCODE -ne 0 -or "$head".Trim() -ne $release.Commit) {
@@ -97,6 +120,9 @@ $expected = @(
     'httpx2-2.13.0-py3-none-any.whl',
     'httpcore2-2.13.0-py3-none-any.whl'
 )
+if ($ReleaseManifest) {
+    $expected = @($manifest.ExpectedWheels)
+}
 $wheels = foreach ($name in $expected) {
     $path = Join-Path $wheelhouse $name
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

@@ -1,0 +1,54 @@
+{
+  "Releases": [
+    {
+      "Name": "maf-python-1.19.0-source",
+      "Repository": "https://github.com/microsoft/agent-framework.git",
+      "Tag": "python-1.19.0",
+      "Commit": "703fbce285ee0f026e5effcadfb9e65aab7f5d84",
+      "Projects": [
+        "python\\packages\\core",
+        "python\\packages\\openai",
+        "python\\packages\\orchestrations"
+      ]
+    },
+    {
+      "Name": "azure-ai-projects-2.6.1-source",
+      "Repository": "https://github.com/Azure/azure-sdk-for-python.git",
+      "Tag": "azure-ai-projects_2.6.1",
+      "Commit": "fedc3ab96021c2b0d42496cb4ddf0c476f77b63d",
+      "SparsePaths": ["sdk/ai/azure-ai-projects", "eng"],
+      "Projects": ["sdk\\ai\\azure-ai-projects"]
+    },
+    {
+      "Name": "openai-3.16.1-source",
+      "Repository": "https://github.com/openai/openai-python.git",
+      "Tag": "v3.16.1",
+      "Commit": "bccad31277a98f120bdce604a35a5774a0beaeae",
+      "Projects": ["."]
+    },
+    {
+      "Name": "httpx2-2.13.0-source",
+      "Repository": "https://github.com/pydantic/httpx2.git",
+      "Tag": "v2.13.0",
+      "Commit": "f2951854442e78cb8f6d2256b7c1d83bd2b77d0b",
+      "Projects": ["src\\httpx2", "src\\httpcore2"]
+    },
+    {
+      "Name": "nbformat-5.11.1-source",
+      "Repository": "https://github.com/jupyter/nbformat.git",
+      "Tag": "v5.11.1",
+      "Commit": "75f819f5b60bc6ffc72145c364132efe5b3c4b35",
+      "Projects": ["."]
+    }
+  ],
+  "ExpectedWheels": [
+    "agent_framework_core-1.19.0-py3-none-any.whl",
+    "agent_framework_openai-1.14.4-py3-none-any.whl",
+    "agent_framework_orchestrations-1.2.0-py3-none-any.whl",
+    "azure_ai_projects-2.6.1-py3-none-any.whl",
+    "openai-3.16.1-py3-none-any.whl",
+    "httpx2-2.13.0-py3-none-any.whl",
+    "httpcore2-2.13.0-py3-none-any.whl",
+    "nbformat-5.11.1-py3-none-any.whl"
+  ]
+}
