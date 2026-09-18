@@ -4,10 +4,19 @@ Notable changes, newest first. Historical entries cover the 340 commits reachabl
 from `main` through `4ec2fac` (2026-08-22), beginning with `630593a` (2026-03-02).
 The local repository is not shallow and has no release tags; dates below are
 recorded commit dates, not published release dates. Related changes, merges,
-formatting edits, and notebook-output refreshes are consolidated. Local stash
-snapshots are excluded.
+formatting edits, and notebook-output refreshes are consolidated. Each
+`## YYYY-MM-DD` heading covers one commit day, with related change groups nested
+under `###` topic headings. Local stash snapshots are excluded.
 
-## Unreleased - Latest Agent Framework notebook and observability controls
+## 2026-09-17
+
+### Changelog organization
+
+- Group changes under one date heading per commit day, nest related topics
+  beneath that heading, replace undated entries, and split historical
+  multi-day ranges into their individual dates.
+
+### Latest Agent Framework notebook and observability controls
 
 - Pin the standalone Agent Framework notebook to core 1.18.0, OpenAI connector
   1.14.3, orchestrations 1.1.1, MCP 1.30.0, OpenAI 3.13.0 and the current
@@ -50,7 +59,7 @@ snapshots are excluded.
   orchestrator's terminal output separate, and select the final Coach response
   explicitly by author.
 
-## Unreleased - Notebook title and telemetry service identity
+### Notebook title and telemetry service identity
 
 - Rename "Project Agents" to "AI Agents" in the notebook heading.
 - Set the notebook telemetry service name to `foundry-agent-fw-demo` and service
@@ -61,7 +70,9 @@ snapshots are excluded.
 - Keep message previews opt-in in the published notebook; preserve local
   display preferences and exclude notebook execution outputs from the commit.
 
-## Unreleased - GenAI content and an explanatory observability report
+## 2026-09-15
+
+### GenAI content and an explanatory observability report
 
 - Enrich Section 6 dependency spans with `AppGenAIContent`, matching resource,
   trace and span IDs. Deduplicate source records and aggregate content before the
@@ -93,7 +104,7 @@ snapshots are excluded.
   prompt edits, existing execution outputs and unrelated work; generated Marp
   decks remain ignored.
 
-## Unreleased — Automatic backend version synchronization for the demo
+### Automatic backend version synchronization for the demo
 
 - Add explicit `sync` and `pinned` backend version policies; opt this demo into
   sync while retaining strict pinned behavior for configurations without a policy.
@@ -109,7 +120,7 @@ snapshots are excluded.
   agent with cloud writes blocked. Add lifecycle/failure/concurrency regressions:
   80 tests pass. No dependency installation or interactive authentication needed.
 
-## Unreleased — Backend agent identity and endpoint migration
+### Backend agent identity and endpoint migration
 
 - Create separate main/Sentinel backend agents from the existing definitions,
   verify distinct unique instance identities and blueprints, and pin each stable
@@ -131,7 +142,7 @@ snapshots are excluded.
   and no table discovery. Verify conversation continuation and HTTP 401 rejection
   of unauthenticated requests while retaining the old agents and fixed version pins.
 
-## Unreleased — Creation diagnostics and persistence correlation
+### Creation diagnostics and persistence correlation
 
 - Enrich the existing main and Sentinel creation spans with authoritative model
   publisher/name/version/deployment and deterministic SHA-256 fingerprints of
@@ -155,7 +166,9 @@ snapshots are excluded.
   49-span baseline from current coverage, and retain Git exclusion of all generated
   Marp decks and exports.
 
-## Unreleased — Visible model metadata in both Marp decks
+## 2026-09-14
+
+### Visible model metadata in both Marp decks
 
 - Add an every-slide footer with model type/provider, underlying name and version
   to the story/Learn and Sentinel decks. Keep deployment aliases and response
@@ -168,7 +181,7 @@ snapshots are excluded.
   slides show the footer without clipping or overlap. Preserve the active run's
   outputs and records; no new model inference was needed for preview generation.
 
-## Unreleased — GPT-5.6 Terra notebook deployment
+### GPT-5.6 Terra notebook deployment
 
 - Add a separate `gpt-5.6-terra` deployment (OpenAI model version `2026-07-09`,
   GlobalStandard, capacity 250) to the existing East US 2 Foundry account and
@@ -185,7 +198,7 @@ snapshots are excluded.
   versioned model name; re-query the same run to confirm Terra telemetry.
   Environment setup cells were not rerun and dependencies were unchanged.
 
-## Unreleased — Explicit SigninLogs SDL routing
+### Explicit SigninLogs SDL routing
 
 - Switch the shared Sentinel system/user policy and exact query template to
   `SigninLogs`, as explicitly requested. Filter `IsInteractive == true` and
@@ -203,7 +216,7 @@ snapshots are excluded.
   listing (2,933.00 ms), with no `search_tables` call/span. No end-to-end latency
   guarantee is claimed. Notebook outputs remain cleared.
 
-## Earlier work — Direct EntraIdSignInEvents SDL attempt
+### Direct EntraIdSignInEvents SDL attempt
 
 - Pin Sentinel system and user instructions to `EntraIdSignInEvents` with
   `LogonType has 'interactiveUser'`, signed-in `AccountUpn` filtering and latest
@@ -222,7 +235,7 @@ snapshots are excluded.
   the explicitly requested SigninLogs path above; no runtime success or
   six-second savings was claimed for the earlier attempt.
 
-## Unreleased — Demo content recording enabled by default
+### Demo content recording enabled by default
 
 - Default `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` to `true` for the
   controlled Windows demo, while respecting an explicit `false` opt-out.
@@ -234,7 +247,7 @@ snapshots are excluded.
   retain strict validation and restart guards. Historical live-run evidence still
   describes the earlier content-off configuration.
 
-## Unreleased — Telemetry policy and dependency simplification
+### Telemetry policy and dependency simplification
 
 - Enforce trace-only export using `OTEL_LOGS_EXPORTER=none`,
   `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False` and disabled performance
@@ -266,7 +279,7 @@ snapshots are excluded.
 - Update notebook notes, README and observability guidance; leave the notebook
   outputs cleared.
 
-## 2026-09-14 — Windows dependency and telemetry validation
+### Windows dependency and telemetry validation
 
 - Improve spacing and readability in the first three code cells of
   `zolab-ai-agent-demo-win11.ipynb`.
@@ -296,7 +309,9 @@ snapshots are excluded.
 - Backfill this changelog from the available Git history through the initial
   March 2, 2026 commit; historical dates are not versioned releases.
 
-## 2026-08-22 — Python 3.14 notebook setup
+## 2026-08-22
+
+### Python 3.14 notebook setup
 
 - Update the Windows notebook setup and kernel-selection checks for Python 3.14,
   while retaining Python 3.13+ guidance for macOS.
@@ -304,16 +319,22 @@ snapshots are excluded.
   for compatibility with the Agent Framework OpenAI dependency, and archive the
   pre-upgrade Python 3.13.14 package inventory. (`4ec2fac`)
 
-## 2026-07-03 — Deployment documentation
+## 2026-07-03
+
+### Deployment documentation
 
 - Refresh the bot deployment architecture diagram. (`0684ff8`)
 
-## 2026-07-02 — Azure resource client compatibility
+## 2026-07-02
+
+### Azure resource client compatibility
 
 - Add a shared `ResourceManagementClient` import fallback for the bot and worker
   to accommodate Azure management SDK package layouts. (`9c1f1cb`)
 
-## 2026-07-01 — Cross-subscription recovery
+## 2026-07-01
+
+### Cross-subscription recovery
 
 - Extend RBAC repair to restore build and Log Analytics access across
   subscriptions, and support explicit subscription-ID overrides.
@@ -321,19 +342,25 @@ snapshots are excluded.
   Security subscription is unavailable; deployment and cleanup still require
   that access. (`e133da9`)
 
-## 2026-06-11 — Aspire startup and observability guidance
+## 2026-06-11
+
+### Aspire startup and observability guidance
 
 - Harden the Agent Framework demo's Aspire startup with Docker Desktop
   readiness handling, available-port selection, and console-exporter fallback.
 - Add an observability demo talk track and an import/library alignment appendix;
   clean generated demo artifacts. (`7ba2501`, `c8f6004`, `9ae0630`)
 
-## 2026-06-10 — RBAC repair tooling
+## 2026-06-10
+
+### RBAC repair tooling
 
 - Add `deployment\repair-bot-rbac.ps1` and runbook guidance for restoring bot and
   worker role assignments removed by governance sweeps. (`c879a36`)
 
-## 2026-06-08 — Documentation and workflow definition
+## 2026-06-08
+
+### Documentation and workflow definition
 
 - Add SVG architecture, runtime, and walkthrough diagrams for the Agent
   Framework PoC, and update its README to use them.
@@ -341,7 +368,9 @@ snapshots are excluded.
   App workflow definition in `logicapp.json`. (`725c043`, `dbec448`, `7be3a89`,
   `98f855b`)
 
-## 2026-05-14 — Sentinel diagnostics and telemetry refresh
+## 2026-05-14
+
+### Sentinel diagnostics and telemetry refresh
 
 - Improve Sentinel MCP failure diagnostics with workspace, subscription,
   identity, and PIM/RBAC troubleshooting context.
@@ -350,56 +379,106 @@ snapshots are excluded.
 - Update observability guidance and stack diagrams, and add example main and
   Sentinel presentation outputs. (`10e92f0`, `1b6abb3`, `977d148`, `d6fdc96`)
 
-## 2026-04-16 — Marp presentation output
+## 2026-04-16
+
+### Marp presentation output
 
 - Generate dark-themed Marp Markdown decks for the main project-agent and
   Sentinel flows, alongside persisted results and run metadata. (`7d1d25c`)
 
-## 2026-04-07 to 2026-04-08 — Dedicated Agent Framework demo
+## 2026-04-08
+
+### Worker image Azure CLI behavior
+
+- Suppress Azure CLI upgrade checks in the worker image. (`3f56f08`)
+
+## 2026-04-07
+
+### Dedicated Agent Framework demo
 
 - Add the Agent Framework SDK notebook, PoC README, and MCP helper; move them
-  into the dedicated `agent-framework-demo` directory.
+  into the dedicated `agent-framework-demo` directory. (`afd0417`, `f632907`)
 - Refine telemetry, local-agent revision tracking, tool metadata, and helper
-  generation; suppress Azure CLI upgrade checks in the worker image.
-  (`afd0417`, `f632907`, `3f7d53f`, `d683488`, `3f56f08`)
+  generation. (`3f7d53f`, `d683488`)
 
-## 2026-04-05 to 2026-04-06 — Agent orchestration and trace correlation
+## 2026-04-06
+
+### Notebook observability and local authentication
+
+- Improve local authentication behavior and document agent roles, telemetry
+  phases, and the refactor in `observability.md` and related guidance.
+  (`1682099`)
+
+## 2026-04-05
+
+### Agent orchestration and trace correlation
 
 - Update the primary notebook and add optional Agent Framework orchestration
   for bot Microsoft Learn and build-guidance requests, preserving queue-backed
   build/teardown execution. (`5c17bb8`)
 - Restore Foundry trace correlation, add response-client dependency spans, and
   refine Sentinel identity, approval, workspace-resolution, and query handling.
-- Improve local authentication behavior and document agent roles, telemetry
-  phases, and the refactor in `observability.md` and related guidance.
-  (`8d9bdfe`, `3a470bb`, `84e0df3`, `3e033ff`, `1682099`)
+  (`8d9bdfe`, `3a470bb`, `84e0df3`, `3e033ff`)
 
-## 2026-04-03 — Sentinel MCP integration
+## 2026-04-03
+
+### Sentinel MCP integration
 
 - Extend the Windows notebook with optional Microsoft Sentinel Data Exploration
   MCP configuration, OAuth-passthrough project-connection discovery, and
   Sentinel query flow. (`cd4544b`)
 
-## 2026-03-28 to 2026-03-29 — Build and authentication resilience
+## 2026-03-29
+
+### Bot authentication and notebook connectivity
+
+- Improve bot authentication retries and shell preflight portability, simplify
+  tracing status, and restore local notebook IMDS suppression.
+  (`d1a660a`, `053abbe`)
+
+## 2026-03-28
+
+### Foundry cleanup and worker resilience
 
 - Harden Foundry cleanup and worker inventory; fix managed-identity deployment
   parsing and worker build-metadata lookup.
-- Improve bot authentication retries and shell preflight portability, simplify
-  tracing status, and restore local notebook IMDS suppression.
-  (`3eb323b`, `779a3b9`, `5b4b2aa`, `d1a660a`, `053abbe`)
+  (`3eb323b`, `779a3b9`, `5b4b2aa`)
 
-## 2026-03-22 to 2026-03-24 — Deployment configuration and preflight
+## 2026-03-24
+
+### Deployment preflight and worker synchronization
+
+- Add deployment and private-DNS preflight checks, Log Analytics shared-key
+  access requirements, and worker endpoint synchronization checks.
+- Increase the bot heartbeat default in stages to six hours and refresh
+  deployment architecture documentation. (`8eb3142`, `aec1518`, `a8d93e1`)
+
+## 2026-03-22
+
+### Deployment configuration and teardown boundaries
 
 - Parameterize deployment environment identifiers and remove remaining
   hard-coded deployment IDs.
-- Strengthen purge retries and teardown boundaries; add deployment/private-DNS
-  preflight checks, Log Analytics shared-key access requirements, and worker
-  endpoint synchronization checks.
-- Increase the bot heartbeat default in stages to six hours and refresh
-  deployment architecture documentation. (`06c2fb3`, `66f1a26`, `c5622dc`,
-  `8eb3142`, `aec1518`, `a8d93e1`)
+  (`06c2fb3`, `66f1a26`)
+- Strengthen purge retries and teardown boundaries. (`c5622dc`)
 
-## 2026-03-11 to 2026-03-14 — Bot identity, networking, and operations
+## 2026-03-14
+
+### Bot documentation and naming
+
+- Enhance Bot-The-Builder documentation, refresh the bot name, and update
+  architecture assets. (`32a2704`, `eee92d9`)
+
+## 2026-03-13
+
+### Build-info links and targeted cleanup
+
+- Fix public build-info download links and harden targeted teardown residual
+  cleanup. (`0ae2e7e`, `cb7d172`)
+
+## 2026-03-12
+
+### Bot identity, networking, and features
 
 - Cut over bot deployment to managed identity, improve worker identity
   bootstrap, and introduce private storage networking for bot and worker.
@@ -407,14 +486,20 @@ snapshots are excluded.
 - Add weather and Microsoft Learn commands, give the bot a model endpoint
   independent of disposable Foundry builds, and refine weather matching,
   retries, and Fahrenheit output. (`45ecd85`, `82f77c0`, `bf5bbe8`)
-- Reorganize bot runtime files, stabilize requester identity and image rollouts,
-  improve heartbeat/status messaging and build-info downloads, and harden
-  targeted teardown cleanup.
-- Add smoke-check scripts and an operations runbook; refresh Teams packaging,
-  architecture documentation, and the MacBook notebook.
-  (`03fe2e5`, `ff6a839`, `cb7d172`)
+- Reorganize bot runtime files and refresh Teams packaging, architecture
+  documentation, and the MacBook notebook. (`ff6a839`)
 
-## 2026-03-10 — Hosted bot and queue-backed worker
+## 2026-03-11
+
+### Bot operations and smoke checks
+
+- Stabilize requester identity and image rollouts, improve heartbeat/status
+  messaging and build-info downloads, and strengthen bot secret handling.
+- Add smoke-check scripts and an operations runbook. (`03fe2e5`)
+
+## 2026-03-10
+
+### Hosted bot and queue-backed worker
 
 - Add Azure Container Instances worker infrastructure, Azure Queue/Blob Storage
   persistence, Bot Service, and a Teams channel.
@@ -424,17 +509,27 @@ snapshots are excluded.
   interactive teardown, build-info delivery, managed-identity authentication,
   and worker build-status recovery. (`2f49ee3`, `814d7d0`, `f357cbc`, `510b236`)
 
-## 2026-03-08 to 2026-03-09 — Microsoft 365 Agents SDK migration
+## 2026-03-09
 
-- Migrate the Teams bot to the Microsoft 365 Agents SDK with worker,
-  conversation-state, proactive-message, and heartbeat components.
+### Local Agents Playground and interaction controls
+
 - Add local Agents Playground configuration, interactive model/build and
   teardown selection, build-info attachments, confirmation/abort prompts, and
   consistent five-minute interaction timeouts.
-- Parameterize Bicep values and harden deployment scripts for Windows and
-  macOS. (`86da6cb`, `ba037d1`, `175015a`, `1d08a7a`, `a66f391`, `a9cb722`)
+  (`ba037d1`, `175015a`, `1d08a7a`)
 
-## 2026-03-07 — Bot sample and Teams workflow refinement
+## 2026-03-08
+
+### Microsoft 365 Agents SDK migration
+
+- Migrate the Teams bot to the Microsoft 365 Agents SDK with worker,
+  conversation-state, proactive-message, and heartbeat components.
+- Parameterize Bicep values and harden deployment scripts for Windows and
+  macOS. (`86da6cb`, `a66f391`, `a9cb722`)
+
+## 2026-03-07
+
+### Bot sample and Teams workflow refinement
 
 - Add the Python Teams bot sample and teardown menu, then reorganize bot code
   and design documentation under `bot-app`.
@@ -443,14 +538,18 @@ snapshots are excluded.
 - Refine notebook tracing and capture deployment build metadata in story
   results. (`26ceba8`, `70fbe2b`, `8add5f0`, `084a5e0`, `e6ad27e`)
 
-## 2026-03-06 — Deployment metadata and Teams automation
+## 2026-03-06
+
+### Deployment metadata and Teams automation
 
 - Expose deployment endpoints and `build_info` output for notebook setup; add
   selectable deployment models and cleanup of generated build metadata.
 - Introduce Teams chat/command automation and expand listener operations.
   (`c524648`, `7936672`, `8a7dbd6`, `296bb06`, `f1534ab`)
 
-## 2026-03-05 — Deployment lifecycle and telemetry connections
+## 2026-03-05
+
+### Deployment lifecycle and telemetry connections
 
 - Add randomized deployment suffixes and deployer-group membership lifecycle
   management.
@@ -459,7 +558,9 @@ snapshots are excluded.
 - Add the `gpt-5.3-chat` deployment and correct its SKU to `GlobalStandard`.
   (`763ee18`, `c08e85f`, `97d6027`, `602f7dd`, `df51553`, `f5f1532`)
 
-## 2026-03-04 — Infrastructure as code
+## 2026-03-04
+
+### Infrastructure as code
 
 - Add Bicep infrastructure and PowerShell deployment automation with RBAC and
   Log Analytics integration.
@@ -469,7 +570,9 @@ snapshots are excluded.
   reorganize the root README. (`64df4cb`, `aa3bbe2`, `0388807`, `85888cd`,
   `c58f673`, `105c1a6`)
 
-## 2026-03-03 — MCP flows and notebook usability
+## 2026-03-03
+
+### MCP flows and notebook usability
 
 - Separate story generation from Microsoft Learn inquiries and refine MCP
   approval handling across the Windows and MacBook notebooks.
@@ -478,7 +581,9 @@ snapshots are excluded.
 - Ignore virtual environments and locally generated story output.
   (`9c50677`, `a0d0df1`, `653dd93`, `eab0822`, `fbb7443`)
 
-## 2026-03-02 — Initial project
+## 2026-03-02
+
+### Initial project
 
 - Create the repository with its introductory README and MIT license.
   (`630593a`)
