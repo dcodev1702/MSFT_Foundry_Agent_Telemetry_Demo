@@ -1,6 +1,10 @@
 # Windows Notebook Observability and Validation
 
-This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-18**. Microsoft Agent Framework (MAF) core 1.19.0 orchestrates the existing Azure AI Projects and Foundry Responses API calls; it does not replace those clients, endpoints or error/approval gates. OpenTelemetry resource identity and the Azure Monitor export path are retained.
+Run notebook kernels and shell examples from the repository root, not this
+documentation directory. Python helpers are in [notebook_support](../notebook_support)
+and dependency profiles are in [requirements](../requirements).
+
+This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](../zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-18**. Microsoft Agent Framework (MAF) core 1.19.0 orchestrates the existing Azure AI Projects and Foundry Responses API calls; it does not replace those clients, endpoints or error/approval gates. OpenTelemetry resource identity and the Azure Monitor export path are retained.
 
 The notebook exports client-side traces to Azure Monitor through the Foundry project's Application Insights connection. Foundry instrumentation supplies GenAI spans, while explicit notebook-side HTTP dependency spans preserve Service Map edges across transport-library changes.
 
@@ -16,7 +20,7 @@ The highest-value enhancements that are now applied are:
 
 ## What 3.1 & 3.3 Turns On Today
 
-Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-win11.ipynb) enable the following:
+Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](../zolab-ai-agent-demo-win11.ipynb) enable the following:
 
 | Capability | Current behavior in 3.1 | Why it matters |
 | --- | --- | --- |
@@ -50,7 +54,7 @@ results. MAF shares the established content-recording policy and 100% trace-only
 Azure Monitor configuration. No span processor stamps every SDK/service span with
 one agent or interaction; reporting follows actual parent relationships instead.
 
-![Pro-code observability stack for the Foundry agent demo](images/foundry-observability-stack.svg)
+![Pro-code observability stack for the Foundry agent demo](../images/foundry-observability-stack.svg)
 
 The diagram above summarizes the same pro-code path visually: notebook orchestration creates explicit spans, Foundry and HTTP client instrumentation enrich the agent and dependency traces, and Azure Monitor exports the resulting telemetry into the operational analysis surfaces.
 
@@ -81,9 +85,9 @@ That is the correct model for agent observability: agent actions, orchestration 
 
 The Python **3.14.7** environment was resolved on **2026-09-18** using the
 approved package feed plus wheels built from verified official GitHub release
-commits. [requirements-notebook.txt](requirements-notebook.txt) is the Windows
+commits. [requirements-notebook.txt](../requirements/requirements-notebook.txt) is the Windows
 notebook's direct-dependency matrix; the table records the tested versions.
-Use [build_notebook_wheels.ps1](build_notebook_wheels.ps1) when the feed has not
+Use [build_notebook_wheels.ps1](../build_notebook_wheels.ps1) when the feed has not
 admitted a recent release. The root notebook's wheel cache and virtual
 environment are independent of the standalone Agent Framework demo.
 
@@ -105,10 +109,10 @@ Install the matrix together, run `pip check`, then restart the kernel if SDKs we
 
 ### Runtime, Shared and Validation Profiles
 
-- [requirements-notebook.txt](requirements-notebook.txt) contains the runtime requirements, including Agent Framework core 1.19.0.
-- [requirements-notebook-shared.txt](requirements-notebook-shared.txt) adds optional Agent Framework OpenAI provider/orchestration integrations and an OTLP gRPC exporter for other shared-environment scenarios. This notebook needs core workflow orchestration only and does not configure an OTLP exporter.
-- [requirements-notebook-validation.txt](requirements-notebook-validation.txt) adds `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution.
-- [constraints-notebook-win11.txt](constraints-notebook-win11.txt) captures direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
+- [requirements-notebook.txt](../requirements/requirements-notebook.txt) contains the runtime requirements, including Agent Framework core 1.19.0.
+- [requirements-notebook-shared.txt](../requirements/requirements-notebook-shared.txt) adds optional Agent Framework OpenAI provider/orchestration integrations and an OTLP gRPC exporter for other shared-environment scenarios. This notebook needs core workflow orchestration only and does not configure an OTLP exporter.
+- [requirements-notebook-validation.txt](../requirements/requirements-notebook-validation.txt) adds `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution.
+- [constraints-notebook-win11.txt](../requirements/constraints-notebook-win11.txt) captures direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
 
 The runtime requires MAF core, but not the optional OpenAI provider, orchestration extensions or OTLP exporter. The tested Azure Identity preview line was retained; moving to stable credentials remains a separate compatibility exercise.
 
@@ -150,7 +154,7 @@ include the new name to display subsequent runs.
 
 ### GenAI Content and the Section 6 Report
 
-[notebook_observability.py](notebook_observability.py) owns the query builders and
+[notebook_support/observability.py](../notebook_support/observability.py) owns the query builders and
 HTML rendering; the notebook retains workspace resolution, credential selection,
 trace flushing, bounded ingestion polling and service-identity validation.
 Rerunning Section 6 only queries existing telemetry; it does not invoke agents,
@@ -338,7 +342,7 @@ protocols, authorization, identities and older versions, and does not enable
 consumers immediately after activation; it is a development convenience, not a
 pre-activation evaluation/approval pipeline.
 The model-definition fingerprint remains separate from endpoint routing.
-Use [the README rollback setting](README.md#backend-agent-endpoints) to explicitly
+Use [the README rollback setting](../README.md#backend-agent-endpoints) to explicitly
 return to the retained project endpoint path.
 
 **Live validation:** a candidate rehearsal passed before cutover. After saving

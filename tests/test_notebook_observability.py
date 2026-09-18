@@ -3,7 +3,7 @@ import json
 import unittest
 from pathlib import Path
 
-from notebook_observability import (
+from notebook_support.observability import (
     build_observability_queries, coverage_issues, render_failure_report,
     render_observability_report,
 )

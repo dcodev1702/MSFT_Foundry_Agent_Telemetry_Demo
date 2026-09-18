@@ -14,7 +14,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from notebook_workflow import NotebookStep, run_notebook_workflow
+from notebook_support.workflow import NotebookStep, run_notebook_workflow
 
 
 RUN_ID = "00000000-0000-0000-0000-000000000001"
@@ -29,7 +29,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.tracer = self.provider.get_tracer("workflow-test")
         self.addCleanup(self.provider.shutdown)
         for target in (
-            "notebook_workflow.trace.get_tracer",
+            "notebook_support.workflow.trace.get_tracer",
             "agent_framework.observability.get_tracer",
         ):
             patcher = patch(target, return_value=self.tracer)

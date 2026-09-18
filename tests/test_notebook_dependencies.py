@@ -29,10 +29,11 @@ from packaging.utils import canonicalize_name
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "zolab-ai-agent-demo-win11.ipynb"
-RUNTIME = ROOT / "requirements-notebook.txt"
-SHARED = ROOT / "requirements-notebook-shared.txt"
-VALIDATION = ROOT / "requirements-notebook-validation.txt"
-CONSTRAINTS = ROOT / "constraints-notebook-win11.txt"
+REQUIREMENTS = ROOT / "requirements"
+RUNTIME = REQUIREMENTS / "requirements-notebook.txt"
+SHARED = REQUIREMENTS / "requirements-notebook-shared.txt"
+VALIDATION = REQUIREMENTS / "requirements-notebook-validation.txt"
+CONSTRAINTS = REQUIREMENTS / "constraints-notebook-win11.txt"
 
 
 def direct_pins(path):
@@ -146,7 +147,8 @@ class NotebookInstallCellTests(unittest.TestCase):
         for with_wheels in (False, True):
             with self.subTest(with_wheels=with_wheels), TemporaryDirectory() as temp:
                 root = Path(temp)
-                requirements = root / "requirements-notebook.txt"
+                requirements = root / "requirements" / "requirements-notebook.txt"
+                requirements.parent.mkdir()
                 requirements.write_text("# test fixture\n", encoding="utf-8")
                 wheelhouse = root / ".wheels"
                 if with_wheels:
@@ -169,7 +171,8 @@ class NotebookInstallCellTests(unittest.TestCase):
     def test_wrong_kernel_cannot_modify_another_environment(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "requirements-notebook.txt").touch()
+            (root / "requirements").mkdir()
+            (root / "requirements" / "requirements-notebook.txt").touch()
             calls = []
             with self.assertRaisesRegex(RuntimeError, "kernel verification"):
                 self.execute(root, root / "unrelated" / "python.exe", calls.append)
@@ -186,7 +189,8 @@ class NotebookInstallCellTests(unittest.TestCase):
     def test_install_failure_preserves_original_error_and_explains_recovery(self):
         with TemporaryDirectory() as temp:
             root = Path(temp)
-            (root / "requirements-notebook.txt").touch()
+            (root / "requirements").mkdir()
+            (root / "requirements" / "requirements-notebook.txt").touch()
             commands = []
 
             def fail_install(command):

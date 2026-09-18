@@ -34,7 +34,42 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
    - 🔍 **Microsoft Foundry** — agent execution traces
    - 📡 **Log Analytics** — span health in `AppDependencies`, conversation/tool content in `AppGenAIContent`, and correlated exception drill-downs
 
-On Windows, Section 1 installs [requirements-notebook.txt](requirements-notebook.txt) and runs `pip check`. If SDKs were already imported before updating, restart the kernel and rerun from the beginning. The matrix below applies to the Windows notebook only; the macOS notebook and standalone [Agent Framework SDK PoC](agent-framework-demo/README-agent-framework-sdk-poc.md) have separate setup instructions.
+On Windows, Section 1 installs [requirements-notebook.txt](requirements/requirements-notebook.txt) and runs `pip check`. If SDKs were already imported before updating, restart the kernel and rerun from the beginning. The matrix below applies to the Windows notebook only; the macOS notebook and standalone [Agent Framework SDK PoC](agent-framework-demo/README-agent-framework-sdk-poc.md) have separate setup instructions.
+
+### Notebook Support Layout
+
+The notebooks stay at the repository root; run their kernels and the commands
+below from that directory. Supporting files are grouped by purpose:
+
+```text
+notebook_support/
+  __init__.py
+  agent_endpoints.py
+  observability.py
+  workflow.py
+requirements/
+  requirements-notebook.txt
+  requirements-notebook-shared.txt
+  requirements-notebook-validation.txt
+  constraints-notebook-win11.txt
+docs/
+  observability.md
+  OTEL-Agent-Spans.md
+```
+
+- [notebook_support](notebook_support) is a Python package. Notebook and test
+  imports use `notebook_support.agent_endpoints`, `notebook_support.observability`
+  and `notebook_support.workflow`; no `sys.path` workaround is needed.
+- [requirements](requirements) contains the root notebook's dependency profiles
+  and shared constraints. Package versions are unchanged, and `-r`/`-c` includes
+  remain relative to their requirement files.
+- [docs](docs) contains the [observability guide](docs/observability.md) and
+  [span reference](docs/OTEL-Agent-Spans.md).
+
+The standalone Agent Framework demo and bot keep their own requirements in their
+existing project directories. After pulling this layout change, restart the
+notebook kernel and rerun the runtime cells from **Confirm Existing Deployment**.
+Clear outputs before saving or sharing executed notebooks.
 
 ### Windows Dependency Matrix
 
@@ -60,10 +95,10 @@ Azure Monitor resolves exporter **1.0.0b57** on the matching OpenTelemetry train
 
 ### Dependency Profiles
 
-- [requirements-notebook.txt](requirements-notebook.txt): Windows runtime, including MAF core **1.19.0**. No MAF model-provider package is needed because existing Foundry calls remain unchanged.
-- [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional OpenAI provider **1.14.4**, orchestrations **1.2.0**, and OTLP gRPC exporter **1.44.0**. These are not used by the Windows workflow integration.
-- [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution and validation.
-- [constraints-notebook-win11.txt](constraints-notebook-win11.txt): 102 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
+- [requirements-notebook.txt](requirements/requirements-notebook.txt): Windows runtime, including MAF core **1.19.0**. No MAF model-provider package is needed because existing Foundry calls remain unchanged.
+- [requirements-notebook-shared.txt](requirements/requirements-notebook-shared.txt): runtime plus optional OpenAI provider **1.14.4**, orchestrations **1.2.0**, and OTLP gRPC exporter **1.44.0**. These are not used by the Windows workflow integration.
+- [requirements-notebook-validation.txt](requirements/requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution and validation.
+- [constraints-notebook-win11.txt](requirements/constraints-notebook-win11.txt): 102 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
 - [agent-framework-demo/requirements.txt](agent-framework-demo/requirements.txt): exact direct pins for the standalone Agent Framework notebook, installed into its independent `agent-framework-demo\.venv` and verified by an in-notebook package inventory.
 
 Section 0 also constrains the bootstrap kernel version. Installing the smaller profile does **not** uninstall existing shared packages. Do not prune the shared environment blindly; use a separate environment for a minimal installation. Azure Identity's previously validated preview version is retained, not silently downgraded.
@@ -74,7 +109,7 @@ After creating the root `.venv`, run:
 
 ```powershell
 .\build_notebook_wheels.ps1
-.\.venv\Scripts\python.exe -m pip install --find-links .\.wheels -r .\requirements-notebook.txt
+.\.venv\Scripts\python.exe -m pip install --find-links .\.wheels -r .\requirements\requirements-notebook.txt
 .\.venv\Scripts\python.exe -m pip check
 ```
 
@@ -96,12 +131,12 @@ from the standalone demo.
 For local validation tooling and the regression suite:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install --find-links .\.wheels -r .\requirements-notebook-validation.txt
+.\.venv\Scripts\python.exe -m pip install --find-links .\.wheels -r .\requirements\requirements-notebook-validation.txt
 .\.venv\Scripts\python.exe -m unittest discover -s .\tests -p "test_notebook*.py" -v
 ```
 
 Install the optional shared profile with the same `--find-links .\.wheels`
-argument and `-r .\requirements-notebook-shared.txt` only when additional MAF
+argument and `-r .\requirements\requirements-notebook-shared.txt` only when additional MAF
 providers or an OTLP exporter are needed by other work. The notebook's
 `SHOW_GENAI_CONTENT` setting controls report previews independently of capture.
 The current notebook opts in; set it to `False` and clear outputs before sharing.
@@ -153,7 +188,7 @@ error rather than displaying guessed values. Rerun **Section 4**, then **5 and
 ### Backend Agent Endpoints
 
 The Windows notebook supports two explicit invocation modes through
-[notebook_agent_endpoints.py](notebook_agent_endpoints.py):
+[notebook_support/agent_endpoints.py](notebook_support/agent_endpoints.py):
 
 - **`project`**: the backward-compatible project Responses endpoint with an
   `agent_reference`. This remains the default for build files without migration
@@ -290,7 +325,7 @@ model environment variables and request telemetry. No SDK update, chat-model
 change or new authentication flow is required when the existing credentials and
 Sentinel connection remain authorized.
 
-The [Terra validation evidence](observability.md#gpt-56-terra-notebook-validation--2026-09-15)
+The [Terra validation evidence](docs/observability.md#gpt-56-terra-notebook-validation--2026-09-15)
 covers all 10 runtime cells, real Learn/Sentinel tool calls and model metadata in
 current-run telemetry. The three environment/dependency setup cells were not
 rerun because the dependency set did not change.
@@ -316,13 +351,13 @@ Section **3.1** configures the notebook's observability path end to end:
 
 Content capture is enabled by default for this controlled demo: prompts, responses and tool payloads may be exported to Application Insights, including sensitive Sentinel data. Set the environment variable to `false` before initialization when this is not appropriate. Restarting a previously initialized kernel is necessary to pick up the new default; an inherited explicit `false` still takes precedence. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
 
-See [observability.md](observability.md) for the full environment variable reference,
-version posture and design notes, and [OTEL-Agent-Spans.md](OTEL-Agent-Spans.md)
+See [observability.md](docs/observability.md) for the full environment variable reference,
+version posture and design notes, and [OTEL-Agent-Spans.md](docs/OTEL-Agent-Spans.md)
 for per-cell span inventories, code examples and validation evidence.
 
 ### MAF Workflow Boundaries
 
-[notebook_workflow.py](notebook_workflow.py) uses the real MAF `WorkflowBuilder`
+[notebook_support/workflow.py](notebook_support/workflow.py) uses the real MAF `WorkflowBuilder`
 and function executors. Section 5 runs `story -> facts -> persistence`; Section
 5.1 runs a separate `sentinel` workflow with the same `demo.run_id` but its own
 trace. This preserves independent notebook execution and Sentinel's existing
@@ -356,7 +391,7 @@ SigninLogs
           Location, LocationDetails, AppDisplayName, ResourceDisplayName
 ```
 
-The selected SDL workspace must expose `SigninLogs` to the connected identity. If the table or required columns are unavailable, the error is surfaced rather than switching tables or treating it as an empty result. Rerun Section 4 to apply changed instructions in project or backend **sync** mode, then Section 5.1 in a new conversation. Backend **pinned** mode still requires a separate tested release and local version update. The existing Sentinel user-passthrough connection is retained; see [validation evidence](observability.md#direct-sentinel-table-routing--2026-09-15).
+The selected SDL workspace must expose `SigninLogs` to the connected identity. If the table or required columns are unavailable, the error is surfaced rather than switching tables or treating it as an empty result. Rerun Section 4 to apply changed instructions in project or backend **sync** mode, then Section 5.1 in a new conversation. Backend **pinned** mode still requires a separate tested release and local version update. The existing Sentinel user-passthrough connection is retained; see [validation evidence](docs/observability.md#direct-sentinel-table-routing--2026-09-15).
 
 ---
 
@@ -448,6 +483,6 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 - [OpenTelemetry for Python: Instrumentation Guide](https://opentelemetry.io/docs/languages/python/instrumentation/)
 - [Azure MCP Server Documentation](https://learn.microsoft.com/azure/developer/azure-mcp-server/)
 - [Foundry client-side tracing (preview)](https://learn.microsoft.com/azure/foundry/observability/how-to/trace-agent-client-side)
-- [Windows dependency matrix](requirements-notebook.txt)
-- [Observability notes and validation evidence](observability.md)
+- [Windows dependency matrix](requirements/requirements-notebook.txt)
+- [Observability notes and validation evidence](docs/observability.md)
 - [Change history](CHANGELOG.md)

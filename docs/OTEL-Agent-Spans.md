@@ -1,5 +1,9 @@
 # OpenTelemetry Agent Spans
 
+Run notebook kernels and shell examples from the repository root. The support
+modules are in [notebook_support](../notebook_support); see the
+[layout guide](../README.md#notebook-support-layout) for imports and dependency paths.
+
 ## MAF workflow orchestration
 
 The Windows notebook now wraps its existing Foundry calls with MAF core 1.19.0
@@ -62,7 +66,7 @@ The rendered metadata-only report was also checked in the integrated browser.
 ## Current Section 6: spans plus GenAI content
 
 The final notebook cell (`6e3dcab6`) now presents an HTML observability report
-using [notebook_observability.py](notebook_observability.py). **`AppGenAIContent`
+using [notebook_support/observability.py](../notebook_support/observability.py). **`AppGenAIContent`
 enriches the span inventory; it does not replace it or create new spans.**
 
 | View | Purpose |
@@ -115,7 +119,7 @@ original runs, not expected counts for future runs or the new content table.
 ## Backend agent endpoint migration
 
 The Windows notebook now supports an explicit **`agent_endpoint`** mode through
-[notebook_agent_endpoints.py](notebook_agent_endpoints.py). This uses separate
+[notebook_support/agent_endpoints.py](../notebook_support/agent_endpoints.py). This uses separate
 new-model backend agents with unique identities and fixed version pins, not
 Teams/M365 publishing. The original agents and **`project`** mode are retained
 for rollback.
@@ -160,7 +164,7 @@ assignments or OAuth consent were needed for the tested caller/tool path.
 The 49/50-span inventories below are historical **project-endpoint** runs.
 They remain valid audit evidence, but are not fixed expected counts or exact
 span names for backend mode. See [observability.md](observability.md#backend-endpoint-migration)
-and [runtime configuration / rollback](README.md#backend-agent-endpoints).
+and [runtime configuration / rollback](../README.md#backend-agent-endpoints).
 
 ### Version synchronization: current demo policy
 
@@ -509,7 +513,7 @@ version as shown earlier.
 ### Historical purpose and scope
 
 This guide itemizes the **49 unique telemetry spans** observed for the Windows
-[Foundry agent notebook](zolab-ai-agent-demo-win11.ipynb) run
+[Foundry agent notebook](../zolab-ai-agent-demo-win11.ipynb) run
 `69fb2e74-eabf-4142-b4e2-352e3e7d4844`. It connects each span to a notebook section,
 cell, purpose, parent, emitting component and relevant code.
 
@@ -1266,8 +1270,8 @@ validation gate, not an extra LLM request.
   persisted outputs. A different run can legitimately have a different span count.
 
 Related repository guidance:
-[README](README.md), [observability guide](observability.md), and
-[notebook](zolab-ai-agent-demo-win11.ipynb).
+[README](../README.md), [observability guide](observability.md), and
+[notebook](../zolab-ai-agent-demo-win11.ipynb).
 
 Microsoft references:
 

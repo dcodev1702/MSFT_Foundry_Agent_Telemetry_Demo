@@ -19,11 +19,11 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import SpanKind, Status, StatusCode
-from notebook_agent_endpoints import (
+from notebook_support.agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, get_pinned_agent,
     prepare_backend_agent, response_options, responses_url, sync_agent_version,
 )
-from notebook_observability import build_observability_queries
+from notebook_support.observability import build_observability_queries
 
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "zolab-ai-agent-demo-win11.ipynb"
@@ -933,7 +933,7 @@ class AgentVersionSyncTests(unittest.TestCase):
 
     def test_local_save_failure_is_explicit_and_next_run_repairs_selection(self):
         original = self.path.read_bytes()
-        with patch("notebook_agent_endpoints.os.replace", side_effect=OSError("read only")):
+        with patch("notebook_support.agent_endpoints.os.replace", side_effect=OSError("read only")):
             with self.assertRaisesRegex(RuntimeError, "active on version 2.*could not be saved"):
                 self.prepare()
         self.assertEqual(self.path.read_bytes(), original)

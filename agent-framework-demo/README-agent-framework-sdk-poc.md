@@ -58,7 +58,7 @@ That makes it a useful contrast to the rest of this repo, which includes Foundry
 - A2A client and process lifecycle: [agent_framework_reviewer_a2a_client.py](./agent_framework_reviewer_a2a_client.py)
 - Official-source wheel recovery: [build_source_wheels.ps1](./build_source_wheels.ps1)
 - Existing repo overview: [README.md](../README.md)
-- Existing observability notes: [observability.md](../observability.md)
+- Existing observability notes: [observability.md](../docs/observability.md)
 - Foundry deployment guide: [deployment/README.md](../deployment/README.md)
 - Bot workspace guide: [bot-app/README.md](../bot-app/README.md)
 - Bot runtime guide: [bot-app/runtime/README.md](../bot-app/runtime/README.md)
@@ -352,7 +352,7 @@ That split is useful because it lets you compare two approaches:
 - Application Insights Well-Architected guidance: [https://learn.microsoft.com/azure/well-architected/service-guides/application-insights](https://learn.microsoft.com/azure/well-architected/service-guides/application-insights)
 - Existing repo overview: [README.md](../README.md)
 - Foundry deployment details: [deployment/README.md](../deployment/README.md)
-- Existing observability notes: [observability.md](../observability.md)
+- Existing observability notes: [observability.md](../docs/observability.md)
 - Bot runtime architecture: [bot-app/runtime/README.md](../bot-app/runtime/README.md)
 
 ## Bottom Line

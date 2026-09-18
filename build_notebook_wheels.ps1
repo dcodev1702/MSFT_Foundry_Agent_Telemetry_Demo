@@ -20,6 +20,6 @@ Set-StrictMode -Version Latest
     -Wheelhouse (Join-Path $PSScriptRoot '.wheels') `
     -ReleaseManifest (Join-Path $PSScriptRoot 'notebook-source-releases.json')
 
-Write-Output 'Runtime: use --find-links .wheels -r requirements-notebook.txt'
-Write-Output 'Optional MAF: use --find-links .wheels -r requirements-notebook-shared.txt'
-Write-Output 'Validation: use --find-links .wheels -r requirements-notebook-validation.txt'
+Write-Output 'Runtime: use --find-links .wheels -r requirements\requirements-notebook.txt'
+Write-Output 'Optional MAF: use --find-links .wheels -r requirements\requirements-notebook-shared.txt'
+Write-Output 'Validation: use --find-links .wheels -r requirements\requirements-notebook-validation.txt'

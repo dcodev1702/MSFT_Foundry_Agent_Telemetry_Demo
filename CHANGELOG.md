@@ -10,6 +10,24 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-18
 
+### Organized notebook support files
+
+- Move notebook Python helpers into the [notebook_support](notebook_support)
+  package and update all notebook/test imports and mock targets.
+- Group root notebook requirement profiles and constraints under
+  [requirements](requirements), updating bootstrap/install commands and wheel
+  build guidance without changing any package versions.
+- Move the [observability guide](docs/observability.md) and
+  [span reference](docs/OTEL-Agent-Spans.md) into [docs](docs), rebasing notebook,
+  README, standalone-demo and cross-guide links.
+- Keep notebooks, generated-output locations, cloud agents and telemetry
+  behavior unchanged. Add layout, installer-path and link regression checks;
+  clear notebook outputs before publication.
+- Verify 155 regression tests, all three relocated dependency profiles and all
+  10 runtime cells in a fresh kernel against existing pinned agents. Azure
+  Monitor reports two workflows, four executor roots, 76 spans and no failed,
+  ambiguous or unmapped critical spans. Isolate generated test artifacts.
+
 ### Foundry Windows notebook dependency alignment
 
 - Update the actual notebook runtime to Azure AI Projects 2.6.1, OpenAI 3.16.1,
@@ -234,7 +252,7 @@ under `###` topic headings. Local stash snapshots are excluded.
   including the newly visible persistence span; no `search_tables` call.
 - Account for date-shaped version values in Kusto validation and distinguish
   the initial ingestion-gate snapshot from the later complete inventory.
-- Add the per-cell [span guide](OTEL-Agent-Spans.md), distinguish the original
+- Add the per-cell [span guide](docs/OTEL-Agent-Spans.md), distinguish the original
   49-span baseline from current coverage, and retain Git exclusion of all generated
   Marp decks and exports.
 
