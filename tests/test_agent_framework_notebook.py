@@ -19,19 +19,26 @@ REQUIREMENTS_PATH = ROOT / "agent-framework-demo" / "requirements.txt"
 MCP_HELPER_PATH = ROOT / "agent-framework-demo" / "agent_framework_menu_mcp_server.py"
 
 EXPECTED_PINS = {
-    "agent-framework-core": "1.18.0",
-    "agent-framework-openai": "1.14.3",
-    "agent-framework-orchestrations": "1.1.1",
+    "agent-framework-core": "1.19.0",
+    "agent-framework-openai": "1.14.4",
+    "agent-framework-orchestrations": "1.2.0",
+    "agent-framework-a2a": "1.0.0b260918",
+    "a2a-sdk": "1.1.4",
     "anyio": "4.15.1",
     "azure-identity": "1.25.3",
-    "httpx2": "2.12.0",
+    "httpx": "0.28.1",
+    "httpx2": "2.13.0",
     "ipykernel": "7.3.0",
     "mcp": "1.30.0",
-    "openai": "3.13.0",
+    "openai": "3.16.0",
     "opentelemetry-api": "1.44.0",
     "opentelemetry-exporter-otlp-proto-grpc": "1.44.0",
     "opentelemetry-sdk": "1.44.0",
+    "protobuf": "6.33.6",
+    "psutil": "7.2.2",
     "pydantic": "2.13.5",
+    "starlette": "1.6.0",
+    "uvicorn": "0.53.0",
 }
 
 
@@ -244,6 +251,7 @@ class NotebookStructureTests(unittest.TestCase):
             "0f3f5f40",
             "4dd2f39c",
             "5d0a3908",
+            "a2c19f47",
             "ac926c91",
             "81348edc",
             "9be200c9",
@@ -342,7 +350,7 @@ class NotebookStructureTests(unittest.TestCase):
             "package_inventory": {
                 "packages": {
                     **EXPECTED_PINS,
-                    "agent-framework-core": "1.18.0",
+                    "agent-framework-core": "1.19.0",
                 },
             },
         }
@@ -359,8 +367,11 @@ class NotebookStructureTests(unittest.TestCase):
             'font-weight: 700;">session-id',
             html,
         )
-        self.assertIn('color: #2EA043; font-weight: 700;">13</span> pins verified', html)
-        self.assertIn('Agent Framework <span style="color: #2EA043; font-weight: 700;">1.18.0', html)
+        self.assertIn(
+            f'color: #2EA043; font-weight: 700;">{len(EXPECTED_PINS)}</span> pins verified',
+            html,
+        )
+        self.assertIn('Agent Framework <span style="color: #2EA043; font-weight: 700;">1.19.0', html)
 
     def test_major_runtime_summaries_use_shared_color_renderer(self):
         for cell_id in (
@@ -375,6 +386,7 @@ class NotebookStructureTests(unittest.TestCase):
             "4dd2f39c",
             "aa785fd2",
             "5d0a3908",
+            "a2c19f47",
             "ac926c91",
             "81348edc",
             "9be200c9",
@@ -478,7 +490,9 @@ class NotebookStructureTests(unittest.TestCase):
 
     def test_cleanup_stops_telemetry_before_removing_aspire(self):
         ordered_ids = [cell["id"] for cell in self.notebook["cells"]]
-        cleanup_ids = ["5d0a3908", "ac926c91", "81348edc", "9be200c9"]
+        cleanup_ids = [
+            "5d0a3908", "a2c19f47", "ac926c91", "81348edc", "9be200c9"
+        ]
         self.assertEqual(
             [ordered_ids.index(cell_id) for cell_id in cleanup_ids],
             sorted(ordered_ids.index(cell_id) for cell_id in cleanup_ids),

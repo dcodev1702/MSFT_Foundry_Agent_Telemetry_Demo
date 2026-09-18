@@ -19,7 +19,7 @@
 
   <!-- Title -->
   <text x="56" y="58" font-size="30" font-weight="800" fill="#e8edf5" letter-spacing="0.5">AGENT FRAMEWORK <tspan font-weight="300" fill="#9aa7ba">// Notebook Architecture</tspan></text>
-  <text x="56" y="80" font-size="12" fill="#6b7689" letter-spacing="0.3">VS Code · .venv · Azure OpenAI · MCP · Workflows · OpenTelemetry · Aspire</text>
+  <text x="56" y="80" font-size="12" fill="#6b7689" letter-spacing="0.3">VS Code · .venv · Azure OpenAI · MCP · A2A Reviewer · OpenTelemetry · Aspire</text>
 
   <circle cx="1004" cy="50" r="5" fill="#34d399" filter="url(#gGr)"/>
   <text x="1018" y="54" font-size="12" fill="#aeb8c7">Local runtime · No Foundry</text>
@@ -44,7 +44,7 @@
   <text x="348" y="186" font-size="11" fill="#c4a5f5">guided, cell-by-cell PoC runtime · orchestrates every spoke below</text>
   <g font-size="10" fill="#cdb6f7">
     <rect x="960" y="160" width="92" height="22" rx="11" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
-    <text x="1006" y="175" text-anchor="middle">Python 3.13</text>
+    <text x="1006" y="175" text-anchor="middle">Python 3.14</text>
     <rect x="1062" y="160" width="92" height="22" rx="11" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
     <text x="1108" y="175" text-anchor="middle">OTel enabled</text>
   </g>
@@ -70,6 +70,8 @@
       <circle cx="84" cy="425" r="2" fill="#a855f7"/><text x="94" y="429">mcp · anyio</text>
       <circle cx="84" cy="442" r="2" fill="#a855f7"/><text x="94" y="446">otlp grpc exporter</text>
       <circle cx="84" cy="459" r="2" fill="#a855f7"/><text x="94" y="463">ipykernel</text>
+      <circle cx="84" cy="476" r="2" fill="#a855f7"/><text x="94" y="480">agent-framework-a2a</text>
+      <circle cx="84" cy="493" r="2" fill="#a855f7"/><text x="94" y="497">a2a-sdk · uvicorn</text>
     </g>
     <rect x="78" y="648" width="174" height="26" rx="13" fill="#1a1130" stroke="#7c3aed" stroke-width="0.9"/>
     <circle cx="92" cy="661" r="3.5" fill="#a855f7"/>
@@ -134,16 +136,18 @@
     <g font-size="10.5" fill="#b8c2d2">
       <circle cx="765" cy="391" r="2" fill="#fbbf24"/><text x="775" y="395">GroupChatBuilder</text>
       <circle cx="765" cy="408" r="2" fill="#fbbf24"/><text x="775" y="412">round-robin selector</text>
-      <circle cx="765" cy="425" r="2" fill="#fbbf24"/><text x="775" y="429">terminate len ≥ 6</text>
+      <circle cx="765" cy="425" r="2" fill="#fbbf24"/><text x="775" y="429">one pass · 3 rounds</text>
       <circle cx="765" cy="442" r="2" fill="#fbbf24"/><text x="775" y="446">streamed turns</text>
     </g>
     <text x="761" y="490" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">PARTICIPANTS</text>
     <rect x="759" y="498" width="174" height="22" rx="11" fill="#2a2208" stroke="#b45309" stroke-width="0.8"/>
-    <circle cx="773" cy="509" r="3" fill="#fbbf24"/><text x="784" y="513" font-size="10" fill="#fde68a">Architect agent</text>
+    <circle cx="773" cy="509" r="3" fill="#fbbf24"/><text x="784" y="513" font-size="10" fill="#fde68a">Architect · local</text>
     <rect x="759" y="524" width="174" height="22" rx="11" fill="#2a2208" stroke="#b45309" stroke-width="0.8"/>
-    <circle cx="773" cy="535" r="3" fill="#fbbf24"/><text x="784" y="539" font-size="10" fill="#fde68a">Reviewer agent</text>
+    <circle cx="773" cy="535" r="3" fill="#fbbf24"/><text x="784" y="539" font-size="10" fill="#fde68a">Reviewer · A2A process</text>
     <rect x="759" y="550" width="174" height="22" rx="11" fill="#2a2208" stroke="#b45309" stroke-width="0.8"/>
-    <circle cx="773" cy="561" r="3" fill="#fbbf24"/><text x="784" y="565" font-size="10" fill="#fde68a">Coach agent</text>
+    <circle cx="773" cy="561" r="3" fill="#fbbf24"/><text x="784" y="565" font-size="10" fill="#fde68a">Coach · local</text>
+    <text x="775" y="596" font-size="10" fill="#b8c2d2">Agent Card · bearer auth</text>
+    <text x="775" y="614" font-size="10" fill="#b8c2d2">loopback · tasks · artifacts</text>
     <rect x="759" y="648" width="174" height="26" rx="13" fill="#2a2208" stroke="#b45309" stroke-width="0.9"/>
     <circle cx="773" cy="661" r="3.5" fill="#fbbf24"/>
     <text x="785" y="665" font-size="10" font-weight="600" fill="#fde68a">ORCHESTRATIONS</text>

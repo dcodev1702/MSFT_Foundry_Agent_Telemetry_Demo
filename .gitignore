@@ -1,4 +1,7 @@
 .venv/
+# Locally built wheels and upstream source checkouts are not project source.
+/agent-framework-demo/.wheels/
+/agent-framework-demo/.source-builds/
 __pycache__/
 *.pyc
 stories.json

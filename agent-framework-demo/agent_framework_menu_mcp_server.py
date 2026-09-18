@@ -78,7 +78,7 @@ def finish_telemetry(*, shutdown: bool = False) -> None:
 
 
 def instrument_mcp_server(server: Server, *, export_enabled: bool = True) -> None:
-    # MAF 1.18 sends trace context in _meta but its server adapter does not extract it.
+    # MAF sends trace context in _meta; the server adapter still needs extraction.
     call_handler = server.request_handlers[types.CallToolRequest]
     tracer = trace.get_tracer("zolab.agent_framework_sdk.mcp")
 

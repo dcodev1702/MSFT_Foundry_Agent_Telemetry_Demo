@@ -10,6 +10,27 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-18
 
+### A2A reviewer and current compatible libraries
+
+- Host ReviewerAgent in a separate loopback A2A service while keeping Architect
+  and Coach local. Discover its Agent Card, verify ephemeral bearer authentication,
+  preserve the original user/draft context, and retrieve completed review tasks
+  and artifacts before the Coach runs.
+- Correlate A2A HTTP and remote model spans with the notebook workflow; add
+  colorized task/trace output, explicit lifecycle guards, and ordered cleanup.
+  Document the local authentication, task-store, and production boundaries.
+- Update to MAF core 1.19.0, OpenAI provider 1.14.4, orchestrations 1.2.0,
+  A2A adapter 1.0.0b260918, A2A SDK 1.1.4, OpenAI 3.16.0, HTTPX2 2.13.0,
+  and Uvicorn 0.53.0. Retain the latest compatible MCP 1.x and protobuf 6.x lines.
+- Provide verified official GitHub source-wheel builds when package mirrors lag,
+  with immutable release commits and local provenance; keep the root environment
+  and existing MCP workflow isolated from these changes.
+- Validate the actual MAF 1.19 notebook runtime, including MCP and the A2A group
+  exercise: both unauthorized probes return 401, the reviewer task completes with
+  one artifact, and Aspire correlates the local Architect/Coach with the remote
+  Reviewer in one trace. Verify cleanup of both helper processes and review
+  published advisory metadata for all 93 resolved packages.
+
 ### MCP helper documentation and formatting
 
 - Add an author/date header describing the helper's purpose, usage,
