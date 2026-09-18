@@ -382,6 +382,52 @@ class NotebookStructureTests(unittest.TestCase):
                 for phrase in expected_phrases:
                     self.assertIn(phrase, description)
 
+    def test_every_code_cell_has_an_immediately_preceding_description(self):
+        for index, cell in enumerate(self.notebook["cells"]):
+            if cell["cell_type"] != "code":
+                continue
+            with self.subTest(code_cell=cell["id"]):
+                self.assertGreater(index, 0)
+                description_cell = self.notebook["cells"][index - 1]
+                self.assertEqual(description_cell["cell_type"], "markdown")
+                self.assertTrue("".join(description_cell["source"]).strip())
+
+    def test_new_operation_descriptions_explain_behavior_and_outcomes(self):
+        expected_descriptions = {
+            "f9e4a4c7": (
+                "Verify the Installed Package Inventory",
+                "does not depend on variables created by the installation cell",
+                "MISMATCH",
+            ),
+            "91a844a6": (
+                "Start the MCP stdio Server",
+                "reused instead of starting a duplicate server",
+                "reserved for MCP traffic",
+            ),
+            "4dd2f39c": (
+                "Run and Validate the Multi-Agent Workflow",
+                "exactly one CoachAgent response",
+                "workflow_orchestrator_completion",
+            ),
+            "5d0a3908": (
+                "Stop the MCP Child Process",
+                "waits up to five seconds",
+                "stop MCP before shutting down telemetry",
+            ),
+        }
+        for code_cell_id, expected_phrases in expected_descriptions.items():
+            with self.subTest(code_cell=code_cell_id):
+                code_index = next(
+                    index
+                    for index, cell in enumerate(self.notebook["cells"])
+                    if cell["id"] == code_cell_id
+                )
+                description = "".join(
+                    self.notebook["cells"][code_index - 1]["source"]
+                )
+                for phrase in expected_phrases:
+                    self.assertIn(phrase, description)
+
 
 class AgentInstructionTests(unittest.TestCase):
     def setUp(self):

@@ -34,9 +34,10 @@ snapshots are excluded.
 - Shut down OpenTelemetry metrics, traces and logs before Aspire cleanup. Guard
   against removing the OTLP receiver or closing credentials while the periodic
   metrics exporter is still active.
-- Add explanatory Markdown before the final OpenTelemetry, Aspire, and Azure
-  credential cleanup cells, including ordering safeguards, expected results,
-  rerun behavior, and resource-removal boundaries.
+- Ensure every code cell has an immediately preceding explanatory Markdown
+  cell. Add dedicated guidance for package verification, MCP startup,
+  multi-agent execution, and every cleanup step, including safeguards,
+  expected results, rerun behavior, and resource-removal boundaries.
 - Align Agent Framework notebook documentation and runtime status panels with
   the Windows notebook palette: green enabled/success states, red
   disabled/action states, rust session IDs/revisions, blue endpoints/versions,
