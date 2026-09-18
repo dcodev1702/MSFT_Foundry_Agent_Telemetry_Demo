@@ -7,6 +7,38 @@ recorded commit dates, not published release dates. Related changes, merges,
 formatting edits, and notebook-output refreshes are consolidated. Local stash
 snapshots are excluded.
 
+## Unreleased - Latest Agent Framework notebook and observability controls
+
+- Pin the standalone Agent Framework notebook to core 1.18.0, OpenAI connector
+  1.14.3, orchestrations 1.1.1, MCP 1.30.0, OpenAI 3.13.0 and the current
+  compatible Python/OpenTelemetry stack. Keep its dependencies isolated in
+  `agent-framework-demo/.venv` rather than modifying the main notebook's
+  shared environment. MCP 1.30.0 is the newest release in Agent Framework
+  1.18's declared `mcp>=1.24,<2` compatibility range.
+- Add an in-notebook package inventory that verifies every direct pin before
+  Azure or agent setup proceeds.
+- Keep prompt, response, tool-argument and tool-result capture enabled by
+  default with `AGENT_DEMO_CAPTURE_CONTENT=false` as an explicit opt-out.
+  Make root DEBUG, console exporters and duplicate GenAI message events
+  independently configurable.
+- Move telemetry setup to the Agent Framework 1.16+ programmatic configuration
+  surface, stamp package/service/session metadata, reject incompatible reruns,
+  and add an explicit 30-second flush/inspection gate.
+- Instrument the generated MCP process without writing diagnostics to the
+  stdio protocol channel. Document current and recommended production hosting,
+  identity, collector, durability, resilience, SLO and data-governance
+  boundaries without changing the agent/tool/MCP/group-chat workflow.
+- Clear persisted notebook outputs and add regression coverage for package
+  pins, source syntax, workflow order, telemetry controls, MCP stdio safety and
+  architecture guidance.
+- Shut down OpenTelemetry metrics, traces and logs before Aspire cleanup. Guard
+  against removing the OTLP receiver or closing credentials while the periodic
+  metrics exporter is still active.
+- Align Agent Framework notebook documentation and runtime status panels with
+  the Windows notebook palette: green enabled/success states, red
+  disabled/action states, rust session IDs/revisions, blue endpoints/versions,
+  and magenta services/agents.
+
 ## Unreleased - Notebook title and telemetry service identity
 
 - Rename "Project Agents" to "AI Agents" in the notebook heading.

@@ -30,7 +30,7 @@ This PoC is intentionally focused on a single teaching surface: one notebook tha
 The notebook is designed around these constraints:
 
 - Windows 11 and VS Code friendly
-- `.venv`-based local setup
+- independent `agent-framework-demo/.venv` local setup
 - Azure OpenAI for model execution
 - Microsoft Agent Framework as the primary SDK
 - Aspire Dashboard as the primary trace viewer
@@ -51,6 +51,7 @@ That makes it a useful contrast to the rest of this repo, which includes Foundry
 ## Primary Assets
 
 - Notebook: [zolab-agent-framework-sdk-win11.ipynb](./zolab-agent-framework-sdk-win11.ipynb)
+- Pinned notebook dependencies: [requirements.txt](./requirements.txt)
 - Existing repo overview: [README.md](../README.md)
 - Existing observability notes: [observability.md](../observability.md)
 - Foundry deployment guide: [deployment/README.md](../deployment/README.md)
@@ -101,40 +102,50 @@ For a local teaching PoC, Aspire is the fastest way to make those questions visi
 
 ### Notebook Install Set
 
-The notebook installs these major packages:
+The notebook installs exact direct pins from [requirements.txt](./requirements.txt), constrained by the repository's reviewed Windows snapshot. Key pins are:
 
-- `agent-framework-core`
-- `agent-framework-orchestrations`
-- `azure-identity`
-- `mcp`
-- `anyio`
-- `ipykernel`
-- `opentelemetry-exporter-otlp-proto-grpc`
+| Package | Version |
+| --- | --- |
+| `agent-framework-core` | `1.18.0` |
+| `agent-framework-openai` | `1.14.3` |
+| `agent-framework-orchestrations` | `1.1.1` |
+| `anyio` | `4.15.1` |
+| `mcp` | `1.30.0` (newest release compatible with Agent Framework 1.18's declared `mcp>=1.24,<2` range) |
+| `openai` | `3.13.0` |
+| `azure-identity` | `1.25.3` |
+| `httpx2` | `2.12.0` |
+| `ipykernel` | `7.3.0` |
+| `pydantic` | `2.13.5` |
+| `opentelemetry-api` / `opentelemetry-sdk` / OTLP gRPC exporter | `1.44.0` |
 
 ## Quick Start
 
 1. Open [zolab-agent-framework-sdk-win11.ipynb](./zolab-agent-framework-sdk-win11.ipynb).
-2. Run the virtual-environment and dependency cells first.
-3. Switch the notebook to the registered `.venv` kernel.
+2. Run the virtual-environment, dependency, and package-inventory cells first.
+3. Switch the notebook to the registered `agent-framework-demo/.venv` kernel.
 4. Run the Azure OpenAI configuration cell.
 5. Run the Aspire Dashboard startup cell and use the printed browser token or login URL. If Docker Desktop is not already running, the cell waits for the Docker Linux engine and prints a clear fallback status instead of raising a Docker `CalledProcessError`.
 6. Run the observability cell to initialize OTLP export.
 7. Run the basic agent section.
 8. Run the MCP demo.
 9. Run the multi-agent workflow section.
-10. Use the cleanup section when you are done.
+10. Run every cleanup cell in order when you are done. OpenTelemetry must be shut down before the Aspire receiver is removed; restart the kernel before rerunning the demo after cleanup.
 
 ## Observability Design Notes
 
-This PoC chooses strong observability over minimal console output.
+This PoC chooses rich telemetry with controlled notebook noise.
 
 The intended telemetry model is:
 
 - spans stay rich enough for Aspire exploration
-- prompts and responses are visible in a controlled demo context
-- the notebook remains understandable while still showing that real tracing is happening
+- prompt, response, tool-argument, and tool-result capture is enabled by default; set `AGENT_DEMO_CAPTURE_CONTENT=false` before telemetry setup to opt out
+- root DEBUG is disabled by default; set `AGENT_DEMO_ROOT_DEBUG=true` for a focused troubleshooting run
+- console exporters are disabled when OTLP is available and used as a fallback otherwise; `AGENT_DEMO_CONSOLE_EXPORTERS` can override the choice
+- duplicate GenAI message events are disabled by default while content remains on current GenAI spans; `AGENT_DEMO_MESSAGE_EVENTS=true` enables them
+- the package inventory, service version, session ID, and agent/workflow revisions make trace comparisons reproducible
+- notebook status panels use the same semantic palette as the main Windows notebook: green for enabled/success, red for disabled/action-required states, rust for session IDs and revisions, blue for endpoints/versions, and magenta for named services/agents
 
-This is deliberately different from a production posture. In production, you would likely reduce sensitive data capture, harden auth posture further, and control sampling more aggressively.
+This is deliberately different from a production posture. In production, route OTLP through a collector to Azure Monitor/Application Insights, apply redaction and access-controlled retention, use a specific managed identity, and define sampling plus alerting policies explicitly.
 
 ### Aspire Dashboard Startup Behavior
 
@@ -144,6 +155,7 @@ The Windows notebook now handles the common Docker Desktop cold-start case expli
 - If Docker CLI is present but the Docker Desktop Linux engine is unavailable, the notebook attempts to start Docker Desktop and waits for the engine.
 - If ports `18888` or `4317` are already busy, the notebook chooses available local ports and prints the actual Aspire UI and OTLP endpoint.
 - If container startup fails, the notebook prints Docker stderr and keeps the rest of the demo runnable with console exporters.
+- Cleanup flushes and shuts down the OpenTelemetry meter, tracer, and logger providers before removing Aspire. This stops the metrics export thread and prevents repeated `StatusCode.UNAVAILABLE` retries after the local receiver is gone.
 
 ## Scope Boundaries
 
@@ -180,6 +192,7 @@ That split is useful because it lets you compare two approaches:
 ## Known Tradeoffs
 
 - The notebook is optimized for learning and inspection, not for minimal package count.
+- The notebook intentionally owns `agent-framework-demo/.venv`; it does not share or constrain the main Foundry notebook's root `.venv`.
 - The MCP demonstration is strongest on the server-exposure side; it is not trying to be a full reusable host product.
 - The workflow section can still generate substantial transcript output because multi-agent conversations are naturally verbose.
 - The notebook depends on local Docker availability if you want the full Aspire experience.
@@ -188,12 +201,19 @@ That split is useful because it lets you compare two approaches:
 
 - Add a small in-notebook MCP client validation step if you want a full request-response MCP proof in the same notebook
 - Add a second workflow example, such as sequential or handoff orchestration, for comparison
-- Add a lighter observability profile for users who want Aspire traces but almost no notebook console output
-- Extract the MCP helper and workflow helpers into reusable repo scripts if this notebook becomes a longer-lived teaching asset
+- Add an automated MCP client handshake if you want the notebook to prove the full stdio request-response path.
+- Extract agent definitions, tools, workflow construction, MCP hosting, and telemetry bootstrap into tested modules if the PoC becomes a production seed.
+- Replace notebook-managed stdio with an authenticated, health-checked MCP service only when tools must be shared remotely.
+- Route production telemetry through an OpenTelemetry Collector and Azure Monitor/Application Insights; Aspire Dashboard is a development viewer, not a production monitoring system.
 
 ## Related References
 
 - Microsoft Agent Framework repo: [https://github.com/microsoft/agent-framework](https://github.com/microsoft/agent-framework)
+- Agent Framework observability: [https://learn.microsoft.com/agent-framework/agents/observability](https://learn.microsoft.com/agent-framework/agents/observability)
+- Agent Framework Python 2026 significant changes: [https://learn.microsoft.com/agent-framework/support/upgrade/python-2026-significant-changes](https://learn.microsoft.com/agent-framework/support/upgrade/python-2026-significant-changes)
+- Azure OpenAI passwordless authentication: [https://learn.microsoft.com/azure/developer/ai/keyless-connections](https://learn.microsoft.com/azure/developer/ai/keyless-connections)
+- Standalone Aspire Dashboard with OTLP: [https://learn.microsoft.com/dotnet/core/diagnostics/observability-otlp-example](https://learn.microsoft.com/dotnet/core/diagnostics/observability-otlp-example)
+- Application Insights Well-Architected guidance: [https://learn.microsoft.com/azure/well-architected/service-guides/application-insights](https://learn.microsoft.com/azure/well-architected/service-guides/application-insights)
 - Existing repo overview: [README.md](../README.md)
 - Foundry deployment details: [deployment/README.md](../deployment/README.md)
 - Existing observability notes: [observability.md](../observability.md)

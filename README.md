@@ -60,6 +60,7 @@ Azure Monitor resolves exporter **1.0.0b57** on the matching OpenTelemetry train
 - [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional Agent Framework core **1.17.0**, OpenAI provider **1.14.2**, and OTLP gRPC exporter **1.44.0**. Use only when those packages are needed by other work in the shared environment.
 - [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.0` for automated execution and validation.
 - [constraints-notebook-win11.txt](constraints-notebook-win11.txt): 100 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
+- [agent-framework-demo/requirements.txt](agent-framework-demo/requirements.txt): exact direct pins for the standalone Agent Framework notebook, installed into its independent `agent-framework-demo\.venv` and verified by an in-notebook package inventory.
 
 Section 0 also constrains the bootstrap kernel version. Installing the smaller profile does **not** uninstall existing shared packages. Do not prune the shared environment blindly; use a separate environment for a minimal installation. Azure Identity's previously validated preview version is retained, not silently downgraded.
 

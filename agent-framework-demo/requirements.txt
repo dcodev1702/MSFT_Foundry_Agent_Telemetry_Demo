@@ -1,0 +1,16 @@
+# Reviewed 2026-09-17 for Windows and CPython 3.14.
+# Pin direct notebook dependencies so reruns do not silently change the demo.
+agent-framework-core==1.18.0
+agent-framework-openai==1.14.3
+agent-framework-orchestrations==1.1.1
+anyio==4.15.1
+azure-identity==1.25.3
+httpx2==2.12.0
+ipykernel==7.3.0
+# Agent Framework 1.18 declares mcp>=1.24,<2; 1.30.0 is the newest compatible release.
+mcp==1.30.0
+openai==3.13.0
+opentelemetry-api==1.44.0
+opentelemetry-exporter-otlp-proto-grpc==1.44.0
+opentelemetry-sdk==1.44.0
+pydantic==2.13.5
