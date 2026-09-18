@@ -281,7 +281,7 @@ class SentinelTableRoutingTests(unittest.TestCase):
             with self.subTest(prompt=target_name):
                 tree = ast.parse(self.cells[cell_id])
                 assignment = next(
-                    node for node in tree.body
+                    node for node in ast.walk(tree)
                     if isinstance(node, ast.Assign)
                     and any(isinstance(target, ast.Name) and target.id == target_name
                             for target in node.targets)
@@ -516,8 +516,11 @@ class CreationSpanEnrichmentTests(unittest.TestCase):
         error = RuntimeError("creation rejected")
         error.response = SimpleNamespace(headers={"x-request-id": "failed-request"})
 
-        def create_version(*, agent_name, definition, raw_response_hook):
+        def create_version(*, agent_name, definition, raw_response_hook, description, metadata, tags):
             self.assertEqual(definition.model, "deployment-alias")
+            self.assertTrue(description)
+            self.assertEqual(metadata, {"created_by": "foundry-agent-fw-demo"})
+            self.assertEqual(tags, {"demo.run_id": "test-run"})
             if fail:
                 raise error
             raw_response_hook(SimpleNamespace(http_response=SimpleNamespace(headers={
@@ -571,7 +574,7 @@ class PersistenceSpanTests(unittest.TestCase):
         notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
         source = "".join(next(cell["source"] for cell in notebook["cells"] if cell["id"] == "2692d274"))
         block = next(
-            node for node in ast.parse(source).body
+            node for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.With)
             and node.items[0].context_expr.args
             and isinstance(node.items[0].context_expr.args[0], ast.Constant)
@@ -764,7 +767,8 @@ class AgentEndpointRoutingTests(unittest.TestCase):
         self.assertIn('kql_coverage = observability_queries["coverage"]', cells["6e3dcab6"])
         query = build_observability_queries("00000000-0000-0000-0000-000000000001")["coverage"]
         self.assertIn('Name endswith "/responses"', query)
-        self.assertIn('tostring(Properties["gen_ai.operation.name"]) == "responses.create"', query)
+        self.assertIn('GenAiOperation=tostring(Properties["gen_ai.operation.name"])', query)
+        self.assertIn('GenAiOperation == "responses.create"', query)
 
 
 class AgentVersionSyncTests(unittest.TestCase):
@@ -1075,11 +1079,13 @@ class TelemetryPolicyTests(unittest.TestCase):
             self.configurations.append(_get_configurations(**kwargs))
 
         self.configure = Mock(side_effect=capture_configuration)
+        self.enable_maf = Mock()
         self.scope = load_functions("3c78effc", [
             "get_content_recording_policy", "configure_notebook_telemetry",
         ], {
             "os": os, "Resource": Resource, "settings": SimpleNamespace(),
             "configure_azure_monitor": self.configure,
+            "enable_instrumentation": self.enable_maf,
             "AIProjectInstrumentor": lambda: self.instrumentor,
             "HTTPX2ClientInstrumentor": lambda: self.httpx2,
         })
@@ -1134,6 +1140,20 @@ class TelemetryPolicyTests(unittest.TestCase):
         self.assertEqual(os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"], "true")
         self.assertTrue(self.instrumentor.instrument.call_args.kwargs["enable_content_recording"])
 
+    def test_maf_uses_the_same_policy_without_another_provider_or_log_exporter(self):
+        for enabled in (True, False):
+            with self.subTest(enabled=enabled):
+                self.scope.pop("_project_otel_initialized", None)
+                self.scope.pop("_notebook_telemetry_setup_started", None)
+                self.scope.pop("_notebook_telemetry_state", None)
+                self.enable_maf.reset_mock()
+                os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = str(enabled)
+                self.initialize()
+                self.enable_maf.assert_called_once_with(
+                    enable_sensitive_data=enabled, enable_message_events=False, force=True,
+                )
+                self.assertEqual(os.environ["OTEL_LOGS_EXPORTER"], "none")
+
     def test_invalid_content_values_fail_before_provider_setup(self):
         for value in ("1", "0", "", "yes"):
             with self.subTest(value=value):
@@ -1142,7 +1162,7 @@ class TelemetryPolicyTests(unittest.TestCase):
                     self.initialize()
         self.configure.assert_not_called()
 
-    def test_resource_identity_is_preserved_without_agent_framework(self):
+    def test_resource_identity_is_preserved_with_agent_framework(self):
         os.environ["OTEL_RESOURCE_ATTRIBUTES"] = "custom.label=retained,service.version=wrong"
         self.initialize()
         attributes = self.configurations[0]["resource"].attributes

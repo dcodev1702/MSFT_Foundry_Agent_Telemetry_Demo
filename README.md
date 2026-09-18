@@ -1,6 +1,6 @@
 # 🤖 Microsoft Foundry — Agent Framework Observability PoC
 
-Jupyter notebooks that configure and query Microsoft Foundry agents with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 notebook uses Azure AI Projects + the Responses API and native OpenTelemetry resource metadata; it does not require Agent Framework. It requires Python 3.14+; the separate macOS notebook supports Python 3.13+.
+Jupyter notebooks that configure and query Microsoft Foundry agents with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 notebook uses **Microsoft Agent Framework (MAF) workflows** around its existing Azure AI Projects + Responses API calls. MAF and Foundry share the same OpenTelemetry/Azure Monitor pipeline. It requires Python 3.14+; the separate macOS notebook supports Python 3.13+.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
@@ -46,6 +46,7 @@ certificate-verification bypass is used.
 | Package | Version | Role |
 |---|---|---|
 | `ipykernel` | `7.3.0` | Notebook kernel |
+| `agent-framework-core` | `1.19.0` | Sequential workflow/executor orchestration and native workflow tracing |
 | `azure-ai-projects` | `2.6.1` | Foundry project agents, MCP definitions and Responses client |
 | `openai` | `3.16.1` | Responses and conversations API; HTTPX2 transport |
 | `httpx2` | `2.13.0` | Current compatible transport; matches HTTPCore2 2.13.0 |
@@ -59,9 +60,9 @@ Azure Monitor resolves exporter **1.0.0b57** on the matching OpenTelemetry train
 
 ### Dependency Profiles
 
-- [requirements-notebook.txt](requirements-notebook.txt): minimal Windows runtime, with **82 resolved dependencies** excluding pip.
-- [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional Agent Framework core **1.19.0**, OpenAI provider **1.14.4**, orchestrations **1.2.0**, and OTLP gRPC exporter **1.44.0**. Use only when those packages are needed by other work in the shared environment.
-- [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution and validation (90 resolved packages, excluding pip).
+- [requirements-notebook.txt](requirements-notebook.txt): Windows runtime, including MAF core **1.19.0**. No MAF model-provider package is needed because existing Foundry calls remain unchanged.
+- [requirements-notebook-shared.txt](requirements-notebook-shared.txt): runtime plus optional OpenAI provider **1.14.4**, orchestrations **1.2.0**, and OTLP gRPC exporter **1.44.0**. These are not used by the Windows workflow integration.
+- [requirements-notebook-validation.txt](requirements-notebook-validation.txt): runtime plus `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution and validation.
 - [constraints-notebook-win11.txt](constraints-notebook-win11.txt): 102 version constraints covering the three profiles on Windows / CPython 3.14. Constraints do not install optional packages. This is a version snapshot, not a hash-verified lock, and does not cover other platforms.
 - [agent-framework-demo/requirements.txt](agent-framework-demo/requirements.txt): exact direct pins for the standalone Agent Framework notebook, installed into its independent `agent-framework-demo\.venv` and verified by an in-notebook package inventory.
 
@@ -100,14 +101,15 @@ For local validation tooling and the regression suite:
 ```
 
 Install the optional shared profile with the same `--find-links .\.wheels`
-argument and `-r .\requirements-notebook-shared.txt` when MAF is also needed in
-the root environment. The source-controlled notebook keeps sensitive previews
-off by default; a local `SHOW_GENAI_CONTENT = True` opt-in deliberately differs
-from the regression that checks that publishing default.
+argument and `-r .\requirements-notebook-shared.txt` only when additional MAF
+providers or an OTLP exporter are needed by other work. The notebook's
+`SHOW_GENAI_CONTENT` setting controls report previews independently of capture.
+The current notebook opts in; set it to `False` and clear outputs before sharing.
 
-The September 18 update passes 119 tests against the publishable notebook in
-the upgraded root environment. A clean runtime/validation environment passes the
-same suite with the one optional-MAF installation check skipped. SDK tests use
+The notebook regression suite includes actual MAF workflow execution with local
+callbacks and an in-memory trace exporter: ordering, exactly-once persistence
+within one execution, failures, optional Sentinel, and shared trace ancestry.
+A runtime/validation-only environment skips the optional provider-profile check. SDK tests use
 an in-memory HTTP transport; they do not create cloud resources or execute
 paid model calls. Both environments pass `pip check`.
 
@@ -120,16 +122,16 @@ After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
 | # | Section | What It Does |
 |---|---|---|
 | **0** | Create or Reuse Virtual Environment | Validates Python 3.14 on Win11, creates `.venv`, installs `ipykernel`, and registers the Jupyter kernel |
-| **1** | Install Dependencies | Installs the constrained Foundry, Azure Identity and Azure Monitor/OpenTelemetry runtime profile |
-| **2** | Import Libraries | Verifies `DefaultAzureCredential`, `AIProjectClient`, `MCPTool`, `PromptAgentDefinition`, and native OpenTelemetry `Resource` imports |
+| **1** | Install Dependencies | Installs the constrained MAF core, Foundry, Azure Identity and Azure Monitor/OpenTelemetry runtime profile |
+| **2** | Import Libraries | Verifies the Foundry clients, workflow helper and native OpenTelemetry `Resource` imports |
 | **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures the Foundry project client plus Responses API settings |
-| **3.1** | Enable Telemetry | Configures Azure Monitor + OpenTelemetry, Foundry client-side tracing, HTTP dependency telemetry, and trace propagation controls |
+| **3.1** | Enable Telemetry | Configures one Azure Monitor/OpenTelemetry provider for MAF, Foundry and HTTP tracing, with shared capture and propagation controls |
 | **3.2** | Configure MSFT Learn MCP Tool | Attaches the [Microsoft Learn MCP endpoint](https://learn.microsoft.com/api/mcp) directly to the Foundry project agent |
 | **3.3** | Configure Microsoft Sentinel MCP Tool | Preserves the existing Foundry project-connection dependency for the Sentinel MCP tool |
 | **4** | Prepare the Agents | In backend sync mode, creates/reuses and activates the matching definition version; strict pinned mode validates only; project mode creates agent versions as before |
-| **5** | Query the Agent | Runs storytelling and Microsoft Learn grounded queries through the Responses API; saves results to `stories.json` and generates a Marp deck |
-| **5.1** | Query Microsoft Sentinel | Keeps the Sentinel MCP dependency path and runs the Sentinel-specific interaction separately |
-| **6** | Validate Telemetry | Resolves the linked workspace, flushes traces, waits for ingestion, and checks current-run interactions, dependencies, failures, service identity and version |
+| **5** | Query the Agent | Runs the story/facts/persistence MAF workflow around the existing Responses calls; saves results and generates a Marp deck |
+| **5.1** | Query Microsoft Sentinel | Runs an optional independent MAF workflow while preserving Sentinel's MCP dependency path |
+| **6** | Validate Telemetry | Flushes traces, waits for ingestion, then validates workflow/executor coverage, span ancestry, dependencies, failures, service identity and version |
 
 For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](deployment/run-smoke-checks.sh) and then exercise the manual Teams smoke sequence from [deployment/OPERATIONS-RUNBOOK.md](deployment/OPERATIONS-RUNBOOK.md).
 
@@ -298,24 +300,42 @@ rerun because the dependency set did not change.
 Section **3.1** configures the notebook's observability path end to end:
 
 - **Azure Monitor + Application Insights** receive exported OpenTelemetry traces.
+- **MAF core workflows** add native `workflow.run`, `executor.process`, graph/message and error spans. `enable_instrumentation` reuses the already configured provider; it does not call `configure_otel_providers` or attach a second exporter.
 - **Microsoft Foundry client-side tracing** is enabled for project-backed agent and Responses API activity.
 - **Azure Monitor owns HTTPX/HTTPX2 auto-instrumentation**. Foundry instrumentation adds GenAI spans; explicit notebook spans retain the demo's orchestration and dependency context. The notebook no longer uninstalls/re-wraps HTTP instrumentors.
 - **Trace context and baggage propagation** are enabled so notebook correlation identifiers flow with downstream requests.
-- **GenAI span semantics** are controlled by the installed Projects preview instrumentor. The unrelated Agent Framework semantic-convention opt-in has been removed.
-- **One content policy** controls SDK and custom spans: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `true` for this demo, accepts only `true`/`false` (case-insensitive), and is passed as an explicit boolean to Projects. Set it explicitly to `false` to opt out. The obsolete Azure content flag is ignored. Changing policy requires a kernel restart.
+- **GenAI model/tool span semantics** remain controlled by the installed Projects instrumentor; MAF contributes workflow/executor semantics rather than wrapping model calls a second time.
+- **One content policy** controls Projects, MAF and custom spans: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `true` for this demo, accepts only `true`/`false` (case-insensitive), and is passed explicitly to both SDKs. Set it to `false` to opt out. MAF message events are disabled, and workflow edges carry only an opaque run UUID, not prompts/results. Changing policy requires a kernel restart.
 - **Trace-only export is enforced** with `OTEL_LOGS_EXPORTER=none`, `OTEL_METRICS_EXPORTER=none`, `enable_live_metrics=False`, and `enable_performance_counters=False`. Sampling is explicitly fixed at 100%, overriding inherited sampling settings for this demo. `OTEL_TRACES_EXPORTER=none` is rejected.
 - **Native resources preserve service/session/project identity**, add `deployment.environment.name`, and retain additional `OTEL_RESOURCE_ATTRIBUTES`. Supply `cloud.region` only from verified deployment metadata; the notebook does not guess it.
 - **Agent setup spans carry diagnostic metadata**: resolved model publisher/name/version/deployment, a deterministic SHA-256 configuration fingerprint, and allowlisted service/API Management request IDs when supplied by the response. Backend mode emits `sync_agent` or `resolve_agent` according to its version policy and records the verified identity and active version; project mode retains `create_agent`. None simulates Foundry service spans.
 - **Persistence is run-correlated**: `persist_story` explicitly records the run, session and agent identity with `app.interaction=persistence`. Section 6 requires exactly one persistence span in addition to the story/facts/Sentinel response coverage.
-- **Section 6 presents an observability report**, not truncated JSON: stage-by-stage span coverage, agent/model/version metadata, conversation/content indexes, a joined span inventory, root-call latency trends, exception diagnostics and expandable current-run KQL.
+- **Section 6 presents an observability report**, not truncated JSON: MAF workflow wall-clock duration, explicit executor roots, stage-by-stage coverage, agent/model/version metadata, content indexes, a joined span inventory, root-call latency trends, exception diagnostics and expandable current-run KQL. Parent/child ancestry assigns spans to stages even when story/facts/persistence share one trace; nested spans are not counted as additional interactions.
 - **Content enriches spans rather than replacing them**: `AppGenAIContent` is joined by resource + trace + span after aggregation to prevent duplicate counts. The health gate remains span-based; missing content has its own status. Standard GenAI content moves out of legacy telemetry tables on September 30, 2026, so the report does not read those legacy content attributes.
-- **Message previews are separately opt-in**: set `SHOW_GENAI_CONTENT=True` in Section 6 to request/display up to 1,200 characters per message/tool field, only when local content recording is enabled. The default `False` shows metadata and character counts, without retrieving payload previews. Detail views cap at 200 rows; coverage counts are uncapped. Treat exception messages as potentially sensitive too.
+- **Message previews are separately opt-in**: `SHOW_GENAI_CONTENT=True` in Section 6 requests/displays up to 1,200 characters per message/tool field, only when local content recording is enabled. Set it to `False` to show metadata and character counts without retrieving payload previews. Detail views cap at 200 rows; coverage counts are uncapped. Treat exception messages as potentially sensitive too.
 
 Content capture is enabled by default for this controlled demo: prompts, responses and tool payloads may be exported to Application Insights, including sensitive Sentinel data. Set the environment variable to `false` before initialization when this is not appropriate. Restarting a previously initialized kernel is necessary to pick up the new default; an inherited explicit `false` still takes precedence. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
 
 See [observability.md](observability.md) for the full environment variable reference,
 version posture and design notes, and [OTEL-Agent-Spans.md](OTEL-Agent-Spans.md)
 for per-cell span inventories, code examples and validation evidence.
+
+### MAF Workflow Boundaries
+
+[notebook_workflow.py](notebook_workflow.py) uses the real MAF `WorkflowBuilder`
+and function executors. Section 5 runs `story -> facts -> persistence`; Section
+5.1 runs a separate `sentinel` workflow with the same `demo.run_id` but its own
+trace. This preserves independent notebook execution and Sentinel's existing
+OAuth/project connection. Set `RUN_SENTINEL_WORKFLOW=False` to skip it; an absent
+Sentinel agent also skips explicitly. A configured Sentinel failure is never
+treated as a skip.
+
+Foundry agent definitions, endpoint routing/version policy, model selection,
+MCP approvals and generated story/Marp formats are unchanged. A failed step
+stops the workflow without automatic retries or checkpoint replay. Persistence
+runs once per workflow execution, **not** once across manual cell reruns; use a
+fresh kernel/run ID for a clean validation run. Native MAF executor spans are
+the explicit interaction roots, while Foundry/HTTP spans remain descendants.
 
 ### MCP Tool Setup
 
@@ -409,13 +429,13 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 ## ✅ Validation Checklist
 
 - [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
-- [ ] **Section 3.1** reports HTTPX2 enabled, 100% sampling, the intended content policy, and disabled log/metric/Live Metrics/performance-counter export
+- [ ] **Section 3.1** reports MAF workflow tracing and HTTPX2 enabled, 100% sampling, the intended content policy, and disabled log/metric/Live Metrics/performance-counter export
 - [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)
 - [ ] **Section 3.3** resolves or prints the Sentinel MCP project connection details
 - [ ] **Section 4** configures both Foundry project agents for a full run
-- [ ] **Section 5** returns a response and appends to `stories.json`
-- [ ] **Section 5.1** returns a Sentinel response when the Foundry project connection is available
-- [ ] **Section 6** reports current-run story, facts and Sentinel coverage, response dependencies, zero failed spans, and the expected service/version
+- [ ] **Section 5** runs the story/facts/persistence MAF workflow, returns responses and appends once to `stories.json`
+- [ ] **Section 5.1** runs the Sentinel MAF workflow when enabled/configured, or prints an explicit skip
+- [ ] **Section 6** reports required MAF workflows/executors, current-run interaction coverage, response dependencies, zero failed spans, and the expected service/version
 - [ ] **Section 6 content report** links the available snapshots without increasing the span count, reports input/output availability separately, and keeps sensitive previews hidden unless explicitly requested
 
 ---

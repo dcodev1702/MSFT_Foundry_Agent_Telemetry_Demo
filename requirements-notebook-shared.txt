@@ -1,6 +1,6 @@
 # Optional compatibility packages for the existing shared demo environment.
 -r requirements-notebook.txt
-agent-framework-core==1.19.0
+# Core workflows are included by the runtime; these providers remain optional.
 agent-framework-openai==1.14.4
 agent-framework-orchestrations==1.2.0
 opentelemetry-exporter-otlp-proto-grpc==1.44.0

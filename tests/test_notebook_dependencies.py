@@ -75,9 +75,9 @@ class NotebookDependencyTests(unittest.TestCase):
 
     def test_optional_shared_profile_matches_when_installed(self):
         try:
-            version("agent-framework-core")
+            version("agent-framework-openai")
         except PackageNotFoundError:
-            self.skipTest("The optional shared MAF profile is not installed.")
+            self.skipTest("The optional shared MAF providers are not installed.")
         for name, expected in direct_pins(SHARED).items():
             with self.subTest(package=name):
                 self.assertEqual(version(name), expected)
@@ -88,13 +88,13 @@ class NotebookDependencyTests(unittest.TestCase):
         self.assertEqual(runtime["openai"], "3.16.1")
         self.assertEqual(runtime["httpx2"], "2.13.0")
         self.assertEqual(runtime["azure-identity"], "1.26.0b2")
-        self.assertEqual(direct_pins(SHARED)["agent-framework-core"], "1.19.0")
-        for name in ("agent-framework-core", "agent-framework-a2a", "a2a-sdk", "uvicorn"):
+        self.assertEqual(runtime["agent-framework-core"], "1.19.0")
+        for name in ("agent-framework-openai", "agent-framework-orchestrations", "agent-framework-a2a", "a2a-sdk", "uvicorn"):
             self.assertNotIn(name, runtime)
 
     def test_standalone_overlap_remains_compatible_without_sharing_environments(self):
         standalone = direct_pins(ROOT / "agent-framework-demo" / "requirements.txt")
-        shared = direct_pins(SHARED)
+        shared = direct_pins(RUNTIME) | direct_pins(SHARED)
         for name in ("agent-framework-core", "agent-framework-openai", "agent-framework-orchestrations"):
             self.assertEqual(shared[name], standalone[name])
         self.assertEqual(direct_pins(RUNTIME)["httpx2"], standalone["httpx2"])

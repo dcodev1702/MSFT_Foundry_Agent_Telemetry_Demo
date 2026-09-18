@@ -1,4 +1,4 @@
-"""Run-scoped KQL and HTML reporting for the Windows notebook."""
+"""Run- and stage-scoped KQL and HTML reporting for the MAF Windows notebook."""
 
 import json
 from html import escape
@@ -20,36 +20,134 @@ let run_operations = AppDependencies
 | where TimeGenerated > ago(6h)
 | where tostring(Properties["demo.run_id"]) == run_id
 | distinct OperationId;
-let spans = AppDependencies
+let spans = materialize(AppDependencies
 | where TimeGenerated > ago(6h) and OperationId in (run_operations)
-| summarize arg_max(TimeGenerated, *) by _ResourceId, OperationId, Id;
-let run_context = spans
-| where tostring(Properties["demo.run_id"]) == run_id
-| summarize arg_max(TimeGenerated, Properties),
-    InteractionLabels=make_set_if(tostring(Properties["app.interaction"]), isnotempty(tostring(Properties["app.interaction"])))
-    by OperationId
-| project OperationId, InteractionLabels,
-    RootInteraction=iff(array_length(InteractionLabels) == 1, tostring(InteractionLabels[0]), ""),
-    RootAgent=tostring(Properties["gen_ai.agent.name"]),
-    RootAgentVersion=tostring(Properties["gen_ai.agent.version"]),
-    RootModel=tostring(Properties["gen_ai.request.model"]);
-let correlated_spans = spans
-| join kind=leftouter (run_context) on OperationId
-| extend IsNotebookRoot=tostring(Properties["demo.run_id"]) == run_id,
-    Interaction=iff(isempty(RootInteraction), "setup / other", RootInteraction),
-    Agent=coalesce(tostring(Properties["gen_ai.agent.name"]), RootAgent),
-    AgentVersion=coalesce(tostring(Properties["gen_ai.agent.version"]), RootAgentVersion),
-    Model=coalesce(tostring(Properties["gen_ai.response.model"]), tostring(Properties["gen_ai.request.model"]), RootModel);
+| summarize arg_max(TimeGenerated, *) by _ResourceId, OperationId, Id);
+let span_context = materialize(spans
+| extend NodeKey=strcat(OperationId, "/", Id),
+    ParentKey=iff(isnotempty(ParentId), strcat(OperationId, "/", ParentId), ""),
+    IsRunTagged=tostring(Properties["demo.run_id"]) == run_id,
+    GenAiOperation=tostring(Properties["gen_ai.operation.name"]),
+    OwnAgent=tostring(Properties["gen_ai.agent.name"]),
+    OwnAgentId=tostring(Properties["gen_ai.agent.id"]),
+    OwnAgentVersion=tostring(Properties["gen_ai.agent.version"]),
+    OwnModel=coalesce(tostring(Properties["gen_ai.response.model"]), tostring(Properties["gen_ai.request.model"])),
+    NativeWorkflowName=tostring(Properties["workflow.name"]),
+    NativeWorkflowId=tostring(Properties["workflow.id"]),
+    IsWorkflowRun=Name == "workflow.run" or Name startswith "workflow.run ",
+    IsExecutor=Name == "executor.process" or Name startswith "executor.process "
+| extend IsNotebookRoot=IsRunTagged and coalesce(tobool(Properties["app.interaction.root"]), false),
+    IsWorkflowRoot=IsRunTagged and coalesce(tobool(Properties["app.workflow.root"]), false),
+    TaggedInteraction=iff(IsRunTagged, tostring(Properties["app.interaction"]), ""),
+    TaggedWorkflow=iff(IsRunTagged, tostring(Properties["app.workflow.name"]), ""),
+    TaggedStep=iff(IsRunTagged, tostring(Properties["app.workflow.step"]), ""),
+    IsResponseDependency=Name endswith "/responses" and GenAiOperation == "responses.create",
+    IsGenAiSpan=Name == "chat" or Name startswith "chat " or GenAiOperation in ("chat", "generate_content", "text_completion"),
+    IsToolSpan=Name == "execute_tool" or Name startswith "execute_tool " or GenAiOperation == "execute_tool"
+| extend IsWorkflowPlumbing=Name startswith "workflow." or Name startswith "edge." or Name startswith "message."
+        or (Name startswith "executor." and not(IsNotebookRoot)),
+    IsCriticalSpan=IsNotebookRoot or IsExecutor or IsResponseDependency or IsGenAiSpan or IsToolSpan
+        or Name endswith "/responses" or Name == "responses" or Name startswith "responses.create"
+        or GenAiOperation in ("responses", "responses.create", "invoke_agent")
+        or Name == "invoke_agent" or Name startswith "invoke_agent "
+);
+let graph_nodes = span_context | distinct NodeKey;
+let parent_edges = span_context
+| where isnotempty(ParentKey)
+| distinct NodeKey, ParentKey;
+let parent_conflicts = span_context
+| summarize ParentKeys=make_set(ParentKey) by NodeKey
+| project NodeKey, NodeConflict=array_length(ParentKeys) > 1;
+let ancestor_links = materialize(union
+    (graph_nodes | project NodeKey, AncestorKey=NodeKey, Depth=tolong(0)),
+    (parent_edges
+    | make-graph NodeKey --> ParentKey with graph_nodes on NodeKey
+    | graph-match cycles=none (child)-[parents*1..64]->(ancestor)
+        where isnotempty(child.NodeKey) and isnotempty(ancestor.NodeKey)
+        project NodeKey=tostring(child.NodeKey), AncestorKey=tostring(ancestor.NodeKey), ParentPath=map(parents, ParentKey)
+    | project NodeKey, AncestorKey, Depth=tolong(array_length(ParentPath)))
+| summarize Depth=min(Depth) by NodeKey, AncestorKey);
+let ancestor_context = span_context
+| join kind=leftouter (parent_conflicts) on NodeKey
+| project AncestorKey=NodeKey, AncestorInteraction=TaggedInteraction,
+    AncestorWorkflow=TaggedWorkflow, AncestorStep=TaggedStep,
+    AncestorIsRoot=IsNotebookRoot, AncestorIsWorkflowRoot=IsWorkflowRoot,
+    AncestorIsWorkflowRun=IsWorkflowRun, AncestorNativeName=NativeWorkflowName,
+    AncestorNativeId=NativeWorkflowId, AncestorAgent=OwnAgent, AncestorAgentId=OwnAgentId,
+    AncestorAgentVersion=OwnAgentVersion, AncestorModel=OwnModel, AncestorConflict=NodeConflict;
+let ancestors = materialize(ancestor_links | join kind=inner (ancestor_context) on AncestorKey);
+let ancestry_context = ancestors
+| summarize StageRootKeys=make_set_if(AncestorKey, AncestorIsRoot),
+    RootInteractions=make_set_if(AncestorInteraction, AncestorIsRoot and isnotempty(AncestorInteraction)),
+    RootSteps=make_set_if(AncestorStep, AncestorIsRoot and isnotempty(AncestorStep)),
+    RootWorkflows=make_set_if(AncestorWorkflow, AncestorIsRoot and isnotempty(AncestorWorkflow)),
+    InteractionLabels=make_set_if(AncestorInteraction, isnotempty(AncestorInteraction)),
+    StepLabels=make_set_if(AncestorStep, isnotempty(AncestorStep)),
+    WorkflowRootKeys=make_set_if(AncestorKey, AncestorIsWorkflowRoot),
+    WorkflowRootNames=make_set_if(AncestorWorkflow, AncestorIsWorkflowRoot and isnotempty(AncestorWorkflow)),
+    WorkflowLabels=make_set_if(AncestorWorkflow, isnotempty(AncestorWorkflow)),
+    NativeWorkflowKeys=make_set_if(AncestorKey, AncestorIsWorkflowRun),
+    NativeWorkflowNames=make_set_if(AncestorNativeName, AncestorIsWorkflowRun and isnotempty(AncestorNativeName)),
+    NativeWorkflowIds=make_set_if(AncestorNativeId, AncestorIsWorkflowRun and isnotempty(AncestorNativeId)),
+    AncestryConflicts=countif(AncestorConflict)
+    by NodeKey
+| extend WorkflowLabels=set_union(WorkflowLabels, NativeWorkflowNames)
+| extend AncestryAmbiguous=AncestryConflicts > 0 or array_length(StageRootKeys) > 1
+        or array_length(InteractionLabels) > 1 or array_length(StepLabels) > 1
+        or array_length(WorkflowRootKeys) > 1 or array_length(NativeWorkflowKeys) > 1
+        or array_length(WorkflowLabels) > 1 or array_length(NativeWorkflowIds) > 1
+        or (array_length(RootInteractions) == 1 and array_length(RootSteps) == 1
+            and tostring(RootInteractions[0]) != tostring(RootSteps[0])),
+    WorkflowName=iff(array_length(WorkflowLabels) == 1, tostring(WorkflowLabels[0]), ""),
+    WorkflowId=iff(array_length(NativeWorkflowIds) == 1, tostring(NativeWorkflowIds[0]), ""),
+    WorkflowStep=iff(array_length(RootSteps) == 1, tostring(RootSteps[0]), ""),
+    WorkflowRootKey=iff(array_length(WorkflowRootKeys) == 1, tostring(WorkflowRootKeys[0]), ""),
+    WorkflowRunKey=iff(array_length(NativeWorkflowKeys) == 1, tostring(NativeWorkflowKeys[0]), "")
+| extend WorkflowCorrelationState=case(AncestryAmbiguous, "ambiguous",
+        array_length(WorkflowRootKeys) == 1 and array_length(WorkflowRootNames) == 1
+        and array_length(NativeWorkflowKeys) == 1 and array_length(NativeWorkflowNames) == 1
+        and array_length(NativeWorkflowIds) == 1 and array_length(WorkflowLabels) == 1, "correlated",
+        "unmapped");
+let nearest_metadata = ancestors
+| extend Metadata=bag_pack("Agent", AncestorAgent, "AgentId", AncestorAgentId,
+        "AgentVersion", AncestorAgentVersion, "Model", AncestorModel)
+| mv-expand MetadataKey=bag_keys(Metadata) to typeof(string)
+| extend MetadataValue=tostring(Metadata[MetadataKey])
+| where isnotempty(MetadataValue)
+| summarize MetadataValues=make_set(MetadataValue) by NodeKey, MetadataKey, Depth
+| summarize arg_min(Depth, MetadataValues) by NodeKey, MetadataKey
+| summarize NearestMetadata=make_bag(bag_pack(MetadataKey,
+        iff(array_length(MetadataValues) == 1, tostring(MetadataValues[0]), ""))),
+    AmbiguousMetadata=countif(array_length(MetadataValues) > 1) by NodeKey;
+let correlated_spans = materialize(span_context
+| join kind=leftouter (ancestry_context) on NodeKey
+| join kind=leftouter (nearest_metadata) on NodeKey
+| extend CorrelationState=case(AncestryAmbiguous or coalesce(AmbiguousMetadata, 0) > 0, "ambiguous",
+        array_length(StageRootKeys) == 1 and array_length(RootInteractions) == 1
+        and array_length(RootSteps) == 1 and array_length(RootWorkflows) == 1
+        and WorkflowCorrelationState == "correlated", "correlated", "unmapped")
+| extend RootInteraction=iff(CorrelationState == "correlated", tostring(RootInteractions[0]), ""),
+    Agent=iff(CorrelationState == "correlated", tostring(NearestMetadata.Agent), OwnAgent),
+    AgentId=iff(CorrelationState == "correlated", tostring(NearestMetadata.AgentId), OwnAgentId),
+    AgentVersion=iff(CorrelationState == "correlated", tostring(NearestMetadata.AgentVersion), OwnAgentVersion),
+    Model=iff(CorrelationState == "correlated", tostring(NearestMetadata.Model), OwnModel)
+| extend Interaction=case(IsWorkflowPlumbing, "workflow / setup",
+        CorrelationState == "correlated", RootInteraction, CorrelationState == "ambiguous", "ambiguous",
+        IsCriticalSpan, "unmapped / critical", "workflow / setup"),
+    SpanCategory=case(IsNotebookRoot and IsExecutor, "executor",
+        IsWorkflowPlumbing or IsWorkflowRoot, "workflow / setup",
+        IsResponseDependency, "responses", IsGenAiSpan, "model", IsToolSpan, "tool", "dependency / setup")
+);
 '''
     content = '''let content_records = AppGenAIContent
 | where TimeGenerated > ago(6h) and TraceId in (run_operations)
-| summarize arg_max(TimeGenerated, *) by _ResourceId, Id;
+| summarize arg_max(TimeGenerated, *) by _ResourceId, TraceId, SpanId, Id;
 let instruction_messages = content_records
 | mv-expand Message=parse_json(InputMessages)
 | where tostring(Message.role) in ("system", "developer")
-| summarize InstructionMessages=make_list(Message) by _ResourceId, Id;
+| summarize InstructionMessages=make_list(Message) by _ResourceId, TraceId, SpanId, Id;
 let content_details = content_records
-| join kind=leftouter (instruction_messages) on _ResourceId, Id
+| join kind=leftouter (instruction_messages) on _ResourceId, TraceId, SpanId, Id
 | extend Instructions=case(isnotempty(SystemInstructions), SystemInstructions,
         array_length(InstructionMessages) > 0, tostring(InstructionMessages), ""),
     InstructionSource=case(isnotempty(SystemInstructions), "SystemInstructions",
@@ -72,39 +170,75 @@ let enriched_spans = correlated_spans
 | join kind=leftouter (content_by_span)
     on _ResourceId, $left.OperationId == $right.TraceId, $left.Id == $right.SpanId
 | extend ContentRecords=coalesce(ContentRecords, 0);
+let content_context = correlated_spans
+| project _ResourceId, TraceId=OperationId, SpanId=Id, Interaction, CorrelationState,
+    WorkflowName, WorkflowId, WorkflowStep, Agent, AgentId, SpanAgentVersion=AgentVersion, Model;
 '''
     queries = {
         "coverage": scope + '''correlated_spans
 | summarize Spans=count(), Failures=countif(Success == false),
     FailedOperations=count_distinctif(OperationId, Success == false),
-    AmbiguousSpans=countif(array_length(InteractionLabels) > 1),
-    Interactions=make_set(RootInteraction),
-    ResponseDependencies=countif(Name endswith "/responses" and tostring(Properties["gen_ai.operation.name"]) == "responses.create"),
-    ResponseInteractions=make_set_if(RootInteraction, Name endswith "/responses" and tostring(Properties["gen_ai.operation.name"]) == "responses.create"),
-    GenAiSpans=countif(Name startswith "chat "),
+    AmbiguousSpans=countif(CorrelationState == "ambiguous" or WorkflowCorrelationState == "ambiguous"),
+    UnmappedCriticalSpans=countif(IsCriticalSpan and CorrelationState == "unmapped"),
+    AmbiguousCriticalSpans=countif(IsCriticalSpan and CorrelationState == "ambiguous"),
+    Interactions=make_set_if(RootInteraction, IsNotebookRoot and CorrelationState == "correlated"),
+    ResponseDependencies=countif(IsResponseDependency),
+    ResponseInteractions=make_set_if(RootInteraction, IsResponseDependency and CorrelationState == "correlated"),
+    GenAiSpans=countif(IsGenAiSpan and not(IsWorkflowPlumbing)),
     PersistenceSpans=countif(Name == "persist_story" and RootInteraction == "persistence"),
+    WorkflowRuns=countif(IsWorkflowRun), WorkflowRootSpans=countif(IsWorkflowRoot),
+    ExecutorSpans=countif(IsNotebookRoot and IsExecutor),
+    WorkflowNames=make_set_if(WorkflowName, IsWorkflowRun and WorkflowCorrelationState == "correlated"),
+    WorkflowIds=make_set_if(WorkflowId, IsWorkflowRun and WorkflowCorrelationState == "correlated"),
+    WorkflowSteps=make_set_if(strcat(WorkflowName, "/", WorkflowStep),
+        IsNotebookRoot and IsExecutor and CorrelationState == "correlated"),
+    WorkflowFailures=countif((IsWorkflowRoot or IsWorkflowRun or IsExecutor) and Success == false),
+    UncorrelatedWorkflowSpans=countif((IsWorkflowRun or IsExecutor) and WorkflowCorrelationState != "correlated"),
     SpanNames=make_set(Name), Roles=make_set_if(AppRoleName, isnotempty(AppRoleName)),
     Versions=make_set_if(AppVersion, isnotempty(AppVersion))
 ''',
         "interactions": scope + '''correlated_spans
 | summarize RootOperations=countif(IsNotebookRoot), Spans=count(), Failures=countif(Success == false),
-    Responses=countif(Name endswith "/responses" and tostring(Properties["gen_ai.operation.name"]) == "responses.create"),
-    ToolSpans=countif(Name startswith "execute_tool "),
+    Responses=countif(IsResponseDependency), ToolSpans=countif(IsToolSpan),
+    UnmappedCriticalSpans=countif(IsCriticalSpan and CorrelationState == "unmapped"),
+    AmbiguousSpans=countif(CorrelationState == "ambiguous"),
     RootDurationMs=round(sumif(DurationMs, IsNotebookRoot), 2),
     Agents=make_set_if(Agent, isnotempty(Agent)), AgentVersions=make_set_if(AgentVersion, isnotempty(AgentVersion)),
     Models=make_set_if(Model, isnotempty(Model)) by Interaction
 | order by Interaction asc
 ''',
+        "workflows": scope + f'''let executor_summary = correlated_spans
+| where IsNotebookRoot and IsExecutor and CorrelationState == "correlated"
+| summarize ExecutorCount=count(), ExecutorSteps=make_set(WorkflowStep),
+    ExecutorFailures=countif(Success == false), ExecutorSpanIds=make_set(Id) by WorkflowRunKey;
+let workflow_span_summary = correlated_spans
+| where isnotempty(WorkflowRunKey)
+| summarize Spans=count(), Failures=countif(Success == false),
+    UnmappedCriticalSpans=countif(IsCriticalSpan and CorrelationState == "unmapped"),
+    AmbiguousSpans=countif(CorrelationState == "ambiguous") by WorkflowRunKey;
+correlated_spans
+| where IsWorkflowRun
+| join kind=leftouter (executor_summary) on WorkflowRunKey
+| join kind=leftouter (workflow_span_summary) on WorkflowRunKey
+| project TimeGenerated, WorkflowName=coalesce(WorkflowName, NativeWorkflowName),
+    WorkflowId=coalesce(WorkflowId, NativeWorkflowId), NativeDurationMs=DurationMs, Success,
+    ExecutorCount=coalesce(ExecutorCount, 0), ExecutorSteps, ExecutorFailures=coalesce(ExecutorFailures, 0),
+    Spans, Failures, UnmappedCriticalSpans, AmbiguousSpans, WorkflowCorrelationState,
+    WorkflowRootKey, OperationId, SpanId=Id, ParentId, ResourceId=_ResourceId, ExecutorSpanIds
+| order by TimeGenerated asc, OperationId asc, SpanId asc
+| take {DETAIL_LIMIT}
+''',
         "runs_trend": scope + '''correlated_spans
 | where IsNotebookRoot and RootInteraction in ("story", "facts", "sentinel")
-| where Name == "sentinel-agent-query" or Name startswith "invoke_agent "
+| where IsExecutor and CorrelationState == "correlated"
 | summarize Calls=count(), Failures=countif(Success == false),
     AvgDurationMs=round(avg(DurationMs), 2), P95DurationMs=round(percentile(DurationMs, 95), 2)
     by bin(TimeGenerated, 15m), Interaction, Agent, AgentVersion, Model, AppRoleInstance
 | order by TimeGenerated desc
 ''',
         "end_to_end": scope + content + f'''enriched_spans
-| project TimeGenerated, Interaction, Name, Agent, AgentVersion, Model, Success, DurationMs,
+| project TimeGenerated, Interaction, SpanCategory, CorrelationState, WorkflowCorrelationState,
+    WorkflowName, WorkflowId, WorkflowStep, Name, Agent, AgentId, AgentVersion, Model, Success, DurationMs,
     Role=AppRoleName, Host=AppRoleInstance, Region=tostring(Properties["cloud.region"]),
     OperationId, SpanId=Id, ParentId, ResourceId=_ResourceId,
     ContentRecords, ContentIds, Conversations, WithInput, WithOutput, WithInstructions
@@ -117,16 +251,21 @@ let enriched_spans = correlated_spans
     RecordsWithInput=sum(WithInput), RecordsWithOutput=sum(WithOutput),
     RecordsWithInstructions=sum(WithInstructions),
     InvalidMessageRecords=sum(InvalidMessages),
-    InputInteractions=make_set_if(RootInteraction, WithInput > 0),
-    OutputInteractions=make_set_if(RootInteraction, WithOutput > 0)
-| extend ScopedContentRecords=toscalar(content_records | count)
-| extend UnmatchedContentRecords=ScopedContentRecords - ContentRecords
+    InputInteractions=make_set_if(RootInteraction, WithInput > 0 and CorrelationState == "correlated"),
+    OutputInteractions=make_set_if(RootInteraction, WithOutput > 0 and CorrelationState == "correlated")
+| extend ScopedContentRecords=toscalar(content_records | count),
+    ScopedInvalidMessageRecords=toscalar(content_details
+        | where InputState == "invalid JSON message array" or OutputState == "invalid JSON message array" | count)
+| extend UnmatchedContentRecords=ScopedContentRecords - ContentRecords,
+    UnmatchedInvalidMessageRecords=ScopedInvalidMessageRecords - InvalidMessageRecords
 ''',
         "content": scope + content + f'''content_details
-| join kind=leftouter (run_context) on $left.TraceId == $right.OperationId
-| project TimeGenerated, Interaction=RootInteraction, ConversationId, Operation,
-    Agent=coalesce(AgentName, RootAgent), AgentVersion=coalesce(AgentVersion, RootAgentVersion),
-    Model=coalesce(ModelName, tostring(Attributes["gen_ai.response.model"]), RootModel),
+| join kind=leftouter (content_context) on _ResourceId, TraceId, SpanId
+| project TimeGenerated, Interaction=coalesce(Interaction, "unmatched / content"),
+    CorrelationState=coalesce(CorrelationState, "unmatched span"), WorkflowName, WorkflowId, WorkflowStep,
+    ConversationId, Operation, Agent=coalesce(AgentName, Agent), AgentId,
+    AgentVersion=coalesce(AgentVersion, SpanAgentVersion),
+    Model=coalesce(ModelName, tostring(Attributes["gen_ai.response.model"]), Model),
     Role=RoleName, TraceId, SpanId, ContentId=Id, ResourceId=_ResourceId,
     InstructionSource, InputState, OutputState,
     InputCharacters=strlen(InputMessages), OutputCharacters=strlen(OutputMessages),
@@ -142,8 +281,10 @@ let enriched_spans = correlated_spans
 | take {DETAIL_LIMIT}
 ''',
         "failures": scope + f'''correlated_spans
-| where Success == false
-| project TimeGenerated, Interaction, Name, Agent, AgentVersion,
+| where Success == false or (IsCriticalSpan and CorrelationState != "correlated")
+    or ((IsWorkflowRun or IsExecutor) and WorkflowCorrelationState != "correlated")
+| project TimeGenerated, Interaction, Name, Agent, AgentVersion, Success,
+    WorkflowName, WorkflowStep, CorrelationState, WorkflowCorrelationState,
     ResultCode, ErrorType=tostring(Properties["error.type"]), Role=AppRoleName,
     OperationId, SpanId=Id, ParentId
 | order by TimeGenerated asc
@@ -161,13 +302,21 @@ let enriched_spans = correlated_spans
 
 
 def coverage_issues(coverage: Row, expected_interactions: set[str]) -> list[str]:
+    """Validate span health and this notebook's required native MAF workflows."""
     issues = []
     if coverage["Spans"] == 0:
         issues.append("No current-run spans have arrived.")
     if coverage["Failures"]:
         issues.append(f"{coverage['Failures']} failed spans across {coverage['FailedOperations']} operations.")
     if coverage["AmbiguousSpans"]:
-        issues.append("Conflicting interaction labels share a trace; correlation is ambiguous.")
+        issues.append("Conflicting span ancestry or metadata makes correlation ambiguous.")
+    if coverage["UnmappedCriticalSpans"]:
+        issues.append(
+            f"{coverage['UnmappedCriticalSpans']} model/Responses/tool/executor spans have no correlated "
+            "executor ancestor; inspect missing parents, root attributes or the 64-edge ancestry limit."
+        )
+    if coverage["AmbiguousCriticalSpans"]:
+        issues.append(f"{coverage['AmbiguousCriticalSpans']} critical spans have ambiguous ancestry or metadata.")
     for field, label in (("Interactions", "interaction spans"), ("ResponseInteractions", "Responses dependencies")):
         missing = expected_interactions - set(coverage[field])
         if missing:
@@ -176,6 +325,32 @@ def coverage_issues(coverage: Row, expected_interactions: set[str]) -> list[str]
         issues.append("No GenAI chat spans have arrived.")
     if coverage["PersistenceSpans"] != 1:
         issues.append(f"Expected one persist_story span; found {coverage['PersistenceSpans']}.")
+    required_workflows = {"story-facts"}
+    required_steps = {"story-facts/story", "story-facts/facts", "story-facts/persistence"}
+    if "sentinel" in expected_interactions:
+        required_workflows.add("sentinel")
+        required_steps.add("sentinel/sentinel")
+    missing_workflows = required_workflows - set(coverage["WorkflowNames"])
+    if missing_workflows:
+        issues.append(f"Missing correlated native workflows: {', '.join(sorted(missing_workflows))}.")
+    missing_steps = required_steps - set(coverage["WorkflowSteps"])
+    if missing_steps:
+        issues.append(f"Missing workflow executor steps: {', '.join(sorted(missing_steps))}.")
+    if coverage["WorkflowRuns"] < len(required_workflows):
+        issues.append("Missing native workflow.run spans.")
+    if coverage["WorkflowRootSpans"] < len(required_workflows):
+        issues.append("Missing notebook.workflow root spans.")
+    if len(set(coverage["WorkflowIds"])) < len(required_workflows):
+        issues.append("Missing distinct native workflow IDs.")
+    if coverage["ExecutorSpans"] < len(required_steps):
+        issues.append("Missing explicitly tagged native executor roots.")
+    if coverage["WorkflowFailures"]:
+        issues.append(f"{coverage['WorkflowFailures']} failed workflow/executor spans.")
+    if coverage["UncorrelatedWorkflowSpans"]:
+        issues.append(
+            f"{coverage['UncorrelatedWorkflowSpans']} native workflow/executor spans have missing or "
+            "contradictory workflow name, ID or parent correlation."
+        )
     return issues
 
 
@@ -224,8 +399,9 @@ def render_failure_report(run_id: str, issues: list[str], failures: list[Row], e
 Group by OperationId and follow ParentId to the cause. This strict gate includes earlier
 attempts with the same run ID, even if a later retry succeeds. Rerunning Section 6 does not
 erase failures. For a clean run, restart the kernel and run the runtime cells, skipping installs.</p>"""
-    body += _section("Failed spans (up to 200)", failures, [
-        "TimeGenerated", "Interaction", "Name", "ResultCode", "ErrorType", "OperationId", "SpanId", "ParentId",
+    body += _section("Failed spans and critical correlation diagnostics (up to 200)", failures, [
+        "TimeGenerated", "Interaction", "WorkflowName", "WorkflowStep", "Name", "Success",
+        "CorrelationState", "WorkflowCorrelationState", "ResultCode", "ErrorType", "OperationId", "SpanId", "ParentId",
     ])
     body += "<p>Exception messages may contain sensitive data; they are separate from message-preview controls.</p>"
     body += _section("Correlated exception details (up to 200 groups; messages capped at 1,200 characters)", exceptions, [
@@ -239,6 +415,8 @@ def render_observability_report(
     queries: dict[str, str], expected_interactions: set[str], *,
     content_recording_enabled: bool, show_content: bool = False,
 ) -> str:
+    if not isinstance(content_recording_enabled, bool) or not isinstance(show_content, bool):
+        raise TypeError("content_recording_enabled and show_content must be booleans.")
     issues = coverage_issues(coverage, expected_interactions)
     if issues:
         raise ValueError("Cannot render a passing report: " + " ".join(issues))
@@ -265,15 +443,29 @@ Scope: this run's traces within the last six hours; timestamps are UTC. Read-onl
         {"Signal": "Responses wrappers", "Value": coverage["ResponseDependencies"], "Meaning": "Explicit request spans; approval continuations can add requests."},
         {"Signal": "GenAI chat spans", "Value": coverage["GenAiSpans"], "Meaning": "Observed model-execution spans; not additional notebook interactions."},
         {"Signal": "Persistence", "Value": coverage["PersistenceSpans"], "Meaning": "Exactly one run-correlated persist_story; not an LLM request."},
+        {"Signal": "Native workflow runs / executor roots", "Value": f"{coverage['WorkflowRuns']} / {coverage['ExecutorSpans']}", "Meaning": "MAF workflow.run spans and explicitly tagged executor.process roots."},
+        {"Signal": "Unmapped / ambiguous critical spans", "Value": f"{coverage['UnmappedCriticalSpans']} / {coverage['AmbiguousCriticalSpans']}", "Meaning": "Missing or contradictory model/Responses/tool/executor ancestry is a health failure."},
+        {"Signal": "Workflow failures / uncorrelated workflow spans", "Value": f"{coverage['WorkflowFailures']} / {coverage['UncorrelatedWorkflowSpans']}", "Meaning": "Native workflow identity and executor correlation are required, independently of content."},
     ], ["Signal", "Value", "Meaning"])
     body += f"<p>Observed services: {escape(_text(coverage['Roles']))}<br>Observed service versions: {escape(_text(coverage['Versions']))}</p>"
     body += """<h3>2. Follow the notebook workflow</h3>
-<p>Setup: Section 4; story and Learn facts: Section 5; persistence: Section 5;
-Sentinel: Section 5.1. RootOperations counts notebook orchestration only.
-RootDurationMs sums root durations in the stage, not nested child durations or total wall-clock time.</p>"""
+<p>MAF orchestrates unchanged Foundry API calls. The story-facts workflow executes story, facts and persistence;
+the separate optional sentinel workflow executes Sentinel and its existing persistence.
+NativeDurationMs is the native workflow.run wall-clock duration, never a sum of nested spans.
+Workflow/graph plumbing remains visible as workflow / setup, not model calls.</p>"""
+    body += _table(results["workflows"], [
+        "TimeGenerated", "WorkflowName", "WorkflowId", "NativeDurationMs", "Success",
+        "ExecutorCount", "ExecutorSteps", "ExecutorFailures", "Spans", "Failures",
+        "UnmappedCriticalSpans", "AmbiguousSpans", "WorkflowCorrelationState",
+        "OperationId", "SpanId", "ParentId",
+    ])
+    body += f"<p>Validated workflow steps: {escape(_text(coverage['WorkflowSteps']))}</p>"
+    body += """<p>RootOperations counts only app.interaction.root=true executor spans, not every span tagged with demo.run_id.
+RootDurationMs sums root durations in the stage, not nested child durations or total wall-clock time.
+Sibling story/facts/persistence stages can share one trace; each child follows ParentId to its own executor.</p>"""
     body += _table(results["interactions"], [
         "Interaction", "RootOperations", "Spans", "Responses", "ToolSpans", "Failures",
-        "RootDurationMs", "Agents", "AgentVersions", "Models",
+        "RootDurationMs", "UnmappedCriticalSpans", "AmbiguousSpans", "Agents", "AgentVersions", "Models",
     ])
     body += f"""<h3>3. What did the LLM and its tools see and return?</h3>
 <p><strong>{escape(content_status)}</strong></p>
@@ -291,14 +483,17 @@ Client and service snapshots can repeat conversation history: do not sum them as
         body += "<p><strong>WARNING:</strong> Some content has no matching dependency span yet; inspect ingestion/correlation.</p>"
     if content["InvalidMessageRecords"]:
         body += f"<p><strong>WARNING:</strong> {content['InvalidMessageRecords']} matched content records contain invalid JSON message arrays; inspect their InputState/OutputState. They are not counted as valid input/output coverage.</p>"
+    if content.get("UnmatchedInvalidMessageRecords", 0):
+        body += f"<p><strong>WARNING:</strong> {content['UnmatchedInvalidMessageRecords']} unmatched content records contain invalid JSON message arrays.</p>"
     body += _section("Conversation and tool content index (up to 200 snapshots)", results["content"], [
-        "TimeGenerated", "Interaction", "ConversationId", "Operation", "Agent", "AgentVersion", "Model", "Role",
+        "TimeGenerated", "Interaction", "CorrelationState", "WorkflowName", "WorkflowStep",
+        "ConversationId", "Operation", "Agent", "AgentVersion", "Model", "Role",
         "InputState", "OutputState", "InputCharacters", "OutputCharacters", "InstructionSource", "ToolArgumentsCharacters", "ToolResultCharacters",
         "TraceId", "SpanId", "ContentId",
     ])
     if show_content:
         body += "<p><strong>Sensitive previews enabled:</strong> these values are saved in notebook outputs. Clear outputs before sharing.</p>"
-        for row in results["content"]:
+        for row in results["content"][:DETAIL_LIMIT]:
             title = f"{row['TimeGenerated']} | {row['Interaction']} | {row['Operation']} | span {row['SpanId']}"
             payloads = ""
             for label in ("Input", "Output", "Instruction", "ToolDefinitions", "ToolArguments", "ToolResult"):
@@ -306,25 +501,28 @@ Client and service snapshots can repeat conversation history: do not sum them as
                 if length:
                     value = row[label + "Preview"]
                     note = f"first {PREVIEW_LIMIT} of {length} characters; truncated" if length > PREVIEW_LIMIT else f"{length} characters"
-                    payloads += f"<h4>{label} ({note})</h4><pre>{escape(value)}</pre>"
+                    payloads += f"<h4>{label} ({note})</h4><pre>{escape(value[:PREVIEW_LIMIT])}</pre>"
             body += f"<details><summary>{escape(title)}</summary>{payloads or 'No payload recorded.'}</details>"
     else:
         body += "<p>Message/tool payloads are not requested or displayed by default. Set SHOW_GENAI_CONTENT=True in Section 6 to opt into bounded previews; local content recording must also be enabled.</p>"
     body += "<h3>4. Inspect latency, span relationships and exceptions</h3>"
     body += _section("End-to-end span inventory with content links (up to 200)", results["end_to_end"], [
-        "TimeGenerated", "Interaction", "Name", "Agent", "AgentVersion", "Model", "Success", "DurationMs",
+        "TimeGenerated", "Interaction", "SpanCategory", "CorrelationState", "WorkflowCorrelationState",
+        "WorkflowName", "WorkflowStep", "Name", "Agent", "AgentVersion", "Model", "Success", "DurationMs",
         "Role", "Host", "Region", "OperationId", "SpanId", "ParentId", "ContentRecords", "ContentIds",
     ])
     body += _section("Root-call trend (15-minute UTC bins; this run only)", results["runs_trend"], [
         "TimeGenerated", "Interaction", "Agent", "AgentVersion", "Model", "Calls", "Failures", "AvgDurationMs", "P95DurationMs",
     ])
-    body += "<p>Trends count only notebook story/facts/Sentinel roots, not nested service invoke_agent spans. P95 with one call equals that call's duration.</p>"
+    body += "<p>Trends count only explicitly tagged native story/facts/Sentinel executor roots, not nested invoke_agent or Responses spans. P95 with one call equals that executor's duration.</p>"
     body += _section("Correlated exceptions (up to 200 groups; potentially sensitive messages)", results["exceptions"], [
         "FirstSeen", "ExceptionType", "Message", "Occurrences", "OperationId", "ParentId",
     ])
     body += """<h3>5. Reproduce and explain the evidence</h3>
-<p>OperationId = TraceId groups one execution; SpanId identifies one operation within it;
-ParentId links to the parent span. ConversationId threads multiple turns/traces.
+<p>OperationId = TraceId groups a distributed trace, which can include several interactions;
+SpanId identifies one operation within it. ParentId ancestry (at most 64 edges) determines stage attribution,
+using trace + span across resources, never a single label guessed for the entire trace.
+Missing or contradictory critical ancestry fails validation. ConversationId threads multiple turns/traces.
 ContentId identifies a content record, not a span. Detail views cap at 200 rows;
 previews cap each payload at 1,200 characters. Coverage counts are uncapped.
 Queries run sequentially and ingestion is asynchronous, so snapshots may grow between views.

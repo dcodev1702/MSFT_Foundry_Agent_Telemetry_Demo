@@ -1,7 +1,8 @@
-# Windows notebook runtime reviewed 2026-09-18; optional MAF/validation profiles remain separate.
+# Windows notebook runtime reviewed 2026-09-18; MAF orchestrates existing Foundry calls.
 # If the approved feed lags, run build_notebook_wheels.ps1 and use --find-links .wheels.
 -c constraints-notebook-win11.txt
 ipykernel==7.3.0
+agent-framework-core==1.19.0
 azure-ai-projects==2.6.1
 openai==3.16.1
 # Patched HTTPX2 transport; 2.10.0 has published security advisories.

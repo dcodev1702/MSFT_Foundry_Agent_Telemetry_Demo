@@ -1,6 +1,6 @@
 # Windows Notebook Observability and Validation
 
-This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-14**. Agent execution uses Azure AI Projects and the Foundry Responses API, with native OpenTelemetry resource metadata. Agent Framework is not a runtime dependency of this notebook.
+This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-18**. Microsoft Agent Framework (MAF) core 1.19.0 orchestrates the existing Azure AI Projects and Foundry Responses API calls; it does not replace those clients, endpoints or error/approval gates. OpenTelemetry resource identity and the Azure Monitor export path are retained.
 
 The notebook exports client-side traces to Azure Monitor through the Foundry project's Application Insights connection. Foundry instrumentation supplies GenAI spans, while explicit notebook-side HTTP dependency spans preserve Service Map edges across transport-library changes.
 
@@ -23,9 +23,10 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-wi
 | OpenTelemetry as the Azure SDK tracing backend | `settings.tracing_implementation = "opentelemetry"` | Makes Azure SDK operations emit spans through OTEL instead of using no-op tracing. |
 | Azure Monitor export | `configure_azure_monitor(...)` with the project's Application Insights connection string | Sends notebook traces to Azure Monitor so they land in Application Insights and Log Analytics. |
 | Foundry client-side tracing | `AIProjectInstrumentor().instrument(...)` with explicit content, trace-context and baggage booleans | Emits client-side GenAI spans with the same content policy as custom notebook spans. |
+| Native MAF workflow tracing | `enable_instrumentation(...)` uses the existing OpenTelemetry provider | Emits native `workflow.run`, executor and graph spans into `AppDependencies`; no second provider or alternate exporter is configured. |
 | HTTP dependency tracing | Azure Monitor auto-instruments HTTPX and HTTPX2 when installed | The HTTPX instrumentation 0.65b0 package contains both instrumentors. OpenAI 3.x uses HTTPX2; no second package or manual re-wrapping is needed. |
 | Explicit Responses API dependency spans | Manual `POST /openai/v1/responses` client spans later in the notebook | Ensures Azure Monitor has concrete dependency rows that correlate cleanly in Service Map and KQL. |
-| Custom notebook orchestration spans | Manual spans such as `create_agent`, `invoke_agent`, `persist_story`, and Sentinel-specific spans | Makes the notebook's orchestration layer observable rather than only the SDK internals. |
+| Notebook workflow and operation spans | A manual `notebook.workflow {name}` span encloses MAF execution; existing `invoke_agent`, `persist_story`, and Sentinel-specific spans remain executor descendants | Keeps the existing Foundry operations observable while explicit executor-root attributes identify logical stages. |
 | Resource identity | Native `Resource.create(attributes)` with explicit service, session, environment and project values | Preserves existing identity and additional `OTEL_RESOURCE_ATTRIBUTES`; adds `deployment.environment.name` alongside the legacy environment attribute. |
 | GenAI semantic conventions | Owned by Azure AI Projects' installed preview instrumentor | The Agent Framework `gen_ai_latest_experimental` opt-in does not select the Projects SDK's schema and is no longer set here. |
 | Baggage propagation | `AZURE_TRACING_GEN_AI_TRACE_CONTEXT_PROPAGATION_INCLUDE_BAGGAGE=true` | Lets the notebook's run, agent, and interaction baggage keys flow with downstream trace context. |
@@ -37,12 +38,17 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](zolab-ai-agent-demo-wi
 
 The telemetry path for this repo is:
 
-1. The notebook creates spans through OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and explicit custom spans.
+1. The notebook creates spans through MAF's native workflow instrumentation, OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and the existing explicit custom spans. `story-facts` has `story`, `facts` and `persistence` executors. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
 2. `configure_azure_monitor(...)` registers Azure Monitor exporters for the signals that remain enabled.
 3. The notebook retrieves the Application Insights connection string from the Foundry project at runtime by calling `project_client.telemetry.get_application_insights_connection_string()`.
 4. Azure Monitor sends the exported trace data to Application Insights.
 5. Because the Application Insights instance is workspace-based, the same telemetry is queryable in Log Analytics. Dependency spans are in `AppDependencies`; captured standard GenAI content is routed to `AppGenAIContent` and correlated by trace/span identifiers.
 6. Agent calls use stable per-agent Responses endpoints in backend mode, or the project Responses API with `agent_reference` in explicit legacy mode. Client/service GenAI spans support the Foundry Traces view. Portal rendering is a separate UI check from the Log Analytics assertions.
+
+Workflow messages carry only the opaque run UUID, not prompts, responses or tool
+results. MAF shares the established content-recording policy and 100% trace-only
+Azure Monitor configuration. No span processor stamps every SDK/service span with
+one agent or interaction; reporting follows actual parent relationships instead.
 
 ![Pro-code observability stack for the Foundry agent demo](images/foundry-observability-stack.svg)
 
@@ -65,7 +71,7 @@ Agent observability is useful only if it answers more than "did the call succeed
 | Layer | What becomes observable |
 | --- | --- |
 | Agent execution layer | Foundry client-side spans and Foundry Traces show agent creation and Responses API activity. |
-| Notebook orchestration layer | Custom spans show where the notebook invoked, persisted, or branched into Sentinel-specific paths. |
+| Notebook orchestration layer | Native MAF workflow/executor spans show orchestration and wall-clock duration; retained custom spans show the underlying Foundry operations and persistence. |
 | Dependency layer | Automatically instrumented HTTPX2 plus explicit client spans create dependency rows for the actual outbound calls. |
 | Run correlation layer | Resource attributes and baggage context let a single notebook run be grouped and traced across surfaces. |
 
@@ -84,6 +90,7 @@ environment are independent of the standalone Agent Framework demo.
 | Package | Installed | Notes |
 | --- | --- | --- |
 | `azure-ai-projects` | `2.6.1` | Project agents, MCP and client-side preview instrumentation. |
+| `agent-framework-core` | `1.19.0` | Required runtime for `WorkflowBuilder`/executor orchestration; uses the configured Azure Monitor provider. |
 | `openai` | `3.16.1` | Responses/conversations API, using HTTPX2. |
 | `httpx2` | `2.13.0` | Paired with HTTPCore2 2.13.0; independently verified with the updated SDK. |
 | `azure-identity` | `1.26.0b2` | Existing preview line retained; no global `--pre` switch. |
@@ -98,12 +105,12 @@ Install the matrix together, run `pip check`, then restart the kernel if SDKs we
 
 ### Runtime, Shared and Validation Profiles
 
-- [requirements-notebook.txt](requirements-notebook.txt) contains only runtime requirements (82 resolved dependencies, excluding pip).
-- [requirements-notebook-shared.txt](requirements-notebook-shared.txt) adds optional Agent Framework core 1.19.0, OpenAI provider 1.14.4, orchestrations 1.2.0 and OTLP gRPC exporter 1.44.0. These remain compatible with the root environment, but this notebook neither imports Agent Framework nor configures an OTLP exporter.
+- [requirements-notebook.txt](requirements-notebook.txt) contains the runtime requirements, including Agent Framework core 1.19.0.
+- [requirements-notebook-shared.txt](requirements-notebook-shared.txt) adds optional Agent Framework OpenAI provider/orchestration integrations and an OTLP gRPC exporter for other shared-environment scenarios. This notebook needs core workflow orchestration only and does not configure an OTLP exporter.
 - [requirements-notebook-validation.txt](requirements-notebook-validation.txt) adds `nbclient==0.11.0` and `nbformat==5.11.1` for automated execution.
-- [constraints-notebook-win11.txt](constraints-notebook-win11.txt) captures 102 direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
+- [constraints-notebook-win11.txt](constraints-notebook-win11.txt) captures direct/transitive versions across those profiles for Windows / CPython 3.14. It constrains resolution without installing optional packages; it is not a hash-verified lock or a cross-platform snapshot.
 
-The constrained runtime plus validation profile installs cleanly without Agent Framework or OTLP. Existing shared packages were not uninstalled. The tested Azure Identity preview line was retained; moving to stable credentials remains a separate compatibility exercise.
+The runtime requires MAF core, but not the optional OpenAI provider, orchestration extensions or OTLP exporter. The tested Azure Identity preview line was retained; moving to stable credentials remains a separate compatibility exercise.
 
 The September 18 dependency check uses the real Azure AI Projects/OpenAI clients
 with an in-memory HTTPX2 transport to verify both project and stable-agent
@@ -112,11 +119,11 @@ This is SDK compatibility validation, not a new live Azure model run. It does
 not create or modify cloud agents, model deployments, or telemetry policy; earlier
 live-run evidence below retains its original dates and versions.
 
-All 119 tests pass against the publication snapshot; the clean runtime/validation
-environment skips only the optional shared-MAF version check. The dependency
-self-check found no active advisories in the PyPI per-version metadata for the
-102 constrained packages. That check is best-effort published-advisory coverage,
-not an independent code security audit or a guarantee about unpublished issues.
+The pre-MAF publication snapshot passed its dependency/SDK compatibility tests.
+Its dependency self-check found no active advisories in the inspected PyPI
+per-version metadata. That historical check is best-effort published-advisory
+coverage, not validation of subsequent dependency changes, an independent code
+security audit or a guarantee about unpublished issues.
 
 ## Current-Run Telemetry Gate (Section 6)
 
@@ -124,10 +131,10 @@ Section 6 is a validation gate, not just a query display:
 
 1. Resolve `WorkspaceResourceId` from the deployment's Application Insights component. Do not assume the Sentinel data workspace is also the telemetry workspace.
 2. Flush the OpenTelemetry provider before querying.
-3. Scope to the current `demo.run_id`, then follow `OperationId` to include SDK and HTTP child spans that do not carry that custom attribute themselves.
+3. Scope to the current `demo.run_id`, then include the associated traces and follow `ParentId` ancestry to attribute SDK/HTTP/service spans to their own stage. Several stages intentionally share one `OperationId`.
 4. Poll for ingestion at 15-second intervals, up to 12 waits. Empty or old results cannot produce a pass.
-5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version (currently `2026.09.16`). Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-fw-demo`. Responses wrappers are identified by `gen_ai.operation.name=responses.create` and a `/responses` name suffix, supporting both project and stable agent endpoints.
-6. Reject API errors and partial results. Display an HTML report with stage totals, content availability, conversation snapshots, a joined span inventory, root-call trends and exception drill-downs. Copyable KQL remains available in expandable sections.
+5. Require story, facts and (when configured) Sentinel interaction coverage, a correlated Responses API dependency for each model interaction, GenAI chat spans, exactly one `persist_story` span labelled `persistence`, zero failed spans, and the configured service version. Also require native `story-facts` workflow identity and its `story`, `facts`, `persistence` executor roots; when Sentinel is configured require the separate `sentinel` workflow and executor. Unmapped or contradictory model/Responses/tool/executor ancestry is a failure, even if every expected stage appears elsewhere. Persistence does not require a Responses dependency because it is not an LLM call. Azure Monitor combines namespace and service name into `AppRoleName=foundry-agent-demo.foundry-agent-fw-demo`. Responses wrappers are identified by `gen_ai.operation.name=responses.create` and a `/responses` name suffix, supporting both project and stable agent endpoints.
+6. Reject API errors and partial results. Display an HTML report with native workflow wall-clock duration, executor steps/counts/failures, stage totals, content availability, conversation snapshots, a joined span inventory, root-call trends and exception/correlation drill-downs. Copyable KQL remains available in expandable sections.
 
 The Sentinel orchestration span now carries both `demo.run_id` and `app.interaction=sentinel`, fixing its omission from run-filtered queries. Its response helper no longer reattaches a context captured before the parent span: doing that detached HTTP dependencies into unrelated operations. The query cells also reject failed/empty responses and exhausted approval loops instead of persisting them as successful results. The Sentinel specialist uses the supplied `SigninLogs` schema and plain KQL; it no longer requires table discovery.
 
@@ -151,27 +158,57 @@ change versions, install packages or create additional demo spans.
 
 | Question | Source and interpretation |
 |---|---|
-| Did the required operations reach telemetry? | `AppDependencies`: unique spans, failed spans/operations, Responses wrappers, GenAI chat spans and persistence. |
-| What happened in each notebook section? | Root interaction labels propagate to the trace's SDK/HTTP/service children. Stage totals show orchestration count/duration, tools, agent versions and models. |
+| Did the required operations reach telemetry? | `AppDependencies`: unique spans, failed spans/operations, native workflows/executors, Responses wrappers, GenAI chat spans, persistence and critical ancestry diagnostics. |
+| What happened in each notebook section? | Parent ancestry assigns SDK/HTTP/service children to the nearest executor stage and available agent metadata. Sibling stages may share a trace. Stage totals show executor count/duration, tools, agent versions and models. |
+| How long did the workflow take? | `workflows`: the native `workflow.run` span's own `DurationMs`, with workflow name/ID, executor steps/counts/failures and correlation state. Never the sum of nested durations. |
 | What messages, instructions and tool payloads were captured? | `AppGenAIContent`: content snapshots, metadata and optional bounded previews. These are not additional spans or distinct agent calls. |
 | What failed? | Failed dependency spans plus `AppExceptions`, grouped by trace and parent span; exception messages are bounded but may contain sensitive data. |
-| How many logical calls and how long did they take? | The 15-minute trend counts only notebook story/facts/Sentinel roots. It excludes nested Foundry `invoke_agent` spans; P95 for a single call is that call's duration. |
+| How many logical calls and how long did they take? | The 15-minute trend counts only native executor spans explicitly tagged `app.interaction.root=true` for story/facts/Sentinel. It excludes nested manual/Foundry `invoke_agent` and Responses spans; P95 for a single executor is that executor's duration. |
 
 #### Correlation and cardinality
 
 1. Validate the run ID as a UUID and select its operations within six hours.
 2. Deduplicate dependency rows by `(_ResourceId, OperationId, Id)` and content
-   records by `(_ResourceId, Id)`, retaining the latest timestamp.
-3. Reduce root interaction context to one row per trace. Conflicting labels
-   produce an explicit ambiguous-correlation validation issue rather than
-   multiplying the span count.
+   records by `(_ResourceId, TraceId, SpanId, Id)`, retaining the latest timestamp.
+3. Build a parent graph keyed by `(OperationId, Id)` so a child can follow its
+   parent across resources. Include the span itself (depth zero), then match
+   ancestor paths of **1–64 edges**, without cycles. Only explicitly tagged
+   `app.interaction.root=true` executor roots define logical interactions.
+   Unchanged manual children can carry run/interaction metadata without becoming
+   extra roots. Choose the nearest available agent metadata by ancestor distance.
+   Collapse ancestry and metadata mappings to one row per graph key before
+   joining them back to resource-specific spans. Contradictory parents,
+   stage/workflow labels or equally near metadata are reported as ambiguous;
+   a critical span with missing ancestry is reported as unmapped. There is no
+   trace-level `arg_max` label or silent fallback to a sibling stage.
 4. Aggregate content by `(_ResourceId, TraceId, SpanId)` **before** the left join.
    Match `OperationId = TraceId`, dependency `Id = SpanId`, and the same resource.
    Spans without content remain visible, while multiple content records can
    annotate one span without multiplying it. The content index retains distinct
    record IDs instead of arbitrarily selecting one message snapshot.
-5. Compute health and latency from spans alone. Content rows without matching
+5. The content index also joins on resource + trace + span, not on trace alone.
+   Compute health and latency from spans alone. Content rows without matching
    spans are reported as a warning, not discarded from the content index.
+   Workflow/graph plumbing stays visible as `workflow / setup`, not model calls.
+   Executor durations are stage measurements; native `workflow.run` duration is
+   the workflow wall clock. Do not sum parent and child durations as a total.
+
+`coverage_issues(coverage, expected_interactions)` keeps its existing signature.
+The default contract requires `story-facts`; `sentinel` is required only when
+present in `expected_interactions`. `WorkflowSteps` uses qualified names:
+`story-facts/story`, `story-facts/facts`, `story-facts/persistence`, and optionally
+`sentinel/sentinel`. New coverage fields are `WorkflowRuns`, `WorkflowRootSpans`,
+`ExecutorSpans`, `WorkflowNames`, `WorkflowIds`, `WorkflowSteps`,
+`WorkflowFailures`, `UncorrelatedWorkflowSpans`, `UnmappedCriticalSpans` and
+`AmbiguousCriticalSpans`. `AmbiguousSpans` now means contradictory ancestry or
+metadata, **not** multiple interaction labels in the same trace.
+
+The bounded ancestry traversal uses Azure Monitor's supported
+[`make-graph` / `graph-match` operators](https://learn.microsoft.com/kusto/query/graph-match-operator?view=azure-monitor).
+Missing parents or roots beyond the traversal bound remain visible and fail
+critical-span coverage; the query does not silently substitute trace-level
+context. Local query-contract tests do not replace execution of the generated
+KQL against the service.
 
 `ConversationId` comes from `Attributes["gen_ai.conversation.id"]`; it can span
 multiple traces/turns. `ContentId` is the content record ID, not a span ID.
@@ -183,13 +220,15 @@ counts or token attributes as unique conversation turns or total model cost.
 Instructions prefer the dedicated `SystemInstructions` field. When absent, the
 query parses `InputMessages` JSON and retains messages with role `system` or
 `developer`, including their structured parts. It does not regex-match legacy
-span properties. Missing agent/model values on SDK records can use the tagged
-root's metadata; unavailable fields remain labelled as not recorded.
+span properties. Missing agent/model values on correlated SDK records use the
+nearest available ancestor metadata; unavailable fields remain labelled as not
+recorded, and ambiguous ancestry is not used to guess an agent.
 
 #### Reading, privacy and failure behavior
 
 - **Span-health PASS** requires the original strict coverage, failure,
-  persistence and identity checks. It does not independently prove answer
+  persistence and identity checks plus workflow/executor and ancestry coverage.
+  It does not independently prove answer
   correctness, groundedness or successful tool semantics.
 - **Content AVAILABLE** means input/output content exists for every expected
   interaction in this snapshot, not that every span should contain messages.
@@ -199,9 +238,10 @@ root's metadata; unavailable fields remain labelled as not recorded.
 - Empty message arrays do not count toward input/output coverage. Invalid JSON
   message arrays generate an explicit warning and a state label in the index,
   rather than being accepted as valid content or silently rendered as empty.
-- `SHOW_GENAI_CONTENT=False` is the Section 6 default. The query returns metadata,
-  sizes and instruction-source labels, but does not return message/tool preview
-  fields. Setting it to `True` requests bounded previews and requires the local
+- `SHOW_GENAI_CONTENT` is an explicit boolean display choice; existing user
+  settings are preserved. When `False`, the query returns metadata, sizes and
+  instruction-source labels, but not message/tool preview fields. Setting it to
+  `True` requests bounded previews and requires the local
   content-recording policy to be enabled. This display toggle does not change
   capture settings or require a kernel restart.
 - Previews show at most **1,200 characters per field**, with original lengths
@@ -238,6 +278,9 @@ Sources: [table schema](https://learn.microsoft.com/azure/azure-monitor/referenc
 [protected tables](https://learn.microsoft.com/azure/azure-monitor/logs/protected-tables-configure).
 
 #### Read-only validation evidence - 2026-09-15
+
+This is historical pre-MAF evidence, not a live validation of the current
+workflow-aware queries or executor-root contract.
 
 The enhanced final cell was executed in an isolated validation kernel against
 the previously completed run `8b2584d2-92d5-4e19-bdcf-37a12d56473f`, without
@@ -382,7 +425,9 @@ A SHA-256 fingerprint is a comparison aid, not encryption or proof of secrecy.
 No extra creation wrapper or synthetic server span was added. The separate
 `persist_story` span now explicitly carries `demo.run_id`, `app.session.id`,
 `app.interaction=persistence`, agent identity/version and runtime. It remains an
-internal span in its own operation, discoverable through the same run-ID filter.
+internal span, discoverable through the same run-ID filter. In the current MAF
+path it is a child of the `persistence` executor in the shared `story-facts`
+trace, rather than an independent logical root.
 Write failures propagate, retain the run attributes and record `error.type`.
 The automatic span context manager records the exception and error status.
 
@@ -490,7 +535,7 @@ Run `419d2a78-eda0-4168-be3f-65e1afe5baf6` executed all **13 notebook code cells
 
 Unlike the initial trace-only claim, this run also checked actual runtime objects: **no SDK log or metric providers**, **no Live Metrics or performance-counter span processors**, **SDK and custom content capture both off**, and **HTTPX2 auto-instrumentation enabled**.
 
-All **25 regression tests** passed in the existing environment and in a clean runtime-plus-validation environment without Agent Framework or OTLP. The clean install passed `pip check`; the optional shared profile also resolved against the same constraints. Earlier live attempts surfaced Sentinel-generated datetime-format and unquoted projection-alias errors; the specialist instructions now keep datetime values raw and aliases space-free. These remain model-generated queries, so service/tool failures still raise rather than being silently retried or presented as success.
+At that pre-MAF validation, all **25 regression tests** passed in the existing environment and in a clean runtime-plus-validation environment without Agent Framework or OTLP. The clean install passed `pip check`; the optional shared profile also resolved against the same constraints. Earlier live attempts surfaced Sentinel-generated datetime-format and unquoted projection-alias errors; the specialist instructions now keep datetime values raw and aliases space-free. These remain model-generated queries, so service/tool failures still raise rather than being silently retried or presented as success.
 
 The reduced runtime closure contains **82 packages**, all checked against PyPI version advisory metadata with **zero reported advisories** and no missing metadata entries. This is not a comprehensive security audit. Notebook code in the cleared working copy was compared byte-for-byte per cell with the successful execution.
 
@@ -594,22 +639,20 @@ For a notebook, I recommend this order:
 3. Call `configure_azure_monitor(...)`.
 4. Then switch `settings.tracing_implementation` to `"opentelemetry"`.
 5. Apply the content/propagation booleans to `AIProjectInstrumentor`, then verify its state and the distro-owned HTTPX2 instrumentor. Do not uninstrument or manually re-wrap HTTP clients.
+6. Enable MAF instrumentation against that same provider; do not configure another exporter or provider.
 
 The helper remembers its backend/resource/content configuration. Identical reruns do not call Azure Monitor again. Changed configuration or a prior partially failed setup requires a fresh kernel.
 
-### 5. Add a span processor for agent metadata
+### 5. Keep stage metadata on explicit executor roots
 
-Microsoft's Foundry tracing guidance explicitly supports adding a custom span processor. That remains a reasonable next step if you want every span to include the same correlation metadata without repeating `span.set_attribute(...)` everywhere.
-
-Good candidates include:
-
-| Attribute | Value idea |
-| --- | --- |
-| `session.id` | Notebook telemetry session UUID |
-| `gen_ai.agent.name` | Main agent or Sentinel agent name |
-| `gen_ai.agent.id` | Agent ID when available |
-| `demo.scenario` | `storytelling`, `msft_learn`, or `sentinel` |
-| `foundry.project.name` | Already present in resource attributes; keep consistent |
+The native `executor.process {id}` span carries `demo.run_id`, `app.session.id`,
+`app.workflow.name`, `app.workflow.step`, `app.interaction`,
+`app.interaction.root=true` and the notebook's agent/model identity. The manual
+workflow parent carries `app.workflow.root=true` and its workflow name.
+No span processor stamps one interaction onto every span: story, facts and
+persistence legitimately share a trace, and remote children can lack custom
+attributes. Parent-based query correlation preserves those boundaries without
+adding message content or changing the outbound Foundry calls.
 
 ### 6. Keep traces on, keep logs and metrics off by default for the notebook
 
@@ -625,7 +668,7 @@ I would keep that default, and only add logs later if you want:
 
 If you want the best improvement-to-effort ratio beyond the current notebook state, do these next:
 
-1. Add a lightweight custom span processor for cross-cutting agent metadata.
+1. Keep explicit workflow/executor metadata and inspect unmatched critical ancestry rather than globally stamping span labels.
 2. Deliberately redesign sampling and the validation gate if you need lower-cost long-running telemetry.
 3. Keep reviewing which baggage keys are safe to propagate as the notebook evolves.
 4. Turn on content recording only for controlled debugging windows.

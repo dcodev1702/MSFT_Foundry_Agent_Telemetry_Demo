@@ -1,5 +1,64 @@
 # OpenTelemetry Agent Spans
 
+## MAF workflow orchestration
+
+The Windows notebook now wraps its existing Foundry calls with MAF core 1.19.0
+workflows. Section 5 executes `story -> facts -> persistence`; Section 5.1 is an
+independent optional `sentinel` workflow. The same run ID connects the workflows,
+but each has its own trace. Agent definitions, models, endpoint routing and MCP
+approvals remain on the existing Foundry path.
+
+```text
+notebook.workflow story-facts
+  workflow.build
+  workflow.run
+    executor.process story       [app.interaction.root = true]
+      invoke_agent ...
+        POST /openai/v1/responses
+          Foundry / transport / service spans
+    executor.process facts       [app.interaction.root = true]
+      invoke_agent ...           [MCP approval continuations remain children]
+    executor.process persistence [app.interaction.root = true]
+      persist_story
+```
+
+MAF emits graph/message spans and causal links as well. Native executor spans
+are the stage roots, not every span carrying `demo.run_id`. The report follows
+parent ancestry per span instead of assigning one interaction to an entire
+trace. Workflow duration is wall-clock time from `workflow.run`; summing nested
+durations would overcount. MAF instrumentation reuses the Azure Monitor provider
+with the same capture policy, without a second exporter. Opaque run IDs, not
+model inputs/results, pass through workflow messages.
+
+### MAF validation snapshot - September 18, 2026
+
+The runtime cells executed against the existing pinned agents without creating
+versions or changing endpoint routing. Test stories and Marp decks were isolated
+from the user's files. All nine generated report queries then ran successfully
+against those captured traces in Log Analytics:
+
+| Signal | Observed |
+|---|---:|
+| Native MAF workflow runs | 2 |
+| Explicit executor roots | 4 |
+| Unique spans, before and after content enrichment | 76 |
+| Responses request wrappers | 8 |
+| GenAI chat spans | 13 |
+| Main persistence span | 1 |
+| Failed, ambiguous or unmapped critical spans | 0 |
+| Matched content records | 34 |
+| Unmatched content records | 0 |
+
+Each story/facts/persistence/Sentinel stage has one executor root. Native
+workflow durations were 32,907 ms for story/facts and 30,605 ms for Sentinel.
+These are sample timings, not fixed performance requirements. The report still
+flags three malformed message-array content records and excludes them from
+valid input/output coverage; valid content exists for each expected interaction.
+
+The 148-test notebook regression suite passes, all 13 notebook code cells
+compile, `pip check` passes, and the runtime profile resolves with MAF core.
+The rendered metadata-only report was also checked in the integrated browser.
+
 ## Current Section 6: spans plus GenAI content
 
 The final notebook cell (`6e3dcab6`) now presents an HTML observability report
@@ -9,6 +68,7 @@ enriches the span inventory; it does not replace it or create new spans.**
 | View | Purpose |
 |---|---|
 | Span-health summary | Required interaction/Responses coverage, GenAI chat spans, one persistence span, failures and service identity. All counts come from unique `AppDependencies` spans. |
+| MAF workflows | Native workflow runs, executor coverage and wall-clock duration, separate from model/tool calls. |
 | Section workflow | Section 4 setup, Section 5 story/Learn/persistence, Section 5.1 Sentinel; root operations/durations, nested span/tool counts, agent versions and models. |
 | Content coverage/index | Conversation IDs, model and agent metadata, instructions, input/output sizes, tool payload availability and optional bounded previews from `AppGenAIContent`. |
 | Enriched inventory | One row per resource/trace/span, with content record IDs and counts. Parent IDs preserve the trace hierarchy. |
@@ -33,12 +93,12 @@ client/service snapshots as unique turns.
 
 The last cell keeps its strict whole-run failure policy, including earlier failed
 attempts sharing the run ID. Content availability is a separate status. The
-metadata-only default does not request message previews; opt in with
-`SHOW_GENAI_CONTENT=True` only with local content recording enabled. Previews cap
+metadata-only setting (`SHOW_GENAI_CONTENT=False`) does not request message previews;
+use `True` only with local content recording enabled. Previews cap
 each payload at 1,200 characters, and detail views cap at 200 rows/groups.
 Coverage totals remain uncapped. Exception messages may contain sensitive data.
 
-**Read-only validation:** the existing successful run
+**Historical pre-MAF read-only validation:** the existing successful run
 `8b2584d2-92d5-4e19-bdcf-37a12d56473f` still has **64 unique dependency spans** after
 enrichment: **34** have content records and **30** do not. All **34** content
 records correlate; **18** include developer instruction messages. The corrected
@@ -311,7 +371,7 @@ For display/validation, normalize only datetime-typed values:
 This preserves non-date version strings. It is not a fallback to a different
 model, a fingerprint-input change or a modification to the Sentinel KQL query.
 
-## Latest validated run: 50 correlated spans
+## Historical pre-MAF validated run: 50 correlated spans
 
 **Run:** `2855bde8-64be-45fd-b58f-5db1dbde25ce`
 
