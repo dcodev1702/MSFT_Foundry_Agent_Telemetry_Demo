@@ -1,0 +1,8 @@
+{
+    "pylint.ignorePatterns": [
+        "*.ipynb"
+    ],
+    "python.analysis.ignore": [
+        "**/*.ipynb"
+    ]
+}

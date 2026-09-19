@@ -71,6 +71,11 @@ existing project directories. After pulling this layout change, restart the
 notebook kernel and rerun the runtime cells from **Confirm Existing Deployment**.
 Clear outputs before saving or sharing executed notebooks.
 
+The shared [VS Code settings](.vscode/settings.json) suppress Pylint and Pylance
+diagnostics for notebooks, while keeping autocomplete/navigation and normal
+checks for `.py` files. This does not disable notebook execution errors or the
+regression suite. Machine-specific Python search paths remain local.
+
 ### Windows Dependency Matrix
 
 Reviewed on **2026-09-18** using the approved package feed and verified official
