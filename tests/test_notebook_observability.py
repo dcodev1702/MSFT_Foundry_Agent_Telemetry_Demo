@@ -7,6 +7,7 @@ from notebook_support.observability import (
     build_observability_queries, coverage_issues, render_failure_report,
     render_observability_report,
 )
+from notebook_support.response_observability import load_model_pricing
 
 
 RUN_ID = "00000000-0000-0000-0000-000000000001"
@@ -46,6 +47,7 @@ def report_results():
             "ExecutorFailures": 0, "WorkflowCorrelationState": "correlated",
         }],
         "interactions": [], "content": [], "end_to_end": [], "runs_trend": [], "exceptions": [],
+        "usage": [], "mcp": [], "mcp_events": [],
     }
 
 
@@ -63,6 +65,7 @@ class QueryTests(unittest.TestCase):
         self.assertEqual(set(self.queries), {
             "coverage", "interactions", "workflows", "runs_trend", "end_to_end",
             "content_coverage", "content", "failures", "exceptions",
+            "usage", "mcp", "mcp_events",
         })
         for query in self.queries.values():
             self.assertIn(f'let run_id = "{RUN_ID}";', query)
@@ -207,6 +210,49 @@ class QueryTests(unittest.TestCase):
         self.assertIn("force_flush(timeout_millis=30000)", source)
         self.assertIn('os.environ["OTEL_SERVICE_VERSION"] not in coverage["Versions"]', source)
         self.assertNotIn("[:4000]", source)
+        for required in (
+            "load_model_pricing(", "NOTEBOOK_MODEL_PRICING_JSON",
+            "model_pricing=model_pricing", "read_response_diagnostics()",
+            '"usage", "mcp", "mcp_events"',
+        ):
+            self.assertIn(required, source)
+
+    def test_usage_counts_only_canonical_response_boundaries_without_a_detail_cap(self):
+        query = self.queries["usage"]
+        self.assertIn("| where IsResponseDependency", query)
+        self.assertIn('UsageSource == "notebook.responses"', query)
+        self.assertIn('Properties["gen_ai.response.id"]', query)
+        self.assertIn('strcat("response/", _ResourceId', query)
+        self.assertIn('strcat("span/", _ResourceId, "/", NodeKey)', query)
+        self.assertIn("make_set(UsageSignature, 2)", query)
+        self.assertIn('arg_max(TimeGenerated, *) by UsageKey', query)
+        self.assertIn("conflicting response snapshots", query)
+        self.assertNotIn("AppGenAIContent", query)
+        self.assertNotIn("take 200", query)
+
+    def test_mcp_span_events_join_exact_parents_and_keep_final_outcomes(self):
+        query = self.queries["mcp"]
+        self.assertIn("AppTraces", query)
+        self.assertNotIn("AppEvents", query)
+        self.assertIn('Message in ("mcp.approval.auto_approved", "mcp.tool.error", "sentinel.mcp_tool_error")', query)
+        self.assertIn("on _ResourceId, OperationId, ParentId", query)
+        self.assertIn('ParentId=Id, StageRootKey', query)
+        self.assertIn("by StageRootKey", query)
+        self.assertIn("FailedRequests=countif(Success == false)", query)
+        self.assertIn('Properties["app.workflow.step.status"]', query)
+        self.assertIn("LatestResponseStatus", query)
+        self.assertIn("ApprovalCountMissing", query)
+        self.assertIn("MissingMcpMetadata", query)
+        self.assertNotIn("take 200", query)
+
+    def test_mcp_error_payloads_require_the_same_preview_opt_in(self):
+        hidden = self.queries["mcp_events"]
+        visible = build_observability_queries(RUN_ID, include_content=True)["mcp_events"]
+        for key in ("app.mcp.error.detail", "app.sentinel.error.details", "ErrorDetailPreview"):
+            self.assertNotIn(key, hidden)
+            self.assertIn(key, visible)
+        self.assertIn("take 200", hidden)
+        self.assertIn("0, 1200", visible)
 
 
 class CoverageTests(unittest.TestCase):
@@ -385,6 +431,63 @@ class ReportTests(unittest.TestCase):
         self.assertIn("earlier", report)
         self.assertIn("&lt;403 Forbidden&gt;", report)
         self.assertNotIn("<403 Forbidden>", report)
+
+    def test_usage_and_mcp_are_present_even_without_pricing_or_payloads(self):
+        report = self.render()
+        for text in ("Pricing not configured", "Missing prices are not zero cost",
+                     "MCP approvals", "AppTraces", "SDK-internal HTTP retry"):
+            self.assertIn(text, report)
+
+    def test_usage_totals_are_not_limited_to_the_displayed_responses(self):
+        results = report_results()
+        results["usage"] = [{
+            "UsageKey": f"response/resource/r-{i}", "ResponseId": f"r-{i}",
+            "Interaction": "story", "Deployment": "demo", "Model": "model",
+            "UsageState": "reported", "InputTokens": 1000, "OutputTokens": 100,
+            "CachedInputTokens": 0, "ReasoningTokens": 0,
+        } for i in range(201)]
+        rates = load_model_pricing('{"demo":{"currency":"USD","input_per_million":2,"output_per_million":8}}')
+        report = self.render(results, model_pricing=rates)
+        self.assertIn("201000", report)
+        self.assertIn("0.5628", report)
+        self.assertIn("201 canonical response/request records", report)
+        self.assertNotIn(">r-200<", report)
+
+    def test_mcp_previews_are_bounded_escaped_and_hidden_by_default(self):
+        results = report_results()
+        results["mcp_events"] = [{
+            "Event": "mcp.tool.error", "ToolName": "<script>tool</script>",
+            "ErrorDetailPreview": "PRIVATE_ERROR<script>" + "x" * 1200 + "TOO_LONG",
+            "DetailTruncated": True,
+        }]
+        hidden = self.render(results)
+        self.assertNotIn("PRIVATE_ERROR", hidden)
+        self.assertNotIn("<script>", hidden)
+        visible = self.render(results, show_content=True)
+        self.assertIn("PRIVATE_ERROR", visible)
+        self.assertIn("&lt;script&gt;", visible)
+        self.assertNotIn("TOO_LONG", visible)
+        self.assertNotIn("<script>", visible)
+
+    def test_failure_report_keeps_attempts_and_eventual_outcome_without_a_false_pass(self):
+        diagnostics = {
+            "usage": [], "mcp_events": [],
+            "mcp": [{"Interaction": "story", "Requests": 2, "FailedRequests": 1,
+                     "FinalStageOutcome": "completed", "LatestResponseStatus": "completed"}],
+        }
+        report = render_failure_report(
+            RUN_ID, ["Earlier request failed."], [], [], diagnostics=diagnostics,
+        )
+        self.assertIn("FAIL", report)
+        self.assertNotIn("PASS -", report)
+        self.assertIn("FailedRequests", report)
+        self.assertIn("completed", report)
+        self.assertIn("does not erase earlier failures", report)
+        with self.assertRaisesRegex(ValueError, "recording policy"):
+            render_failure_report(
+                RUN_ID, [], [], [], diagnostics=diagnostics,
+                show_content=True, content_recording_enabled=False,
+            )
 
     def test_failing_coverage_cannot_render_a_pass(self):
         for field, value in (

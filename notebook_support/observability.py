@@ -1,9 +1,12 @@
 """Run- and stage-scoped KQL and HTML reporting for the MAF Windows notebook."""
 
 import json
+from collections.abc import Mapping
 from html import escape
 from typing import Any
 from uuid import UUID
+
+from .response_observability import TokenPricing, price_response_usage
 
 
 Row = dict[str, Any]
@@ -127,6 +130,7 @@ let correlated_spans = materialize(span_context
         and array_length(RootSteps) == 1 and array_length(RootWorkflows) == 1
         and WorkflowCorrelationState == "correlated", "correlated", "unmapped")
 | extend RootInteraction=iff(CorrelationState == "correlated", tostring(RootInteractions[0]), ""),
+    StageRootKey=iff(CorrelationState == "correlated", tostring(StageRootKeys[0]), ""),
     Agent=iff(CorrelationState == "correlated", tostring(NearestMetadata.Agent), OwnAgent),
     AgentId=iff(CorrelationState == "correlated", tostring(NearestMetadata.AgentId), OwnAgentId),
     AgentVersion=iff(CorrelationState == "correlated", tostring(NearestMetadata.AgentVersion), OwnAgentVersion),
@@ -173,6 +177,58 @@ let enriched_spans = correlated_spans
 let content_context = correlated_spans
 | project _ResourceId, TraceId=OperationId, SpanId=Id, Interaction, CorrelationState,
     WorkflowName, WorkflowId, WorkflowStep, Agent, AgentId, SpanAgentVersion=AgentVersion, Model;
+'''
+    responses = '''let response_requests = materialize(correlated_spans
+| where IsResponseDependency
+| extend ResponseId=tostring(Properties["gen_ai.response.id"]),
+    Deployment=tostring(Properties["app.model.deployment"]),
+    Model=coalesce(tostring(Properties["gen_ai.response.model"]), Model),
+    UsageSource=tostring(Properties["app.usage.source"]),
+    ReportedUsageState=tostring(Properties["app.usage.state"]),
+    ResponseStatus=coalesce(tostring(Properties["app.response.status"]),
+        iff(Success == false, "request failed", "not recorded")),
+    InputTokens=tolong(Properties["gen_ai.usage.input_tokens"]),
+    OutputTokens=tolong(Properties["gen_ai.usage.output_tokens"]),
+    CachedInputTokens=tolong(Properties["app.usage.cached_input_tokens"]),
+    ReasoningTokens=tolong(Properties["app.usage.reasoning_tokens"]),
+    McpToolCalls=tolong(Properties["app.mcp.tool_calls"]),
+    McpToolErrors=tolong(Properties["app.mcp.tool_errors"])
+| extend UsageState=case(UsageSource == "notebook.responses", coalesce(ReportedUsageState, "invalid"),
+        Success == false, "request failed", "not captured; rerun runtime cells"),
+    UsageKey=iff(isnotempty(ResponseId),
+        strcat("response/", _ResourceId, "/", tostring(Properties["server.address"]), "/", ResponseId),
+        strcat("span/", _ResourceId, "/", NodeKey))
+| extend UsageState=iff(isempty(ResponseId) and UsageState == "reported", "response id not reported", UsageState),
+    UsageIssue=tostring(Properties["app.usage.issue"])
+);
+let canonical_responses = materialize(response_requests
+| extend UsageSignature=tostring(pack_array(StageRootKey, Deployment, Model, UsageState,
+    InputTokens, OutputTokens, CachedInputTokens, ReasoningTokens, McpToolCalls, McpToolErrors))
+| summarize SnapshotVariants=make_set(UsageSignature, 2), arg_max(TimeGenerated, *) by UsageKey
+| extend UsageState=iff(array_length(SnapshotVariants) > 1, "conflicting response snapshots", UsageState)
+);
+'''
+    mcp_events = '''let event_context = correlated_spans
+| project _ResourceId, OperationId, ParentId=Id, StageRootKey, Interaction,
+    WorkflowName, WorkflowId, WorkflowStep, CorrelationState;
+let mcp_events = materialize(AppTraces
+| where TimeGenerated > ago(6h) and OperationId in (run_operations)
+| where Message in ("mcp.approval.auto_approved", "mcp.tool.error", "sentinel.mcp_tool_error")
+| extend EventId=tostring(Properties["app.mcp.event.id"])
+| extend EventKey=strcat(_ResourceId, "/", OperationId, "/", ParentId, "/",
+    iff(isnotempty(EventId), EventId, strcat(TimeGenerated, "/", Message, "/", tostring(Properties))))
+| summarize arg_max(TimeGenerated, *) by EventKey
+| join kind=leftouter (event_context) on _ResourceId, OperationId, ParentId
+| extend Interaction=coalesce(Interaction, "unmatched / event"),
+    CorrelationState=coalesce(CorrelationState, "unmatched span"),
+    ApprovalRound=tolong(Properties["app.approval.round"]),
+    ApprovedRequests=tolong(Properties["app.approval.count"]),
+    ResponseId=tostring(Properties["app.response.id"]),
+    ToolCallId=tostring(Properties["app.mcp.call.id"]),
+    ToolName=tostring(Properties["app.mcp.tool.name"]),
+    ToolStatus=tostring(Properties["app.mcp.tool.status"]),
+    Server=tostring(Properties["app.mcp.server"])
+);
 '''
     queries = {
         "coverage": scope + '''correlated_spans
@@ -297,6 +353,61 @@ correlated_spans
 | order by FirstSeen asc
 | take {DETAIL_LIMIT}
 ''',
+        "usage": scope + responses + '''canonical_responses
+| project TimeGenerated, UsageKey, Interaction, WorkflowName, WorkflowStep, CorrelationState,
+    Deployment, Model, ResponseId, ResponseStatus, Success, UsageState, UsageIssue,
+    InputTokens, OutputTokens, CachedInputTokens, ReasoningTokens,
+    OperationId, SpanId=Id, ResourceId=_ResourceId
+| order by TimeGenerated asc, UsageKey asc
+''',
+        "mcp": scope + responses + mcp_events + '''let request_summary = response_requests
+| where isnotempty(StageRootKey)
+| summarize Requests=count(), FailedRequests=countif(Success == false),
+    UnsuccessfulResponses=countif(ResponseStatus in ("failed", "incomplete", "cancelled")),
+    arg_max(TimeGenerated, ResponseStatus, ResponseId) by StageRootKey
+| project StageRootKey, Requests, FailedRequests, UnsuccessfulResponses,
+    LatestResponseStatus=ResponseStatus, LatestResponseId=ResponseId;
+let tool_summary = canonical_responses
+| where isnotempty(StageRootKey)
+| summarize CanonicalResponses=count(), McpReportedResponses=countif(isnotnull(McpToolCalls)),
+    ReportedToolCalls=sum(McpToolCalls), ReportedToolErrors=sum(McpToolErrors) by StageRootKey;
+let event_summary = mcp_events
+| where isnotempty(StageRootKey)
+| summarize ApprovalRounds=countif(Message == "mcp.approval.auto_approved"),
+    ApprovedRequests=sumif(ApprovedRequests, Message == "mcp.approval.auto_approved"),
+    ApprovalCountMissing=countif(Message == "mcp.approval.auto_approved" and isnull(ApprovedRequests)),
+    ToolErrorEvents=countif(Message in ("mcp.tool.error", "sentinel.mcp_tool_error")) by StageRootKey;
+correlated_spans
+| where IsNotebookRoot and RootInteraction in ("story", "facts", "sentinel")
+| join kind=leftouter (request_summary) on StageRootKey
+| join kind=leftouter (tool_summary) on StageRootKey
+| join kind=leftouter (event_summary) on StageRootKey
+| project TimeGenerated, Interaction=RootInteraction, WorkflowName, WorkflowId, WorkflowStep,
+    FinalStageOutcome=coalesce(tostring(Properties["app.workflow.step.status"]), "not recorded"),
+    LatestResponseStatus=coalesce(LatestResponseStatus, "not recorded"), LatestResponseId,
+    Requests=coalesce(Requests, 0), FailedRequests=coalesce(FailedRequests, 0),
+    UnsuccessfulResponses=coalesce(UnsuccessfulResponses, 0),
+    ReportedToolCalls=coalesce(ReportedToolCalls, 0), ReportedToolErrors=coalesce(ReportedToolErrors, 0),
+    MissingMcpMetadata=coalesce(CanonicalResponses, 0) - coalesce(McpReportedResponses, 0),
+    ApprovalRounds=coalesce(ApprovalRounds, 0), ApprovedRequests=coalesce(ApprovedRequests, 0),
+    ApprovalCountMissing=coalesce(ApprovalCountMissing, 0), ToolErrorEvents=coalesce(ToolErrorEvents, 0),
+    OperationId, SpanId=Id
+| order by TimeGenerated asc, OperationId asc, SpanId asc
+''',
+        "mcp_events": scope + mcp_events + '''mcp_events
+| project TimeGenerated, Interaction, WorkflowName, WorkflowStep, CorrelationState,
+    Event=Message, ResponseId, ToolCallId, ToolName, ToolStatus, Server, ApprovalRound, ApprovedRequests,
+    OperationId, ParentId, ResourceId=_ResourceId'''
+        + (f''',
+    ErrorDetailPreview=substring(coalesce(tostring(Properties["app.mcp.error.detail"]),
+        tostring(Properties["app.sentinel.error.details"])), 0, {PREVIEW_LIMIT}),
+    DetailTruncated=coalesce(tobool(Properties["app.mcp.error.detail_truncated"]), false)
+        or strlen(tostring(Properties["app.sentinel.error.details"])) > {PREVIEW_LIMIT}'''
+           if include_content else "")
+        + f'''
+| order by TimeGenerated asc, OperationId asc, ParentId asc
+| take {DETAIL_LIMIT}
+''',
     }
     return {name: query.strip() for name, query in queries.items()}
 
@@ -392,7 +503,96 @@ def _frame(body: str) -> str:
 </style>''' + body + "</section>"
 
 
-def render_failure_report(run_id: str, issues: list[str], failures: list[Row], exceptions: list[Row]) -> str:
+def _validate_content_policy(content_recording_enabled: bool, show_content: bool) -> None:
+    if not isinstance(content_recording_enabled, bool) or not isinstance(show_content, bool):
+        raise TypeError("content_recording_enabled and show_content must be booleans.")
+    if show_content and not content_recording_enabled:
+        raise ValueError("Message previews require the notebook content-recording policy to be enabled.")
+
+
+def _response_diagnostics(
+    results: dict[str, list[Row]], pricing: Mapping[str, TokenPricing], *, show_content: bool,
+) -> str:
+    summaries, responses = price_response_usage(results["usage"], pricing)
+    body = """<h3>Response token usage and estimated cost</h3>
+<p>Only the notebook's explicit Responses request spans supply usage. SDK/model/transport spans
+and content snapshots are not added to these totals. Response IDs are deduplicated per resource/host;
+requests without a response ID remain separate trace/span records and are not priced.
+Conflicting snapshots are explicitly unpriced. Cached input is part of input tokens;
+reasoning is part of output tokens, not an additional charge.</p>"""
+    body += f"<p>{len(responses)} canonical response/request records; totals use all records, not just the first {DETAIL_LIMIT} displayed.</p>"
+    if not pricing:
+        body += "<p><strong>Pricing not configured.</strong> Set NOTEBOOK_MODEL_PRICING_JSON to your verified deployment/model rates per million tokens and rerun Section 6. Missing prices are not zero cost.</p>"
+    body += """<p>Estimates use supplied rates at report time, with an exact deployment match preferred
+over an exact response-model match. No Azure billing lookup or currency conversion is performed.
+Missing/invalid usage, absent cache details, and missing rates remain unpriced.
+A partial estimate is only the known subtotal, not the run's total cost.
+Tool charges, special cache-write charges, provisioned capacity, storage, taxes and other charges are excluded.</p>"""
+    body += _table(summaries, [
+        "Interaction", "Deployment", "Model", "ResponseRecords", "UsageReported", "UsageMissing",
+        "KnownInputTokens", "KnownOutputTokens", "KnownCachedInputTokens", "KnownReasoningTokens",
+        "CachedUsageMissing", "ReasoningUsageMissing", "Currency", "EstimatedCost",
+        "PricedResponses", "UnpricedResponses", "EstimateCoverage",
+    ])
+    if len(summaries) > DETAIL_LIMIT:
+        body += f"<p>Showing {DETAIL_LIMIT} of {len(summaries)} summary groups; no cross-currency grand total is implied.</p>"
+    body += _section("Configured token rates (per million tokens)", [
+        {"PricingKey": name, "Currency": rates.currency, "InputRate": rates.input_per_million,
+         "CachedInputRate": rates.cached_input_per_million, "OutputRate": rates.output_per_million,
+         "Source": rates.source}
+        for name, rates in pricing.items()
+    ], ["PricingKey", "Currency", "InputRate", "CachedInputRate", "OutputRate", "Source"])
+    body += _section("Canonical response accounting (up to 200 records)", responses, [
+        "TimeGenerated", "Interaction", "WorkflowStep", "Deployment", "Model", "ResponseId",
+        "ResponseStatus", "Success", "UsageState", "UsageIssue", "InputTokens", "OutputTokens",
+        "CachedInputTokens", "ReasoningTokens", "PricingKey", "Currency", "EstimatedCost", "CostState",
+        "OperationId", "SpanId",
+    ])
+    body += """<h3>MCP approvals, tool errors and final outcomes</h3>
+<p>Requests counts explicit Responses API invocations, including approval continuations;
+it does not count each SDK-internal HTTP retry. Failed requests remain visible beside the latest
+response and final executor outcome. FailedRequests counts SDK invocations that raised;
+UnsuccessfulResponses counts returned failed/incomplete/cancelled responses even with HTTP 200.
+Reported tool counts describe MCP items returned by Responses,
+not independent measurements of remote tool execution. Missing MCP metadata is not zero tool use.</p>"""
+    body += _table(results["mcp"], [
+        "Interaction", "WorkflowName", "WorkflowId", "FinalStageOutcome", "LatestResponseStatus",
+        "Requests", "FailedRequests", "UnsuccessfulResponses", "ApprovalRounds", "ApprovedRequests", "ApprovalCountMissing",
+        "ReportedToolCalls", "ReportedToolErrors", "MissingMcpMetadata", "ToolErrorEvents",
+        "LatestResponseId", "OperationId", "SpanId",
+    ])
+    body += """<p>Approval rounds count approval events; approved requests sum their request counts.
+ToolErrorEvents can include both individual tool errors and Sentinel summary events, so it is not
+a distinct-tool-failure count. Events export with spans to AppTraces even with log collection disabled.
+They join to their exact resource/trace/parent span before stage attribution. Unmatched events stay visible.
+The strict whole-run failure gate is unchanged: an eventual successful outcome does not erase earlier failures.
+Ingestion is asynchronous; absent events are not proof that a remote tool ran without errors.</p>"""
+    columns = [
+        "TimeGenerated", "Interaction", "WorkflowStep", "Event", "Server", "ToolName", "ToolStatus",
+        "ApprovalRound", "ApprovedRequests", "ResponseId", "ToolCallId", "CorrelationState",
+        "OperationId", "ParentId",
+    ]
+    events = results["mcp_events"]
+    if show_content:
+        columns += ["ErrorDetailPreview", "DetailTruncated"]
+        events = [
+            dict(row, ErrorDetailPreview=str(row["ErrorDetailPreview"])[:PREVIEW_LIMIT])
+            for row in events[:DETAIL_LIMIT]
+        ]
+        body += "<p><strong>Sensitive MCP error previews enabled:</strong> at most 1,200 characters per event; previews are saved in notebook outputs.</p>"
+    else:
+        body += "<p>MCP error payloads are not requested or displayed. Bounded previews require both content recording and SHOW_GENAI_CONTENT.</p>"
+    body += _section("MCP event evidence (up to 200 events)", events, columns)
+    return body
+
+
+def render_failure_report(
+    run_id: str, issues: list[str], failures: list[Row], exceptions: list[Row], *,
+    diagnostics: dict[str, list[Row]] | None = None,
+    model_pricing: Mapping[str, TokenPricing] | None = None,
+    content_recording_enabled: bool = False, show_content: bool = False,
+) -> str:
+    _validate_content_policy(content_recording_enabled, show_content)
     body = f"<h2>FAIL - current-run telemetry</h2><p>Run: <code>{escape(run_id)}</code></p>"
     body += "<ul>" + "".join(f"<li>{escape(issue)}</li>" for issue in issues) + "</ul>"
     body += """<p>One failed call can mark several parent/child spans as failed.
@@ -407,6 +607,10 @@ erase failures. For a clean run, restart the kernel and run the runtime cells, s
     body += _section("Correlated exception details (up to 200 groups; messages capped at 1,200 characters)", exceptions, [
         "FirstSeen", "ExceptionType", "Message", "Occurrences", "OperationId", "ParentId",
     ])
+    if diagnostics is not None:
+        body += _response_diagnostics(
+            diagnostics, model_pricing if model_pricing is not None else {}, show_content=show_content,
+        )
     return _frame(body)
 
 
@@ -414,14 +618,12 @@ def render_observability_report(
     run_id: str, workspace_id: str, coverage: Row, results: dict[str, list[Row]],
     queries: dict[str, str], expected_interactions: set[str], *,
     content_recording_enabled: bool, show_content: bool = False,
+    model_pricing: Mapping[str, TokenPricing] | None = None,
 ) -> str:
-    if not isinstance(content_recording_enabled, bool) or not isinstance(show_content, bool):
-        raise TypeError("content_recording_enabled and show_content must be booleans.")
+    _validate_content_policy(content_recording_enabled, show_content)
     issues = coverage_issues(coverage, expected_interactions)
     if issues:
         raise ValueError("Cannot render a passing report: " + " ".join(issues))
-    if show_content and not content_recording_enabled:
-        raise ValueError("Message previews require the notebook content-recording policy to be enabled.")
     content = results["content_coverage"][0]
     missing_content = expected_interactions - (
         set(content["InputInteractions"]) & set(content["OutputInteractions"])
@@ -518,6 +720,9 @@ Client and service snapshots can repeat conversation history: do not sum them as
     body += _section("Correlated exceptions (up to 200 groups; potentially sensitive messages)", results["exceptions"], [
         "FirstSeen", "ExceptionType", "Message", "Occurrences", "OperationId", "ParentId",
     ])
+    body += _response_diagnostics(
+        results, model_pricing if model_pricing is not None else {}, show_content=show_content,
+    )
     body += """<h3>5. Reproduce and explain the evidence</h3>
 <p>OperationId = TraceId groups a distributed trace, which can include several interactions;
 SpanId identifies one operation within it. ParentId ancestry (at most 64 edges) determines stage attribution,

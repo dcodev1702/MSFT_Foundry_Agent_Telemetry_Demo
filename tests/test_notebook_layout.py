@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "zolab-ai-agent-demo-win11.ipynb"
-MODULES = ("agent_endpoints", "observability", "workflow")
+MODULES = ("agent_endpoints", "observability", "response_observability", "workflow")
 PROFILES = (
     "requirements-notebook.txt", "requirements-notebook-shared.txt",
     "requirements-notebook-validation.txt",

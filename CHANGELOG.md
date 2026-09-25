@@ -8,6 +8,22 @@ formatting edits, and notebook-output refreshes are consolidated. Each
 `## YYYY-MM-DD` heading covers one commit day, with related change groups nested
 under `###` topic headings. Local stash snapshots are excluded.
 
+## 2026-09-19
+
+### Response usage, cost estimates and MCP outcomes
+
+- Enrich existing notebook Responses spans with reported token usage and
+  response/model/status metadata, without changing Foundry calls, MAF execution,
+  prompts, approval decisions or persistence.
+- Add canonical response accounting and decimal cost estimates using explicit
+  deployment/model rates. Deduplicate response IDs, avoid nested-span totals,
+  keep cached/reasoning tokens as subsets, and label missing/partial estimates.
+- Add MCP approval/tool-error event evidence, request failures, unsuccessful
+  returned responses and final executor outcomes to passing and failing reports.
+  Preserve exact-parent correlation, sensitive-payload controls and strict gates.
+- Retain the existing latency views and native Azure Monitor pipeline; add no
+  OpenLLMetry dependency, exporter or agent execution during report refresh.
+
 ## 2026-09-18
 
 ### Organized notebook support files

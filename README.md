@@ -33,6 +33,7 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
    - 📊 **Application Insights** — request/dependency traces
    - 🔍 **Microsoft Foundry** — agent execution traces
    - 📡 **Log Analytics** — span health in `AppDependencies`, conversation/tool content in `AppGenAIContent`, and correlated exception drill-downs
+   - **Response accounting and MCP outcomes** — input/output, cached input and reasoning tokens; optional estimates using your supplied prices; approvals, tool errors, request failures and final stage outcomes. See [configuration and interpretation](docs/observability.md#response-usage-cost-estimates-and-mcp-outcomes).
 
 On Windows, Section 1 installs [requirements-notebook.txt](requirements/requirements-notebook.txt) and runs `pip check`. If SDKs were already imported before updating, restart the kernel and rerun from the beginning. The matrix below applies to the Windows notebook only; the macOS notebook and standalone [Agent Framework SDK PoC](agent-framework-demo/README-agent-framework-sdk-poc.md) have separate setup instructions.
 
@@ -46,6 +47,7 @@ notebook_support/
   __init__.py
   agent_endpoints.py
   observability.py
+  response_observability.py
   workflow.py
 requirements/
   requirements-notebook.txt
@@ -58,8 +60,9 @@ docs/
 ```
 
 - [notebook_support](notebook_support) is a Python package. Notebook and test
-  imports use `notebook_support.agent_endpoints`, `notebook_support.observability`
-  and `notebook_support.workflow`; no `sys.path` workaround is needed.
+  imports use `notebook_support.agent_endpoints`, `notebook_support.observability`,
+  `notebook_support.response_observability` and `notebook_support.workflow`;
+  no `sys.path` workaround is needed.
 - [requirements](requirements) contains the root notebook's dependency profiles
   and shared constraints. Package versions are unchanged, and `-r`/`-c` includes
   remain relative to their requirement files.

@@ -24,6 +24,7 @@ from notebook_support.agent_endpoints import (
     prepare_backend_agent, response_options, responses_url, sync_agent_version,
 )
 from notebook_support.observability import build_observability_queries
+from notebook_support.response_observability import record_response_observability
 
 
 NOTEBOOK = Path(__file__).resolve().parents[1] / "zolab-ai-agent-demo-win11.ipynb"
@@ -58,6 +59,9 @@ class RecordingSpan:
     def set_attribute(self, name, value):
         self.attributes[name] = value
 
+    def set_attributes(self, attributes):
+        self.attributes.update(attributes)
+
     def add_event(self, *args):
         pass
 
@@ -76,6 +80,7 @@ def response(text="", approvals=(), status="completed"):
         output=[SimpleNamespace(type="mcp_approval_request", id=value) for value in approvals],
         error=None,
         model="test-model",
+        usage=None,
     )
 
 
@@ -96,6 +101,7 @@ class ResponseValidationTests(unittest.TestCase):
             "tracer": SimpleNamespace(start_as_current_span=lambda *args, **kwargs: self.span),
             "SpanKind": SpanKind, "Status": Status, "StatusCode": StatusCode,
             "agent_runtime": AgentRuntimeConfig(mode="project"), "response_options": response_options,
+            "record_response_observability": record_response_observability,
         }
         self.scope = load_functions(
             "2692d274",
@@ -190,6 +196,8 @@ class SentinelCorrelationTests(unittest.TestCase):
             "StatusCode": StatusCode, "urlparse": urlparse,
             "otel_context": context, "context": context.get_current(),
             "sentinel_agent_display_name": "test-sentinel",
+            "model_name": "test-model", "content_recording_enabled": False,
+            "record_response_observability": record_response_observability,
             "sentinel_agent_reference_payload": {},
             "conversation": SimpleNamespace(id="conversation-test"),
             "openai_client": SimpleNamespace(

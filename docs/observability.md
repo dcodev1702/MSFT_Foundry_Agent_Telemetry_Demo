@@ -152,6 +152,113 @@ Historical run evidence below retains its original role and version. Queries or
 dashboards hardcoded to the old `foundry-agent-framework-demo` service name must
 include the new name to display subsequent runs.
 
+### Response Usage, Cost Estimates, and MCP Outcomes
+
+Section 6 now includes two additional diagnostic sections on both passing and
+failing reports. The Foundry/MAF workflow, prompts, approvals, persistence,
+exporters and latency analysis are unchanged. No OpenLLMetry package is added.
+The telemetry service version for these additions is `2026.09.19`.
+
+[response_observability.py](../notebook_support/response_observability.py)
+enriches the **existing explicit Responses request span**, without adding spans
+or changing the returned response. It records the response ID/model/status,
+deployment name, input/output tokens, and reported cached-input/reasoning
+subtotals. It also records counts of MCP call items and unsuccessful tool items;
+individual tool-error events include identifiers and status. Missing usage and
+invalid counts are explicit diagnostics, not zero tokens or new agent failures.
+Missing MCP output metadata is not interpreted as zero tool use.
+
+#### Token accounting and pricing
+
+- `usage` selects only notebook Responses dependency spans, not native model,
+  workflow, transport or content records. Each response ID is counted once per
+  resource/host. A request without a response ID uses its trace/span identity
+  and remains unpriced. Conflicting snapshots are flagged and unpriced.
+- Totals use **all** returned canonical rows; the detail table displays at most
+  200. Cached input is a subset of input tokens, and reasoning is a subset of
+  output tokens. Neither is added a second time.
+- Prices are never guessed or fetched automatically. Set
+  `NOTEBOOK_MODEL_PRICING_JSON` in the notebook kernel before running Section 6.
+  Keys are exact deployment names or exact returned model names; deployment
+  matches take precedence. Rates apply at report time, not as a reconstructed
+  historical billing record.
+
+The following uses **synthetic regression-test rates, not prices for any Azure
+model**. Replace the key, currency, rates and provenance with verified values
+for your deployment/region/billing arrangement before using it:
+
+```python
+import json
+import os
+
+os.environ["NOTEBOOK_MODEL_PRICING_JSON"] = json.dumps({
+    "your-deployment": {
+        "currency": "USD",
+        "input_per_million": "2",
+        "cached_input_per_million": "0.5",
+        "output_per_million": "8",
+        "source": "Replace with your verified rate card and date",
+    }
+})
+```
+
+Currency and ordinary input/output rates are required for each configured
+entry. Cached-input price is optional only when no cached tokens were used.
+Absent cache usage is unknown, not zero. Decimal arithmetic computes:
+
+```text
+((input - cached_input) * input_rate
+ + cached_input * cached_input_rate
+ + output * output_rate) / 1,000,000
+```
+
+For example, the synthetic rates above yield `0.0025 USD` for 1,000 input
+tokens, including 200 cached tokens, and 100 output tokens, including any
+reasoning tokens. Explicit zero rates are valid. Negative/non-finite rates,
+duplicate JSON keys, unknown fields and malformed currency/configuration fail
+with an actionable error.
+
+Unknown models, missing rates and missing/invalid usage remain **unpriced**.
+The report displays priced/unpriced record counts and labels partial amounts
+as **known subtotals**, not the full run's cost. Currencies are never summed
+together. Estimates exclude tool charges, special cache-write charges,
+provisioned capacity, storage, taxes and other non-token charges; they are not
+an Azure invoice.
+
+#### MCP outcomes and event evidence
+
+- `mcp` reports each correlated story/facts/Sentinel executor's final outcome
+  beside Responses requests, failed requests, returned unsuccessful responses,
+  latest response status, approval rounds, approved request counts and reported
+  MCP tool items/errors. A round can approve more than one request.
+- `FailedRequests` means explicit SDK invocations that raised; it does not count
+  every SDK-internal HTTP retry. `UnsuccessfulResponses` separately counts
+  `failed`, `incomplete` and `cancelled` responses, even with HTTP 200.
+  Tool errors include error payloads and failed/incomplete MCP item statuses.
+  These are reported output items, not newly instrumented remote tool executions.
+- Generic span events are exported by Azure Monitor's **trace exporter** to
+  `AppTraces`, so `OTEL_LOGS_EXPORTER=none` is retained. `mcp_events` selects
+  `mcp.approval.auto_approved`, `mcp.tool.error` and `sentinel.mcp_tool_error`;
+  deduplicates event identities; and joins each event to its exact
+  resource/trace/parent span before assigning a stage. Unmatched events remain
+  visible. Individual errors and Sentinel summaries can both be present;
+  diagnostic event counts are not distinct-tool-failure counts.
+- New error-payload, tool-name and server-label capture follows
+  `content_recording_enabled`; identifiers, counts and status remain available.
+  Querying and
+  displaying those payloads additionally requires `SHOW_GENAI_CONTENT=True`.
+  Previews are capped at 1,200 characters, HTML-escaped and saved in notebook
+  outputs. Existing exception/console-output caveats still apply.
+- A successful final outcome **does not erase earlier failed requests**. Both
+  sections are included in failure/coverage-timeout reports, and the strict
+  whole-run failure gate remains unchanged.
+
+Restart the kernel and rerun the runtime cells once to emit the new metadata.
+Thereafter, rerun only Section 6 to refresh ingestion or change price estimates:
+it does not invoke agents. Older spans remain visible as not captured/unpriced,
+with missing MCP metadata identified. Event ingestion is asynchronous; missing
+events do not prove that a remote tool completed without errors.
+
 ### GenAI Content and the Section 6 Report
 
 [notebook_support/observability.py](../notebook_support/observability.py) owns the query builders and
@@ -167,6 +274,8 @@ change versions, install packages or create additional demo spans.
 | How long did the workflow take? | `workflows`: the native `workflow.run` span's own `DurationMs`, with workflow name/ID, executor steps/counts/failures and correlation state. Never the sum of nested durations. |
 | What messages, instructions and tool payloads were captured? | `AppGenAIContent`: content snapshots, metadata and optional bounded previews. These are not additional spans or distinct agent calls. |
 | What failed? | Failed dependency spans plus `AppExceptions`, grouped by trace and parent span; exception messages are bounded but may contain sensitive data. |
+| What usage and estimated token cost did responses report? | `usage`: canonical explicit Responses request records, never sums of nested native/model spans. Local decimal estimates use explicitly supplied prices; unknowns and partial totals remain visible. |
+| What happened with MCP approvals and tools? | `mcp` and `mcp_events`: stage outcomes and request attempts plus exact-parent `AppTraces` event evidence, with payload previews controlled separately. |
 | How many logical calls and how long did they take? | The 15-minute trend counts only native executor spans explicitly tagged `app.interaction.root=true` for story/facts/Sentinel. It excludes nested manual/Foundry `invoke_agent` and Responses spans; P95 for a single executor is that executor's duration. |
 
 #### Correlation and cardinality
