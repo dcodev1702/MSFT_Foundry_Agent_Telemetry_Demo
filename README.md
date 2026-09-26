@@ -165,6 +165,20 @@ callbacks, and cover Linux bootstrap, kernel isolation, authentication errors,
 dependency versions, and unchanged workflow/telemetry behavior. They do not
 execute paid model calls or verify live Azure permissions and telemetry ingestion.
 
+### Linux Tool-Content Tracing
+
+Section 3.1 enables `OTEL_LOG_TOOL_CONTENT=1` by default for this demo. This
+notebook-level option adds correlated MCP observation spans for returned tool
+calls, approval requests, and tool discovery in both the main/Learn and Sentinel
+response paths. It does not require SDK upgrades or an additional exporter.
+
+Section 6 includes tool-content coverage and optional arguments/result/definition
+previews. Observation spans are not measurements of remote tool execution.
+The master content policy still applies; `0` disables the additional observations,
+and `SHOW_GENAI_CONTENT` controls display. See the
+[additions table and complete controls](docs/observability.md#linux-mcp-tool-content-capture).
+Restart the kernel and rerun from **Confirm Existing Deployment** after this update.
+
 ### Notebook Support Layout
 
 The notebooks stay at the repository root; run their kernels and the commands

@@ -1,4 +1,4 @@
-"""Run- and stage-scoped KQL and HTML reporting for the MAF Windows notebook."""
+"""Run- and stage-scoped KQL and HTML reporting for the MAF notebooks."""
 
 import json
 from collections.abc import Mapping
@@ -14,10 +14,14 @@ DETAIL_LIMIT = 200
 PREVIEW_LIMIT = 1200
 
 
-def build_observability_queries(run_id: str, *, include_content: bool = False) -> dict[str, str]:
+def build_observability_queries(
+    run_id: str, *, include_content: bool = False, include_tool_content: bool = False,
+) -> dict[str, str]:
     run_id = str(UUID(run_id))
     if not isinstance(include_content, bool):
         raise TypeError("include_content must be a boolean.")
+    if not isinstance(include_tool_content, bool):
+        raise TypeError("include_tool_content must be a boolean.")
     scope = f'''let run_id = "{run_id}";
 let run_operations = AppDependencies
 | where TimeGenerated > ago(6h)
@@ -46,10 +50,11 @@ let span_context = materialize(spans
     TaggedStep=iff(IsRunTagged, tostring(Properties["app.workflow.step"]), ""),
     IsResponseDependency=Name endswith "/responses" and GenAiOperation == "responses.create",
     IsGenAiSpan=Name == "chat" or Name startswith "chat " or GenAiOperation in ("chat", "generate_content", "text_completion"),
-    IsToolSpan=Name == "execute_tool" or Name startswith "execute_tool " or GenAiOperation == "execute_tool"
+    IsToolSpan=Name == "execute_tool" or Name startswith "execute_tool " or GenAiOperation == "execute_tool",
+    IsToolObservation=coalesce(tobool(Properties["app.tool.observation"]), false)
 | extend IsWorkflowPlumbing=Name startswith "workflow." or Name startswith "edge." or Name startswith "message."
         or (Name startswith "executor." and not(IsNotebookRoot)),
-    IsCriticalSpan=IsNotebookRoot or IsExecutor or IsResponseDependency or IsGenAiSpan or IsToolSpan
+    IsCriticalSpan=IsNotebookRoot or IsExecutor or IsResponseDependency or IsGenAiSpan or IsToolSpan or IsToolObservation
         or Name endswith "/responses" or Name == "responses" or Name startswith "responses.create"
         or GenAiOperation in ("responses", "responses.create", "invoke_agent")
         or Name == "invoke_agent" or Name startswith "invoke_agent "
@@ -140,7 +145,8 @@ let correlated_spans = materialize(span_context
         IsCriticalSpan, "unmapped / critical", "workflow / setup"),
     SpanCategory=case(IsNotebookRoot and IsExecutor, "executor",
         IsWorkflowPlumbing or IsWorkflowRoot, "workflow / setup",
-        IsResponseDependency, "responses", IsGenAiSpan, "model", IsToolSpan, "tool", "dependency / setup")
+        IsResponseDependency, "responses", IsGenAiSpan, "model", IsToolObservation, "tool observation",
+        IsToolSpan, "tool", "dependency / setup")
 );
 '''
     content = '''let content_records = AppGenAIContent
@@ -409,6 +415,90 @@ correlated_spans
 | take {DETAIL_LIMIT}
 ''',
     }
+    if include_tool_content:
+        tool_content = '''let tool_payloads = content_records
+| summarize arg_max(TimeGenerated, *) by _ResourceId, TraceId, SpanId
+| project _ResourceId, TraceId, SpanId, ContentId=Id,
+    ToolCallArguments, ToolCallResult, ToolDefinitions;
+let tool_observations = materialize(correlated_spans
+| where IsToolObservation
+| join kind=leftouter (tool_payloads)
+    on _ResourceId, $left.OperationId == $right.TraceId, $left.Id == $right.SpanId
+| extend OutputItemId=tostring(Properties["app.tool.output_item.id"]),
+    ItemType=tostring(Properties["app.tool.output_item.type"]),
+    ResponseId=tostring(Properties["gen_ai.response.id"]),
+    ConversationId=tostring(Properties["gen_ai.conversation.id"]),
+    ToolCallId=tostring(Properties["gen_ai.tool.call.id"]),
+    ApprovalId=tostring(Properties["app.mcp.approval.id"]),
+    ToolName=tostring(Properties["gen_ai.tool.name"]),
+    Server=tostring(Properties["app.mcp.server"]),
+    ToolStatus=tostring(Properties["app.mcp.tool.status"]),
+    ReturnedError=coalesce(tobool(Properties["app.tool.returned_error"]), false),
+    ArgumentsReturned=coalesce(tobool(Properties["app.tool.arguments.present"]), false),
+    ResultReturned=coalesce(tobool(Properties["app.tool.result.present"]), false),
+    DefinitionsReturned=coalesce(tobool(Properties["app.tool.definitions.present"]), false),
+    ArgumentsCharacters=tolong(Properties["app.tool.arguments.characters"]),
+    ResultCharacters=tolong(Properties["app.tool.result.characters"]),
+    DefinitionsCharacters=tolong(Properties["app.tool.definitions.characters"])
+| extend PayloadState=case(
+    not(ArgumentsReturned or ResultReturned or DefinitionsReturned), "no payload returned",
+    coalesce(ArgumentsCharacters, 0) + coalesce(ResultCharacters, 0) + coalesce(DefinitionsCharacters, 0) == 0, "empty payload returned",
+    isempty(ContentId), "waiting / not recorded",
+    (ArgumentsReturned and strlen(ToolCallArguments) != ArgumentsCharacters)
+        or (ResultReturned and strlen(ToolCallResult) != ResultCharacters)
+        or (DefinitionsReturned and strlen(ToolDefinitions) != DefinitionsCharacters), "incomplete payload",
+    "available")
+);
+'''
+        tool_scope = scope + content + tool_content
+        queries["tool_content_coverage"] = tool_scope + '''let capture_requests = correlated_spans
+| where IsResponseDependency and (tostring(Properties["app.usage.source"]) == "notebook.responses"
+    or isnotnull(tobool(Properties["app.tool.content.enabled"])))
+| extend CaptureEnabled=tobool(Properties["app.tool.content.enabled"]),
+    ExpectedItems=tolong(Properties["app.tool.content.items"])
+| summarize Requests=count(), CaptureEnabledRequests=countif(CaptureEnabled == true),
+    CaptureDisabledRequests=countif(CaptureEnabled == false),
+    PolicyNotRecorded=countif(isnull(CaptureEnabled)),
+    OutputNotReported=countif(CaptureEnabled == true and isnull(ExpectedItems)),
+    ExpectedItems=sum(ExpectedItems) by StageRootKey;
+let observed_items = tool_observations
+| summarize ObservedItems=count(), McpCalls=countif(ItemType == "mcp_call"),
+    ApprovalRequests=countif(ItemType == "mcp_approval_request"), ToolLists=countif(ItemType == "mcp_list_tools"),
+    PayloadsAvailable=countif(PayloadState in ("available", "empty payload returned")),
+    WaitingContent=countif(PayloadState == "waiting / not recorded"),
+    IncompleteContent=countif(PayloadState == "incomplete payload"),
+    ReportedErrors=countif(ReturnedError) by StageRootKey;
+correlated_spans
+| where IsNotebookRoot and RootInteraction in ("story", "facts", "sentinel")
+| join kind=leftouter (capture_requests) on StageRootKey
+| join kind=leftouter (observed_items) on StageRootKey
+| project Interaction=RootInteraction, Requests=coalesce(Requests, 0),
+    CaptureEnabledRequests=coalesce(CaptureEnabledRequests, 0),
+    CaptureDisabledRequests=coalesce(CaptureDisabledRequests, 0), PolicyNotRecorded=coalesce(PolicyNotRecorded, 0),
+    OutputNotReported=coalesce(OutputNotReported, 0),
+    ExpectedItems=coalesce(ExpectedItems, 0), ObservedItems=coalesce(ObservedItems, 0),
+    McpCalls=coalesce(McpCalls, 0), ApprovalRequests=coalesce(ApprovalRequests, 0), ToolLists=coalesce(ToolLists, 0),
+    PayloadsAvailable=coalesce(PayloadsAvailable, 0), WaitingContent=coalesce(WaitingContent, 0),
+    IncompleteContent=coalesce(IncompleteContent, 0), ReportedErrors=coalesce(ReportedErrors, 0),
+    OperationId, SpanId=Id
+| order by Interaction asc
+'''
+        queries["tool_content"] = tool_scope + '''tool_observations
+| project TimeGenerated, Interaction, WorkflowName, WorkflowId, WorkflowStep, CorrelationState,
+    ItemType, ToolName, Server, ToolStatus, ReturnedError, PayloadState,
+    ResponseId, ConversationId, OutputItemId, ToolCallId, ApprovalId,
+    ArgumentsReturned, ResultReturned, DefinitionsReturned,
+    ArgumentsCharacters, ResultCharacters, DefinitionsCharacters,
+    OperationId, SpanId=Id, ParentId, ContentId, ResourceId=_ResourceId'''
+        if include_content:
+            queries["tool_content"] += f''',
+    ArgumentsPreview=substring(ToolCallArguments, 0, {PREVIEW_LIMIT}),
+    ResultPreview=substring(ToolCallResult, 0, {PREVIEW_LIMIT}),
+    DefinitionsPreview=substring(ToolDefinitions, 0, {PREVIEW_LIMIT})'''
+        queries["tool_content"] += f'''
+| order by TimeGenerated asc, OperationId asc, SpanId asc
+| take {DETAIL_LIMIT}
+'''
     return {name: query.strip() for name, query in queries.items()}
 
 
@@ -583,6 +673,51 @@ Ingestion is asynchronous; absent events are not proof that a remote tool ran wi
     else:
         body += "<p>MCP error payloads are not requested or displayed. Bounded previews require both content recording and SHOW_GENAI_CONTENT.</p>"
     body += _section("MCP event evidence (up to 200 events)", events, columns)
+    if {"tool_content", "tool_content_coverage"} & results.keys():
+        body += """<h3>Tool-content observations (OTEL_LOG_TOOL_CONTENT)</h3>
+<p>These are MCP output items observed after each Responses request, including
+approval continuations. They are not additional tool invocations, measured remote
+tool durations, or extra token usage. Calls, approval requests, and tool discovery
+are counted separately. A returned tool error does not mean the local observation
+failed; the existing response/executor failure policy is unchanged.</p>
+<p>Coverage uses all observation spans. ExpectedItems comes from the request span;
+fewer ObservedItems can mean ingestion is pending. CaptureDisabledRequests records
+an explicit opt-out, while PolicyNotRecorded identifies older/missing instrumentation.
+OutputNotReported means no output list was returned (including failed requests), not zero tool use.
+Tool payload ingestion is separate from span-health PASS; absent results are not
+invented and an empty returned string is distinct from an unavailable result.</p>"""
+        body += _table(results["tool_content_coverage"], [
+            "Interaction", "Requests", "CaptureEnabledRequests", "CaptureDisabledRequests", "PolicyNotRecorded", "OutputNotReported",
+            "ExpectedItems", "ObservedItems", "McpCalls", "ApprovalRequests", "ToolLists",
+            "PayloadsAvailable", "WaitingContent", "IncompleteContent", "ReportedErrors",
+        ])
+        tool_rows = results["tool_content"]
+        tool_columns = [
+            "TimeGenerated", "Interaction", "WorkflowStep", "ItemType", "ToolName", "Server",
+            "ToolStatus", "ReturnedError", "PayloadState", "ArgumentsReturned", "ResultReturned", "DefinitionsReturned",
+            "ArgumentsCharacters", "ResultCharacters", "DefinitionsCharacters",
+            "ResponseId", "ConversationId", "OutputItemId", "ToolCallId", "ApprovalId",
+            "CorrelationState", "OperationId", "SpanId", "ParentId", "ContentId",
+        ]
+        if show_content:
+            preview_columns = ["ArgumentsPreview", "ResultPreview", "DefinitionsPreview"]
+            visible_rows = []
+            for row in tool_rows[:DETAIL_LIMIT]:
+                previews = {}
+                for label in ("Arguments", "Result", "Definitions"):
+                    value = str(row[label + "Preview"])[:PREVIEW_LIMIT]
+                    if not row[label + "Returned"]:
+                        value = "not returned"
+                    elif row[label + "Characters"] == 0:
+                        value = "empty returned string"
+                    previews[label + "Preview"] = value
+                visible_rows.append(dict(row, **previews))
+            tool_rows = visible_rows
+            tool_columns += preview_columns
+            body += "<p>Tool previews show at most 1,200 characters per field. Returned text is submitted in the GenAI attributes; this Azure Monitor exporter caps each at 262,144 characters, and service limits still apply. Length differences are reported as incomplete payloads.</p>"
+        else:
+            body += "<p>Tool payload previews are not requested or displayed; enable SHOW_GENAI_CONTENT to view them.</p>"
+        body += _section("MCP tool content (up to 200 observations)", tool_rows, tool_columns)
     return body
 
 

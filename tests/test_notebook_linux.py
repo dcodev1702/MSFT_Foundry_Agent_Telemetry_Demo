@@ -51,7 +51,10 @@ class LinuxNotebookTests(unittest.TestCase):
     def test_foundry_workflows_and_telemetry_keep_the_original_behavior(self):
         original = json.loads((ROOT / "zolab-ai-agent-demo-win11.ipynb").read_text(encoding="utf-8"))
         linux = notebook_cells()
-        platform_cells = {"fcc00444", "04fb2ced", "a2c70b8c", "8b1659dd", "8330c10b"}
+        platform_cells = {
+            "fcc00444", "04fb2ced", "a2c70b8c", "8b1659dd", "8330c10b",
+            "3c78effc", "2692d274", "ef551c01", "6e3dcab6",
+        }
         self.assertEqual(set(linux), {cell["id"] for cell in original["cells"]})
         for cell in original["cells"]:
             if cell["cell_type"] == "code" and cell["id"] not in platform_cells:
@@ -66,6 +69,25 @@ class LinuxNotebookTests(unittest.TestCase):
                         self.assertEqual(calls[0], calls[1])
                     else:
                         self.assertEqual(linux[cell["id"]]["source"], cell["source"])
+
+    def test_tool_observation_additions_do_not_change_agent_calls_or_workflows(self):
+        original = json.loads((ROOT / "zolab-ai-agent-demo-win11.ipynb").read_text(encoding="utf-8"))
+        linux = notebook_cells()
+        for cell in original["cells"]:
+            if cell["id"] not in {"2692d274", "ef551c01"}:
+                continue
+            calls = []
+            for source in ("".join(cell["source"]), "".join(linux[cell["id"]]["source"])):
+                tree = ast.parse(source)
+                calls.append([
+                    ast.dump(node) for node in ast.walk(tree)
+                    if isinstance(node, ast.Call) and (
+                        isinstance(node.func, ast.Attribute) and ast.unparse(node.func) == "openai_client.responses.create"
+                        or isinstance(node.func, ast.Name) and node.func.id == "run_notebook_workflow"
+                    )
+                ])
+            self.assertTrue(calls[0])
+            self.assertEqual(calls[0], calls[1])
 
     def test_profiles_are_exact_and_use_linux_constraints_only(self):
         constraints = direct_pins(REQUIREMENTS / "constraints-notebook-linux.txt")

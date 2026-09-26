@@ -1,10 +1,14 @@
-# Windows Notebook Observability and Validation
+# Notebook Observability and Validation
 
 Run notebook kernels and shell examples from the repository root, not this
 documentation directory. Python helpers are in [notebook_support](../notebook_support)
 and dependency profiles are in [requirements](../requirements).
 
 This document describes Sections 3.1, 3.3, 5, 5.1 and 6 of the [Windows notebook](../zolab-ai-agent-demo-win11.ipynb). Dependency review date: **2026-09-18**. Microsoft Agent Framework (MAF) core 1.19.0 orchestrates the existing Azure AI Projects and Foundry Responses API calls; it does not replace those clients, endpoints or error/approval gates. OpenTelemetry resource identity and the Azure Monitor export path are retained.
+
+The [Linux notebook](../zolab-ai-agent-demo-linux.ipynb) shares that tracing path,
+with its [own dependency profile](../README.md#linux-dependency-matrix) and the
+[MCP tool-content observations](#linux-mcp-tool-content-capture) described below.
 
 The notebook exports client-side traces to Azure Monitor through the Foundry project's Application Insights connection. Foundry instrumentation supplies GenAI spans, while explicit notebook-side HTTP dependency spans preserve Service Map edges across transport-library changes.
 
@@ -258,6 +262,92 @@ Thereafter, rerun only Section 6 to refresh ingestion or change price estimates:
 it does not invoke agents. Older spans remain visible as not captured/unpriced,
 with missing MCP metadata identified. Event ingestion is asynchronous; missing
 events do not prove that a remote tool completed without errors.
+
+### Linux MCP Tool-Content Capture
+
+The Linux notebook supports **`OTEL_LOG_TOOL_CONTENT=1`** as a **notebook-level
+compatibility option**. The installed Azure AI Projects, MAF, and OpenTelemetry
+packages do not natively interpret that variable. No package upgrades or extra
+exporter are required.
+
+Section 3.1 uses `os.environ.setdefault("OTEL_LOG_TOOL_CONTENT", "1")`, enabling
+this demo by default while preserving an existing opt-out. Accepted values are
+`1`, `0`, `true`, and `false` (case-insensitive, ignoring surrounding whitespace).
+Invalid values fail before provider setup. The effective setting is included in
+the notebook's configuration fingerprint; changing it requires a kernel restart.
+
+| Place | Addition | Evidence and behavior |
+|---|---|---|
+| Section 3.1 | Tool-content policy and status banner | Shows the effective capture state and retains the existing provider, sampler, and native instrumentors. |
+| Section 5 | Capture after every story/Learn Responses request | Includes initial requests and each MCP approval continuation, attached to its exact request span. |
+| Section 5.1 | Same capture on the optional Sentinel path | Keeps the existing project connection, OAuth, KQL prompts, approval logic, and persistence. |
+| Shared response helper | `notebook.mcp.observe mcp_call` | Available arguments and results, tool/server/status, response/conversation/call/approval IDs, and returned-error state. |
+| Shared response helper | `notebook.mcp.observe mcp_approval_request` and `notebook.mcp.observe mcp_list_tools` | Approval arguments or discovered tool definitions; never fabricates a result for an approval request or a tool-call ID for discovery. |
+| Span events | `mcp.tool.content.observed` | Metadata-only observation event, exported to `AppTraces` by the existing trace exporter; raw payloads are not duplicated into the event. |
+| Section 6 | `tool_content_coverage` and `tool_content` queries | Uncapped coverage counts plus up to 200 observations with bounded optional payload previews, in both passing and failing reports. |
+| Tests | Real SDK item types, in-memory spans, and installed exporter conversion | Cover policy parsing, both response paths/continuations, exact parents, missing/empty results, limits, HTML escaping, and unchanged native behavior. |
+
+#### What is captured
+
+The helper processes only `mcp_call`, `mcp_approval_request`, and `mcp_list_tools`
+items actually returned in `response.output`. It uses these standard attributes:
+
+- `gen_ai.tool.call.arguments` for available tool arguments.
+- `gen_ai.tool.call.result` for an available returned result.
+- `gen_ai.tool.definitions` for the returned tool discovery list.
+- `gen_ai.tool.call.id`, `gen_ai.tool.name`, and `gen_ai.tool.type` where applicable.
+- `gen_ai.response.id`, `gen_ai.response.model`, and `gen_ai.conversation.id`.
+
+`app.tool.*` attributes identify the source, output item type/ID, presence and
+original character counts of each payload, and returned errors or failed/incomplete
+tool status. The request span records `app.tool.content.enabled`, its capture
+state, and the number of supported output items. A missing output list is
+reported explicitly, not interpreted as zero tool use. Both request wrappers
+stamp the effective policy before the SDK call, so failed requests retain
+capture-state evidence without inventing response items.
+
+Each observation is an **INTERNAL** child of the existing Responses request span
+with custom operation `observe_tool`. The observation duration measures local
+processing only: remote tool timings are unavailable in these output items.
+Do not add these spans to remote `execute_tool` counts, token usage, or billed
+tool invocations. Returned tool failures are recorded as metadata while the
+observation's span status describes local processing; existing response/executor
+failure semantics are not changed.
+
+The helper submits returned strings without application-side redaction or
+truncation. The pinned Azure Monitor exporter caps each standard GenAI content
+attribute at **262,144 characters**; service limits still apply. The
+[AppGenAIContent schema](https://learn.microsoft.com/azure/azure-monitor/reference/tables/appgenaicontent)
+stores these as `ToolCallArguments`, `ToolCallResult`, and `ToolDefinitions`.
+The report compares recorded lengths with the observation's original lengths
+and labels missing or incomplete payloads. A returned empty string is distinct
+from a result the service did not return.
+
+#### Capture and display switches
+
+| Setting | Effect |
+|---|---|
+| `OTEL_LOG_TOOL_CONTENT=1` and master content capture `true` | Enables the additional MCP observations and available payloads. |
+| `OTEL_LOG_TOOL_CONTENT=0` | Disables the additional observation spans. Native SDK message/tool capture still follows its existing master policy. |
+| `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=false` | Disables SDK message capture and the additional tool payload observations, even if the tool option is `1`. |
+| `SHOW_GENAI_CONTENT=True` | Queries/displays tool previews, up to 1,200 characters per field; this Linux demo already opts in. |
+| `SHOW_GENAI_CONTENT=False` | Queries/displays metadata and coverage only; captured content remains at the configured telemetry destination. |
+
+`OTEL_LOGS_EXPORTER` remains `none`: despite the option's name, no new log
+provider or OTLP collector is configured. Span events already export through
+Azure Monitor's trace pipeline. No application-level tool results are placed
+in baggage, workflow messages, or the request's HTTP headers.
+
+After updating, restart the kernel and rerun the runtime cells from **Confirm
+Existing Deployment** through Section 6; no package reinstall is needed.
+Subsequent Section 6 reruns are read-only: they do not invoke agents. Older
+requests show missing policy metadata; enabled requests with fewer observed
+items or missing content can indicate ingestion delay. Tool-content availability
+is separate from the span-health PASS gate.
+
+These changes were validated locally with SDK response models, both notebook
+request wrappers, an in-memory exporter, and the installed Azure exporter.
+This is not a claim that new live Azure tool calls or ingestion were executed.
 
 ### GenAI Content and the Section 6 Report
 

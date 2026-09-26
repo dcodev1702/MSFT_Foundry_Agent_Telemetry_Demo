@@ -1,6 +1,7 @@
-"""Metadata-only response accounting and explicit, user-supplied token pricing."""
+"""Response accounting, opt-in MCP content observations, and explicit token pricing."""
 
 import json
+import os
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -8,7 +9,8 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, TypeGuard
 
 from openai.types.responses import Response
-from opentelemetry.trace import Span
+from opentelemetry import trace
+from opentelemetry.trace import Span, SpanKind
 
 
 Row = dict[str, Any]
@@ -94,12 +96,110 @@ def _usage_problem(input_tokens: Any, output_tokens: Any, cached: Any, reasoning
     return ""
 
 
+def get_tool_content_recording_policy(
+    *, content_enabled: bool, environment: Mapping[str, str] | None = None,
+) -> bool:
+    """Apply the notebook's tool-content opt-in under its master content policy."""
+    if not isinstance(content_enabled, bool):
+        raise TypeError("content_enabled must be a boolean.")
+    environment = os.environ if environment is None else environment
+    value = environment.get("OTEL_LOG_TOOL_CONTENT", "0").strip().lower()
+    if value not in {"0", "1", "false", "true"}:
+        raise ValueError("OTEL_LOG_TOOL_CONTENT must be '0', '1', 'false', or 'true'.")
+    return content_enabled and value in {"1", "true"}
+
+
+def _record_tool_content(
+    parent: Span, response: Response, *, enabled: bool,
+    deployment: str, conversation_id: str | None,
+) -> None:
+    parent.set_attribute("app.tool.content.enabled", enabled)
+    if not enabled:
+        parent.set_attribute("app.tool.content.state", "disabled")
+        return
+    output = getattr(response, "output", None)
+    if output is None:
+        parent.set_attribute("app.tool.content.state", "response output not reported")
+        return
+    items = [item for item in output if item.type in {"mcp_call", "mcp_approval_request", "mcp_list_tools"}]
+    parent.set_attribute("app.tool.content.items", len(items))
+    parent.set_attribute(
+        "app.tool.content.state", "observed" if items else "no MCP items returned",
+    )
+    tracer = trace.get_tracer(__name__)
+    for item in items:
+        snapshot = item.model_dump(mode="json")
+        response_id = getattr(response, "id", None) or ""
+        error = snapshot.get("error")
+        status = snapshot.get("status") or {
+            "mcp_call": "not reported",
+            "mcp_approval_request": "approval requested",
+            "mcp_list_tools": "discovery returned",
+        }[item.type]
+        returned_error = (error is not None and error != "") or status in {"failed", "incomplete"}
+        attributes: dict[str, str | bool | int] = {
+            "app.tool.observation": True,
+            "app.tool.source": "responses.output",
+            "app.tool.timing": "client observation; remote duration unavailable",
+            "app.tool.output_item.type": item.type,
+            "app.tool.output_item.id": item.id,
+            "app.tool.returned_error": returned_error,
+            "gen_ai.operation.name": "observe_tool",
+            "gen_ai.response.id": response_id,
+            "app.model.deployment": deployment,
+            "app.mcp.server": item.server_label,
+            "app.mcp.tool.status": status,
+        }
+        if conversation_id:
+            attributes["gen_ai.conversation.id"] = conversation_id
+        model = getattr(response, "model", None)
+        if model:
+            attributes["gen_ai.response.model"] = model
+        if item.type == "mcp_call":
+            attributes["gen_ai.tool.call.id"] = item.id
+            if item.approval_request_id:
+                attributes["app.mcp.approval.id"] = item.approval_request_id
+        elif item.type == "mcp_approval_request":
+            attributes["app.mcp.approval.id"] = item.id
+        if item.type != "mcp_list_tools":
+            attributes["gen_ai.tool.name"] = item.name
+            attributes["gen_ai.tool.type"] = "extension"
+        for field, key, label in (
+            ("arguments", "gen_ai.tool.call.arguments", "arguments"),
+            ("output", "gen_ai.tool.call.result", "result"),
+            ("tools", "gen_ai.tool.definitions", "definitions"),
+        ):
+            value = snapshot.get(field)
+            attributes[f"app.tool.{label}.present"] = value is not None
+            if value is not None:
+                text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+                attributes[key] = text
+                attributes[f"app.tool.{label}.characters"] = len(text)
+        # These spans observe returned items, not the unobservable remote execution.
+        with tracer.start_as_current_span(
+            f"notebook.mcp.observe {item.type}",
+            context=trace.set_span_in_context(parent),
+            kind=SpanKind.INTERNAL,
+            attributes=attributes,
+        ) as observation:
+            observation.add_event("mcp.tool.content.observed", {
+                "app.mcp.event.id": f"{response_id}:{item.id}:content",
+                "app.response.id": response_id,
+                "app.tool.output_item.id": item.id,
+                "app.tool.output_item.type": item.type,
+                "app.tool.returned_error": returned_error,
+            })
+
+
 def record_response_observability(
     span: Span, response: Response, *, deployment: str, capture_content: bool,
+    capture_tool_content: bool | None = None, conversation_id: str | None = None,
 ) -> None:
     """Enrich the existing request span without changing the response or outcome."""
     if not isinstance(capture_content, bool):
         raise TypeError("capture_content must be a boolean.")
+    if capture_tool_content is not None and not isinstance(capture_tool_content, bool):
+        raise TypeError("capture_tool_content must be a boolean or None.")
     span.set_attributes({
         "app.usage.source": "notebook.responses",
         "app.model.deployment": deployment,
@@ -141,6 +241,12 @@ def record_response_observability(
         span.set_attributes({"app.mcp.tool_calls": tool_calls, "app.mcp.tool_errors": tool_errors})
     else:
         span.set_attribute("app.mcp.state", "not reported")
+
+    if capture_tool_content is not None:
+        _record_tool_content(
+            span, response, enabled=capture_content and capture_tool_content,
+            deployment=deployment, conversation_id=conversation_id,
+        )
 
     usage = getattr(response, "usage", None)
     if usage is None:

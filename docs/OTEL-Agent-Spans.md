@@ -4,6 +4,42 @@ Run notebook kernels and shell examples from the repository root. The support
 modules are in [notebook_support](../notebook_support); see the
 [layout guide](../README.md#notebook-support-layout) for imports and dependency paths.
 
+## Linux MCP tool-content observations
+
+The [Linux notebook](../zolab-ai-agent-demo-linux.ipynb) adds optional
+`OTEL_LOG_TOOL_CONTENT=1` observations on the existing Azure Monitor provider.
+This is a notebook-level switch, not a native SDK environment setting.
+
+```text
+executor.process facts (or sentinel)
+  existing agent/stage span
+    POST /openai/v1/responses
+      existing Foundry / transport spans
+      notebook.mcp.observe mcp_approval_request
+    POST /openai/v1/responses (approval continuation)
+      existing Foundry / transport spans
+      notebook.mcp.observe mcp_list_tools
+      notebook.mcp.observe mcp_call
+```
+
+The diagram illustrates item types that may be returned, not a required sequence.
+There is one INTERNAL observation span per supported MCP output item, with
+`app.tool.observation=true` and custom operation `observe_tool`. Parent context
+is set explicitly to the request span. Arguments, available results, and tool
+definitions use standard GenAI content attributes; a metadata-only
+`mcp.tool.content.observed` event supplies an additional breadcrumb.
+
+These spans measure **local observation**, not remote tool execution duration.
+Section 6 classifies them as `tool observation`, separately from native
+`execute_tool` spans. It reports remote errors/status without turning successful
+local observation into a failed request, and never adds the spans to token usage.
+Payload records join on resource + trace + span; content coverage does not replace
+the existing workflow/response health checks.
+
+See the [additions table, controls, and limits](observability.md#linux-mcp-tool-content-capture).
+The historical span counts below describe earlier runs and do not include these
+optional Linux observations.
+
 ## MAF workflow orchestration
 
 The Windows notebook now wraps its existing Foundry calls with MAF core 1.19.0

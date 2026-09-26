@@ -10,6 +10,24 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-26
 
+### Linux MCP tool-content observations
+
+- Support `OTEL_LOG_TOOL_CONTENT=1` as an explicit notebook-level compatibility
+  option, enabled by default for the Linux demo under its existing master
+  content policy. Validate values and require restart on effective-policy changes.
+- Observe returned MCP calls, approval requests, and tool lists after every
+  main/Learn and Sentinel Responses request, including approval continuations.
+  Capture available arguments/results/definitions on exact-parent INTERNAL
+  spans, with response/conversation/tool identifiers and observation events.
+- Keep remote tool status separate from local observation success and timing.
+  Preserve native SDK instrumentation, approval behavior, workflow/persistence
+  semantics, token accounting, and all installed dependency versions.
+- Add tool-content coverage and detail queries to passing/failing Section 6
+  reports, with missing/empty/incomplete payload states, 200-row detail limits,
+  and 1,200-character HTML-escaped previews. Document the exporter's GenAI limits.
+- Add policy, SDK-item, parent-correlation, continuation, exporter, and report
+  regression checks; document the additions table and restart instructions.
+
 ### Ubuntu notebook and Linux tooling
 
 - Add [the Linux notebook](zolab-ai-agent-demo-linux.ipynb) for Ubuntu 26.04
