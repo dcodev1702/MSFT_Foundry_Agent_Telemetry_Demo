@@ -288,6 +288,24 @@ compatibility option**. The installed Azure AI Projects, MAF, and OpenTelemetry
 packages do not natively interpret that variable. No package upgrades or extra
 exporter are required.
 
+#### What improves in the demo?
+
+**The improvement is tool-level evidence, not better latency monitoring or a
+different final answer.** The demo already traced workflows, Responses requests,
+token usage, approvals, and errors. The flag adds a dedicated view of **what MCP
+tools were asked to do and what they returned**, linked to the request that
+produced it.
+
+| Question you want to answer | What was already available | What the new flag adds |
+|---|---|---|
+| **What arguments did the tool receive?** | Agent prompts and some SDK message/tool content. | A dedicated arguments field per returned MCP item, such as the reported KQL query or workspace parameter, when supplied. |
+| **What did the tool return versus what the agent told me?** | The assistant's answer and SDK-dependent response content. | A separate tool-result field for comparison with the final answer. Missing results, empty results, and content not yet available in telemetry are distinguished. |
+| **Was a tool discovered, awaiting approval, or called?** | Approval events and tool counts/errors. | Separate observation rows for discovery, approval requests, and MCP calls rather than treating them as interchangeable operations. |
+| **Which request produced this tool result?** | Workflow and request traces. | Exact-parent observation spans plus response, conversation, tool-call, and approval IDs, where applicable. These separate Learn/Sentinel activity and approval continuations. |
+| **Is the telemetry complete enough to explain the run?** | General span-health and content checks. | Expected-versus-observed MCP item counts, with available, waiting, and incomplete payload states. Request success does not imply that tool content is available to inspect. |
+
+#### Implementation locations
+
 Section 3.1 uses `os.environ.setdefault("OTEL_LOG_TOOL_CONTENT", "1")`, enabling
 this demo by default while preserving an existing opt-out. Accepted values are
 `1`, `0`, `true`, and `false` (case-insensitive, ignoring surrounding whitespace).
@@ -366,6 +384,210 @@ is separate from the span-health PASS gate.
 These changes were validated locally with SDK response models, both notebook
 request wrappers, an in-memory exporter, and the installed Azure exporter.
 This is not a claim that new live Azure tool calls or ingestion were executed.
+
+#### Walkthrough with code and example values
+
+The following code excerpts come from the current
+[Linux notebook](../zolab-ai-agent-demo-linux.ipynb) and
+[response observability helper](../notebook_support/response_observability.py).
+They are excerpts from the existing implementation, not standalone scripts.
+**The example values are synthetic and were exercised locally through the real
+helper with an in-memory exporter. They are not results retrieved from a live
+Sentinel workspace.**
+
+##### 1. Enable capture after an existing response
+
+Section 3.1 enables the demo option without overwriting an existing value:
+
+```python
+os.environ.setdefault("OTEL_LOG_TOOL_CONTENT", "1")
+```
+
+After configuring the existing telemetry pipeline, the notebook derives the
+effective setting under the master content policy:
+
+```python
+tool_content_recording_enabled = get_tool_content_recording_policy(
+    content_enabled=content_recording_enabled
+)
+```
+
+The locally verified policy results were:
+
+```text
+OTEL_LOG_TOOL_CONTENT=1 + master content capture=true  -> enabled
+OTEL_LOG_TOOL_CONTENT=1 + master content capture=false -> disabled
+```
+
+In the main/Learn path, the helper runs **after the existing SDK request returns**.
+The Sentinel path uses the same hook with its own agent reference and conversation:
+
+```python
+response = openai_client.responses.create(
+    conversation=conversation.id,
+    input=response_input,
+    **response_options(agent_runtime, agent_reference_payload),
+)
+record_response_observability(
+    response_http_span, response, deployment=model_name,
+    capture_content=content_recording_enabled,
+    capture_tool_content=tool_content_recording_enabled,
+    conversation_id=conversation.id,
+)
+```
+
+**Demo value:** the helper inspects the returned response. It does not make
+another tool call just to collect telemetry. Setting the flag to `0` disables
+the additional observations, not native SDK message capture independently.
+
+##### 2. Separate tool arguments from tool results
+
+The helper maps the returned SDK fields into standard GenAI attributes:
+
+```python
+for field, key, label in (
+    ("arguments", "gen_ai.tool.call.arguments", "arguments"),
+    ("output", "gen_ai.tool.call.result", "result"),
+    ("tools", "gen_ai.tool.definitions", "definitions"),
+):
+    value = snapshot.get(field)
+    attributes[f"app.tool.{label}.present"] = value is not None
+    if value is not None:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+        attributes[key] = text
+        attributes[f"app.tool.{label}.characters"] = len(text)
+```
+
+For a constructed `query_lake` response, the helper produced these attributes:
+
+```json
+{
+  "gen_ai.tool.name": "query_lake",
+  "app.mcp.server": "microsoft-sentinel-data",
+  "app.mcp.tool.status": "completed",
+  "app.tool.returned_error": false,
+  "gen_ai.tool.call.arguments": "{\"workspaceId\":\"demo-workspace\",\"query\":\"SigninLogs | take 1\"}",
+  "gen_ai.tool.call.result": "{\"rows\":[{\"UserPrincipalName\":\"demo@example.invalid\",\"IPAddress\":\"192.0.2.10\"}]}",
+  "app.tool.arguments.present": true,
+  "app.tool.result.present": true
+}
+```
+
+The escaped JSON is intentional: **the payload attributes contain strings**.
+Their contents depend on what the service actually returns. The example row
+format above is not a guaranteed Sentinel response schema.
+
+**Demo value:** instead of showing only "the agent reported an IP address," you
+can inspect the reported tool arguments and returned data separately from the
+agent's summary. This supports comparison; it is not an automatic check that
+the answer is correct.
+
+##### 3. Attach each item to the correct request
+
+The helper creates an INTERNAL observation span with an explicit request parent:
+
+```python
+with tracer.start_as_current_span(
+    f"notebook.mcp.observe {item.type}",
+    context=trace.set_span_in_context(parent),
+    kind=SpanKind.INTERNAL,
+    attributes=attributes,
+) as observation:
+    observation.add_event("mcp.tool.content.observed", {
+        "app.mcp.event.id": f"{response_id}:{item.id}:content",
+        "app.response.id": response_id,
+        "app.tool.output_item.id": item.id,
+        "app.tool.output_item.type": item.type,
+        "app.tool.returned_error": returned_error,
+    })
+```
+
+`parent` is the existing Responses request span, not a new unrelated trace.
+The event provides a metadata breadcrumb without duplicating the raw payload.
+Example identifiers produced for the constructed completed call were:
+
+```json
+{
+  "gen_ai.response.id": "resp_demo_2",
+  "gen_ai.conversation.id": "conv_demo",
+  "gen_ai.tool.call.id": "call_demo",
+  "app.mcp.approval.id": "approval_demo"
+}
+```
+
+The locally exercised sequence had this relationship:
+
+```text
+executor.process sentinel
+  POST /openai/v1/responses                 [resp_demo_1]
+    notebook.mcp.observe mcp_list_tools
+    notebook.mcp.observe mcp_approval_request
+  POST /openai/v1/responses                 [resp_demo_2]
+    notebook.mcp.observe mcp_call
+```
+
+That is **three observed items, but only one reported MCP call**:
+
+| Item | Example evidence |
+|---|---|
+| `mcp_list_tools` | Tool definitions include `query_lake`; status is `discovery returned`. |
+| `mcp_approval_request` | Arguments and `approval_demo`; status is `approval requested`; no result is invented. |
+| `mcp_call` | Arguments, returned result, `call_demo`, and its related approval ID; status is `completed`. |
+
+**Demo value:** follow discovery, approval, and the returned call without
+presenting all three as tool executions.
+
+##### 4. Read the evidence in Section 6
+
+The notebook requests tool-content views through the existing
+[query builder and report renderer](../notebook_support/observability.py):
+
+```python
+SHOW_GENAI_CONTENT = True
+if SHOW_GENAI_CONTENT and not content_recording_enabled:
+    raise RuntimeError("GenAI previews require the local content-recording policy to be enabled.")
+
+observability_queries = build_observability_queries(
+    demo_run_filter,
+    include_content=SHOW_GENAI_CONTENT,
+    include_tool_content=True,
+)
+```
+
+Find **"Tool-content observations (OTEL_LOG_TOOL_CONTENT)"**, then expand
+**"MCP tool content (up to 200 observations)"**. For the synthetic sequence
+above, an **illustrative coverage row after successful ingestion** would be:
+
+| Interaction | Requests | ExpectedItems | ObservedItems | McpCalls | ApprovalRequests | ToolLists |
+|---|---:|---:|---:|---:|---:|---:|
+| sentinel | 2 | 3 | 3 | 1 | 1 | 1 |
+
+The detail view distinguishes these situations:
+
+| Example report values | Meaning |
+|---|---|
+| `ResultReturned=false` | The response did not supply a result. The preview says **"not returned."** |
+| `ResultReturned=true`, `ResultCharacters=0` | A result was supplied but was empty. The preview says **"empty returned string."** |
+| `PayloadState="waiting / not recorded"` | Payload was reported as present, but no matching content record is available yet. |
+| `PayloadState="incomplete payload"` | Stored content lengths do not match the original observed lengths. |
+
+Previews show up to **1,200 characters per field**, with up to **200 detail
+rows**. Coverage counts are not limited to those displayed rows.
+
+##### What this does and does not prove
+
+The Sentinel networking timeout was already visible before this flag. The
+additional evidence can identify the affected tool item and its request,
+**but it does not diagnose the underlying network failure**. Observation
+durations are local processing times, not remote tool execution timings.
+
+Some content may already exist in native SDK traces. The improvement is a
+**consistent, dedicated, correlated tool-evidence view**, not access to hidden
+server-side activity. It appears in Section 6, **not the Marp decks**, and does
+not backfill older runs.
+
+**Demo explanation:** "The existing tracing tells us whether the agent ran.
+This view helps us inspect the tool evidence behind its answer."
 
 ### GenAI Content and the Section 6 Report
 
