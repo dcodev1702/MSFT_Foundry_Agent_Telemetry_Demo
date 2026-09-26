@@ -1,0 +1,17 @@
+# Ubuntu 26.04 / CPython 3.14.7 runtime, reviewed 2026-09-26.
+# Independent of Windows profiles; use the configured package index.
+-c constraints-notebook-linux.txt
+pip==26.2.1
+ipykernel==7.3.0
+agent-framework-core==1.19.0
+azure-ai-projects==2.7.0
+openai==3.19.2
+httpx2==2.13.1
+# Latest stable Identity release; the Windows preview pin is not needed here.
+azure-identity==1.25.3
+azure-monitor-opentelemetry==1.8.10
+azure-core-tracing-opentelemetry==1.0.0b13
+# Keep the Azure Monitor-compatible OpenTelemetry train together.
+opentelemetry-api==1.44.0
+opentelemetry-sdk==1.44.0
+opentelemetry-instrumentation-httpx==0.65b0

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import time
 import unittest
 from contextlib import redirect_stdout
@@ -69,7 +70,11 @@ class NotebookDependencyTests(unittest.TestCase):
         self.assertIn("-r requirements-notebook.txt", VALIDATION.read_text())
 
     def test_runtime_and_validation_pins_match_the_selected_environment(self):
-        for profile in (RUNTIME, VALIDATION):
+        profiles = (
+            (REQUIREMENTS / "requirements-notebook-linux.txt", REQUIREMENTS / "requirements-notebook-linux-validation.txt")
+            if sys.platform == "linux" else (RUNTIME, VALIDATION)
+        )
+        for profile in profiles:
             for name, expected in direct_pins(profile).items():
                 with self.subTest(profile=profile.name, package=name):
                     self.assertEqual(version(name), expected)

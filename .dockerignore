@@ -1,5 +1,6 @@
 bot-app/runtime/.env
 bot-app/runtime/.venv/
+.venv-linux/
 bot-app/runtime/.queue/
 bot-app/runtime/.state/
 **/__pycache__/

@@ -1,6 +1,6 @@
 # 🤖 Microsoft Foundry — Agent Framework Observability PoC
 
-Jupyter notebooks that configure and query Microsoft Foundry agents with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 notebook uses **Microsoft Agent Framework (MAF) workflows** around its existing Azure AI Projects + Responses API calls. MAF and Foundry share the same OpenTelemetry/Azure Monitor pipeline. It requires Python 3.14+; the separate macOS notebook supports Python 3.13+.
+Jupyter notebooks that configure and query Microsoft Foundry agents with **end-to-end observability** — tracing agent runs, tool invocations, and responses across Application Insights, Microsoft Foundry Traces, and Log Analytics. The Win11 and Linux notebooks use **Microsoft Agent Framework (MAF) workflows** around their existing Azure AI Projects + Responses API calls. MAF and Foundry share the same OpenTelemetry/Azure Monitor pipeline. Windows requires Python 3.14+; the Ubuntu 26.04 notebook uses **Python 3.14.7** in its own environment, and the separate macOS notebook supports Python 3.13+.
 
 ![Architecture overview of Foundry agent observability flow](https://github.com/user-attachments/assets/cbd172e9-b56e-4cf1-93a6-c48482eacd2a)
 
@@ -17,7 +17,7 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
 | **Sentinel MCP** | Existing Foundry project connection, OAuth consent, and Sentinel/data-lake access for the signed-in identity; required to run every cell including Section 5.1 |
 | **Microsoft Foundry Project** | Connected to an **Application Insights** instance backed by a **Log Analytics workspace** |
 | **Model Deployment** | The deployment script offers `gpt-4.1-mini`, `gpt-5.3`, `gpt-5.4`, or `grok-4-1-fast-reasoning`. The notebook can also use an existing compatible deployment, such as `gpt-5.6-terra`, through its local build metadata (see below). |
-| **Python** | Python 3.14+ for Win11 or Python 3.13+ for macOS, with `venv` support |
+| **Python** | Python 3.14.7 for Ubuntu 26.04, Python 3.14+ for Win11, or Python 3.13+ for macOS; Linux bootstrap uses `uv`, including on hosts without system `pip`/`ensurepip` |
 | **Jupyter Notebook** | VS Code with Jupyter extension or JupyterLab |
 
 ---
@@ -25,9 +25,9 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
 ## 🚀 Quick Start
 
 1. Run the deployment first — it generates `build_info-<suffix>.json` at the repo root (see [`deployment/README.md`](deployment/README.md))
-2. Open `zolab-ai-agent-demo-macbook.ipynb` or `zolab-ai-agent-demo-win11.ipynb`
-3. Run **Section 0** — creates `.venv` and registers the notebook kernel
-4. On Win11, switch to the **AI Agent Demo (.venv, Python 3.14)** kernel
+2. Open [the Linux notebook](zolab-ai-agent-demo-linux.ipynb), [the macOS notebook](zolab-ai-agent-demo-macbook.ipynb), or [the Windows notebook](zolab-ai-agent-demo-win11.ipynb)
+3. Run **Section 0** — creates `.venv` (Windows/macOS) or `.venv-linux` (Linux) and registers the notebook kernel; first-time Linux setup is below
+4. Select the registered kernel: **AI Agent Demo (.venv, Python 3.14)** on Win11 or **AI Agent Demo (Linux, Python 3.14.7)** on Linux
 5. Run sections **1 → 5** in order
 6. Run **Section 6** and inspect telemetry in the Azure Portal:
    - 📊 **Application Insights** — request/dependency traces
@@ -35,7 +35,135 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
    - 📡 **Log Analytics** — span health in `AppDependencies`, conversation/tool content in `AppGenAIContent`, and correlated exception drill-downs
    - **Response accounting and MCP outcomes** — input/output, cached input and reasoning tokens; optional estimates using your supplied prices; approvals, tool errors, request failures and final stage outcomes. See [configuration and interpretation](docs/observability.md#response-usage-cost-estimates-and-mcp-outcomes).
 
-On Windows, Section 1 installs [requirements-notebook.txt](requirements/requirements-notebook.txt) and runs `pip check`. If SDKs were already imported before updating, restart the kernel and rerun from the beginning. The matrix below applies to the Windows notebook only; the macOS notebook and standalone [Agent Framework SDK PoC](agent-framework-demo/README-agent-framework-sdk-poc.md) have separate setup instructions.
+On Windows, Section 1 installs [requirements-notebook.txt](requirements/requirements-notebook.txt) and runs `pip check`. If SDKs were already imported before updating, restart the kernel and rerun from the beginning. The Windows dependency matrix applies to the Windows notebook only; Linux has its own profile below, while the macOS notebook and standalone [Agent Framework SDK PoC](agent-framework-demo/README-agent-framework-sdk-poc.md) have separate setup instructions.
+
+### Ubuntu 26.04 Linux Setup
+
+[zolab-ai-agent-demo-linux.ipynb](zolab-ai-agent-demo-linux.ipynb) uses an isolated
+`.venv-linux` and the `ai-agent-demo-linux` kernel. Its requirements and constraints
+do not include the Windows profiles, Windows-only packages, or Windows wheel-build
+scripts. The original Windows/macOS notebooks and the standalone demo are unchanged.
+
+This host has Ubuntu 26.04.1 x86_64, system Python 3.14.4, and `uv`, but no system
+`pip` or `ensurepip`. Keep system Python intact: use `uv` to provision the requested
+**Python 3.14.7** without adding it to the user's executable directory.
+The installed `uv` catalog ends at Python 3.14.6, so setup uses
+[official uv download metadata at a fixed revision](https://github.com/astral-sh/uv/blob/716f320609fec9a36b27718be4c403d73fab7c9a/crates/uv-python/download-metadata.json),
+including upstream download checksums, rather than silently selecting an older Python.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first if it is absent.
+
+For **first-time setup**, run these commands from the repository root:
+
+```bash
+uv python install --no-bin --python-downloads-json-url \
+  https://raw.githubusercontent.com/astral-sh/uv/716f320609fec9a36b27718be4c403d73fab7c9a/crates/uv-python/download-metadata.json \
+  3.14.7
+uv venv --python 3.14.7 --no-python-downloads --seed .venv-linux
+.venv-linux/bin/python -m pip install --upgrade -r requirements/requirements-notebook-linux.txt
+.venv-linux/bin/python -m pip check
+.venv-linux/bin/python -m ipykernel install --user \
+  --name ai-agent-demo-linux --display-name "AI Agent Demo (Linux, Python 3.14.7)"
+```
+
+If `.venv-linux` already exists, use Section 0 to validate and reuse it instead
+of recreating it. An environment with a different Python version must be moved
+aside explicitly before setup; the notebook will not overwrite it. Select
+**AI Agent Demo (Linux, Python 3.14.7)** in VS Code, then run environment
+verification and Section 1. After package changes, restart that kernel and rerun
+verification and the runtime cells. Activating a terminal environment does not
+switch an already-running notebook kernel.
+
+Azure CLI is a separate system tool, not a notebook Python dependency. If missing,
+follow Microsoft's [Ubuntu installation instructions](https://learn.microsoft.com/cli/azure/install-azure-cli-linux?pivots=apt).
+This Linux host is verified with **Azure CLI 2.90.0** and the following extensions
+(versions checked **2026-09-26**):
+
+| Extension | Version | Purpose |
+|---|---|---|
+| `log-analytics` | `1.0.0b2` (preview) | KQL queries through `az monitor log-analytics query` |
+| `azure-devops` | `1.0.8` | Azure DevOps Services: projects, repos, pipelines, boards, and artifacts |
+
+Install them in the Linux terminal, outside the notebook virtual environment:
+
+```bash
+az extension add --name log-analytics --version 1.0.0b2 --allow-preview true --yes
+az extension add --name azure-devops --version 1.0.8 --allow-preview false --yes
+az extension list --output table
+az monitor log-analytics query --help
+az devops project list --help
+```
+
+There is no extension named `kql` in the official index:
+[`log-analytics`](https://learn.microsoft.com/cli/azure/monitor/log-analytics#az-monitor-log-analytics-query)
+provides the Azure Monitor KQL query command. Section 6 still uses the Logs API
+directly; installing this extension does not change the notebook's telemetry path.
+[`azure-devops`](https://learn.microsoft.com/azure/devops/cli/) is the Azure DevOps
+extension, not the separate Azure Developer CLI (`azd`). CLI extensions are not
+added to the Python requirements or constraints.
+
+For VS Code Remote/SSH or a headless host, sign in in a terminal **on that Linux host**:
+
+```bash
+az login --use-device-code
+az account show
+```
+
+Use your organization's approved interactive method if device-code authentication
+is restricted. The notebook reports missing or expired credentials rather than
+starting a hidden interactive login or installing system packages. Existing
+deployment metadata, project access, and Sentinel connection/consent requirements
+still apply.
+
+### Linux Dependency Matrix
+
+Reviewed on **2026-09-26** for **Ubuntu 26.04.1 / CPython 3.14.7 / x86_64**.
+The runtime resolves independently of Windows, uses the latest stable direct
+releases where compatible, and retains the Azure Monitor/OpenTelemetry release train.
+OpenTelemetry **1.45.0 / instrumentation 0.66b0** are newer but incompatible with
+[Azure Monitor 1.8.10's declared bounds](https://pypi.org/pypi/azure-monitor-opentelemetry/1.8.10/json),
+so this profile deliberately uses **1.44.0 / 0.65b0**. The tracing bridge,
+instrumentation, and Monitor exporter require preview-version packages; the
+installer does not enable prereleases globally.
+
+| Package | Version | Notes |
+|---|---|---|
+| `pip` / `ipykernel` | `26.2.1` / `7.3.0` | Isolated installer and notebook kernel |
+| `agent-framework-core` | `1.19.0` | Existing workflows; no extra MAF providers |
+| `azure-ai-projects` | `2.7.0` | Foundry agents, project and agent-endpoint Responses clients |
+| `openai` | `3.19.2` | Responses and conversations APIs |
+| `httpx2` / `httpcore2` | `2.13.1` | Matching transport pair |
+| `azure-identity` | `1.25.3` | Stable release instead of the Windows profile's `1.26.0b2` preview |
+| `azure-monitor-opentelemetry` | `1.8.10` | Resolves exporter `1.0.0b57` |
+| `azure-core-tracing-opentelemetry` | `1.0.0b13` | Azure SDK tracing bridge |
+| `opentelemetry-api` / `opentelemetry-sdk` | `1.44.0` | Compatible with Azure Monitor and MAF |
+| `opentelemetry-instrumentation-httpx` | `0.65b0` | Includes the HTTPX2 instrumentor |
+| `nbclient` / `nbformat` | `0.11.0` / `5.11.1` | Optional validation profile |
+
+- [requirements-notebook-linux.txt](requirements/requirements-notebook-linux.txt):
+  exact direct runtime pins.
+- [requirements-notebook-linux-validation.txt](requirements/requirements-notebook-linux-validation.txt):
+  runtime plus notebook validation tools.
+- [constraints-notebook-linux.txt](requirements/constraints-notebook-linux.txt):
+  96 resolved package versions for these two Linux profiles, including Linux
+  terminal dependencies `pexpect`/`ptyprocess`. This is a version snapshot,
+  not a hash-verified lock or a promise of compatibility with other platforms.
+  Constraints do not install optional validation packages.
+
+Package installation uses the configured index with TLS verification enabled.
+If an approved feed lacks a release, have it admitted or supply approved
+Linux-compatible wheels; do not use Windows constraints or disable certificate
+verification. Upgrade the runtime and telemetry train together and rerun:
+
+```bash
+.venv-linux/bin/python -m pip install -r requirements/requirements-notebook-linux-validation.txt
+.venv-linux/bin/python -m pip check
+.venv-linux/bin/python -m unittest discover -s tests -p "test_notebook*.py" -v
+```
+
+These tests exercise the real SDKs with in-memory HTTP transports and MAF
+callbacks, and cover Linux bootstrap, kernel isolation, authentication errors,
+dependency versions, and unchanged workflow/telemetry behavior. They do not
+execute paid model calls or verify live Azure permissions and telemetry ingestion.
 
 ### Notebook Support Layout
 
@@ -54,6 +182,9 @@ requirements/
   requirements-notebook-shared.txt
   requirements-notebook-validation.txt
   constraints-notebook-win11.txt
+  requirements-notebook-linux.txt
+  requirements-notebook-linux-validation.txt
+  constraints-notebook-linux.txt
 docs/
   observability.md
   OTEL-Agent-Spans.md
@@ -63,9 +194,9 @@ docs/
   imports use `notebook_support.agent_endpoints`, `notebook_support.observability`,
   `notebook_support.response_observability` and `notebook_support.workflow`;
   no `sys.path` workaround is needed.
-- [requirements](requirements) contains the root notebook's dependency profiles
-  and shared constraints. Package versions are unchanged, and `-r`/`-c` includes
-  remain relative to their requirement files.
+- [requirements](requirements) contains the root notebooks' platform-specific
+  dependency profiles and constraints. Linux is independent of the Windows
+  snapshot; `-r`/`-c` includes remain relative to their requirement files.
 - [docs](docs) contains the [observability guide](docs/observability.md) and
   [span reference](docs/OTEL-Agent-Spans.md).
 
@@ -160,11 +291,11 @@ paid model calls. Both environments pass `pip check`.
 
 ## 📓 Notebook Sections
 
-After selecting the `AI Agent Demo (.venv)` kernel, run sections in order:
+After selecting the platform's registered demo kernel, run sections in order:
 
 | # | Section | What It Does |
 |---|---|---|
-| **0** | Create or Reuse Virtual Environment | Validates Python 3.14 on Win11, creates `.venv`, installs `ipykernel`, and registers the Jupyter kernel |
+| **0** | Create or Reuse Virtual Environment | Validates Python 3.14 on Win11 or 3.14.7 on Linux, creates `.venv` or `.venv-linux`, installs `ipykernel`, and registers the platform's Jupyter kernel |
 | **1** | Install Dependencies | Installs the constrained MAF core, Foundry, Azure Identity and Azure Monitor/OpenTelemetry runtime profile |
 | **2** | Import Libraries | Verifies the Foundry clients, workflow helper and native OpenTelemetry `Resource` imports |
 | **3** | Configure Credentials and Clients | Reuses deployment values from `build_info-<suffix>.json`, resolves Azure auth, and configures the Foundry project client plus Responses API settings |
@@ -195,7 +326,7 @@ error rather than displaying guessed values. Rerun **Section 4**, then **5 and
 
 ### Backend Agent Endpoints
 
-The Windows notebook supports two explicit invocation modes through
+The Windows and Linux notebooks support two explicit invocation modes through
 [notebook_support/agent_endpoints.py](notebook_support/agent_endpoints.py):
 
 - **`project`**: the backward-compatible project Responses endpoint with an

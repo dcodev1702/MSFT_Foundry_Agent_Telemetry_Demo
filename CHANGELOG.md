@@ -8,6 +8,27 @@ formatting edits, and notebook-output refreshes are consolidated. Each
 `## YYYY-MM-DD` heading covers one commit day, with related change groups nested
 under `###` topic headings. Local stash snapshots are excluded.
 
+## 2026-09-26
+
+### Ubuntu notebook and Linux tooling
+
+- Add [the Linux notebook](zolab-ai-agent-demo-linux.ipynb) for Ubuntu 26.04
+  with an isolated Python 3.14.7 environment and a dedicated Jupyter kernel.
+  Bootstrap through verified upstream uv metadata without replacing system Python.
+- Add independent Linux runtime/validation profiles and a 96-package constraint
+  snapshot. Preserve the validated Azure Monitor 1.8.10, OpenTelemetry 1.44.0,
+  and HTTPX instrumentation 0.65b0 combination.
+- Replace Windows setup instructions with Linux paths and explicit terminal
+  authentication guidance for remote/headless hosts. Document Azure CLI 2.90.0,
+  the Log Analytics KQL extension, and Azure DevOps extension setup.
+- Show the detected distribution, release, and CPU architecture in Section 2,
+  including `Ubuntu 26.04 - x64`, alongside the existing platform/Python output.
+- Add regression coverage for Linux bootstrap, kernel isolation, dependency
+  pins, CLI prerequisites, distro output, and preserved agent/workflow calls.
+  Validate local SDK execution without running paid Azure workloads.
+- Clear notebook execution output for publication and leave the original
+  Windows/macOS notebooks and their dependency profiles unchanged.
+
 ## 2026-09-19
 
 ### Response usage, cost estimates and MCP outcomes
