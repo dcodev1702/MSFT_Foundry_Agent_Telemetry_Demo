@@ -1,0 +1,38 @@
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  trusted_proxy_ranges: []
+  disable_spend_logs: true
+  pass_through_request_timeout: 600
+  # One route per Foundry agent endpoint. Sub-paths carry the notebook's
+  # /conversations and /responses calls. Client headers are forwarded so W3C
+  # trace context reaches Foundry; the configured Authorization replaces the
+  # client's LiteLLM master key.
+  pass_through_endpoints:
+    - path: /foundry-agent/main
+      target: os.environ/FOUNDRY_MAIN_AGENT_BASE_URL
+      include_subpath: true
+      forward_headers: true
+      auth: true
+      methods:
+        - POST
+      headers:
+        Authorization: "Bearer os.environ/AZURE_AD_TOKEN"
+      default_query_params:
+        api-version: v1
+    - path: /foundry-agent/sentinel
+      target: os.environ/FOUNDRY_SENTINEL_AGENT_BASE_URL
+      include_subpath: true
+      forward_headers: true
+      auth: true
+      methods:
+        - POST
+      headers:
+        Authorization: "Bearer os.environ/AZURE_AD_TOKEN"
+      default_query_params:
+        api-version: v1
+
+litellm_settings:
+  request_timeout: 600
+  set_verbose: false
+  json_logs: true

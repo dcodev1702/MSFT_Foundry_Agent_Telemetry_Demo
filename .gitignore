@@ -28,5 +28,8 @@ logicapp-vmmymachine-01.json
 .queue/
 .state/
 .env
+/gateway/.env*
+!/gateway/.env.example
+/gateway/.neon
 .bot-secrets.json
 .claude/

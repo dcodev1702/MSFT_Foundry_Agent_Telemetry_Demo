@@ -10,6 +10,27 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-26
 
+### Linux LiteLLM gateway with Neon
+
+- Add an optional host-local LiteLLM proxy in `gateway/`, backed by a Neon
+  database, with one authenticated `POST` pass-through route per backend agent
+  endpoint for `/conversations` and `/responses`. Use a single master key,
+  disable spend logging, and configure no virtual keys, budgets, or limits.
+- Forward client headers so W3C trace context reaches Foundry while the
+  configured Entra token replaces the master key. Foundry's server-side `chat`
+  spans stay in the notebook's traces, which Section 6 requires.
+- Resolve both agent endpoints, a short-lived Azure CLI token, and local keys
+  into a Git-ignored `gateway/.env`. `gateway/start.sh` starts the container,
+  waits for health, and verifies Neon; rotated Neon credentials are accepted
+  through a hidden prompt, and `gateway/smoke-test.sh` checks both routes.
+- Make gateway routing opt-in for the Linux notebook through `agent_gateway` or
+  `FOUNDRY_AGENT_GATEWAY`, with direct routing as the default. Section 3 reports
+  the route and checks LiteLLM readiness, Neon, and token lifetime before agent
+  calls. The Foundry SDK client keeps its instrumentation and headers, and
+  Responses spans record the gateway and upstream Foundry host.
+- Validate run `be4d66dc` end to end through the gateway: Section 6 passed with
+  zero failed spans. Add 17 gateway regression tests.
+
 ### Linux presentation and Sentinel error guidance
 
 - Restore the original notebook title and Microsoft logo as a native Markdown

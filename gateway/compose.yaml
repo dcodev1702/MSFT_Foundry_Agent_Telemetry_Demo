@@ -1,0 +1,44 @@
+name: foundry-agent-gateway
+
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable@sha256:87f34979b9f8cb274fac90ca8a4fdda07d8480de22755562a26adeb95ce20d02
+    restart: unless-stopped
+    init: true
+    command:
+      - --config
+      - /app/config.yaml
+      - --port
+      - "4000"
+      - --num_workers
+      - "1"
+    env_file:
+      - .env
+    environment:
+      AZURE_AD_TOKEN: ${AZURE_AD_TOKEN:?run ./start.sh to refresh Azure authentication}
+      DATABASE_URL: ${DATABASE_URL:?set a direct Neon connection string}
+      FOUNDRY_MAIN_AGENT_BASE_URL: ${FOUNDRY_MAIN_AGENT_BASE_URL:?run ./start.sh to resolve the main agent endpoint}
+      FOUNDRY_SENTINEL_AGENT_BASE_URL: ${FOUNDRY_SENTINEL_AGENT_BASE_URL:?run ./start.sh to resolve the Sentinel agent endpoint}
+      LITELLM_LOG: INFO
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?run ./start.sh to generate the proxy key}
+      LITELLM_MODE: PRODUCTION
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?run ./start.sh to generate the database encryption key}
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+    ports:
+      - "${LITELLM_BIND_ADDRESS:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen(
+              "http://127.0.0.1:4000/health/liveliness", timeout=5
+          ).read()
+      interval: 10s
+      timeout: 6s
+      retries: 18
+      start_period: 120s
+    stop_grace_period: 30s

@@ -188,9 +188,17 @@ below from that directory. Supporting files are grouped by purpose:
 notebook_support/
   __init__.py
   agent_endpoints.py
+  gateway.py
   observability.py
   response_observability.py
   workflow.py
+gateway/
+  compose.yaml
+  config.yaml
+  refresh_runtime_env.py
+  start.sh
+  smoke-test.sh
+  .env.example
 requirements/
   requirements-notebook.txt
   requirements-notebook-shared.txt
@@ -205,9 +213,11 @@ docs/
 ```
 
 - [notebook_support](notebook_support) is a Python package. Notebook and test
-  imports use `notebook_support.agent_endpoints`, `notebook_support.observability`,
-  `notebook_support.response_observability` and `notebook_support.workflow`;
-  no `sys.path` workaround is needed.
+  imports use `notebook_support.agent_endpoints`, `notebook_support.gateway`,
+  `notebook_support.observability`, `notebook_support.response_observability`
+  and `notebook_support.workflow`; no `sys.path` workaround is needed.
+- [gateway](gateway) contains the optional host-local LiteLLM proxy for the Linux
+  notebook; see [Optional LiteLLM Gateway with Neon (Linux)](#optional-litellm-gateway-with-neon-linux).
 - [requirements](requirements) contains the root notebooks' platform-specific
   dependency profiles and constraints. Linux is independent of the Windows
   snapshot; `-r`/`-c` includes remain relative to their requirement files.
@@ -456,6 +466,63 @@ Both exported Marp decks were also checked in the browser: all seven slides
 retained the model footer without clipping/overlap and showed the backend runtime
 label on the metadata slide.
 
+### Optional LiteLLM Gateway with Neon (Linux)
+
+The Linux notebook can send both backend agents' Responses traffic through a
+host-local [LiteLLM](https://docs.litellm.ai/) proxy in [gateway](gateway), backed
+by a [Neon](https://neon.com/) database. Direct calls to Foundry remain the
+default. The gateway uses one LiteLLM master key and disables spend logging; it
+configures no virtual keys, users, budgets or limits.
+
+```text
+Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
+    /foundry-agent/main/*     --> main agent endpoint     (Entra token)
+    /foundry-agent/sentinel/* --> Sentinel agent endpoint (Entra token)
+    LiteLLM --(TLS)--> Neon
+```
+
+- **Routes:** [gateway/config.yaml](gateway/config.yaml) defines one authenticated
+  `POST` pass-through route per agent endpoint, covering `/conversations` and
+  `/responses`. LiteLLM's `azure_ai/agents` provider expects Assistants-style
+  `asst_` IDs and rejects the named agent endpoints, so the routes pass Foundry
+  Responses payloads, including MCP approvals, through unchanged.
+- **Trace context:** Foundry's server-side `responsesapi` service emits the GenAI
+  `chat` spans that Section 6 requires. Both routes set `forward_headers: true`
+  so `traceparent`, `baggage` and `Foundry-Features` reach Foundry; the configured
+  Entra token still replaces the client's master key. Do not enable LiteLLM's own
+  OpenTelemetry callback unless it exports to the same Application Insights resource.
+- **Start and refresh:** run `gateway/start.sh` from the repository root. It
+  resolves both agent endpoints from `build_info-*.json`, obtains an Entra token
+  from the Azure CLI session, writes the Git-ignored `gateway/.env` (mode `0600`),
+  starts the container and fails unless LiteLLM is healthy and Neon is connected.
+  Rerun it before the token expires, typically after 60–90 minutes; the CLI can
+  reuse its cached token until about five minutes before expiry. Refreshing
+  recreates the container, so avoid it during a notebook run.
+  `gateway/smoke-test.sh` checks both routes.
+- **Neon:** use the direct (non-`-pooler`) connection string with
+  `sslmode=require`, because LiteLLM runs `prisma migrate deploy` at startup.
+  After a password rotation, copy the direct string from the Neon Console
+  (**Connect**, pooling off) and run `gateway/start.sh --prompt-database-url`;
+  the value is not echoed.
+- **Notebook opt-in:** add `"agent_gateway": "litellm"` to the local build file or
+  set `FOUNDRY_AGENT_GATEWAY=litellm`; the environment variable wins. Section 3
+  prints the route and stops before any agent call unless LiteLLM is ready, Neon
+  is connected and at least 10 minutes of token lifetime remain. The notebook keeps
+  the Foundry SDK client and changes only its base URL and API key
+  ([notebook_support/gateway.py](notebook_support/gateway.py)). Responses spans
+  carry `app.gateway.name=litellm` and `app.upstream.server.address`. Agent
+  preparation and deployment lookups still call Foundry directly. Set
+  `agent_gateway` to `direct`, or remove it, to switch back.
+
+**Validated gateway run:** run `be4d66dc-840f-4b4a-813f-8e9908123210` routed 3
+conversations and 8 Responses requests (5 main and 3 Sentinel, including 5 MCP
+approval rounds) through LiteLLM with no gateway errors. Section 6 passed with
+zero failed spans; all 8 notebook Responses spans carried the gateway tag, and 13
+Foundry server-side `chat` spans joined the run's traces.
+[tests/test_notebook_gateway.py](tests/test_notebook_gateway.py) covers
+configuration, routing, readiness failures, SDK headers and notebook wiring
+without live calls.
+
 ---
 
 ## 🔑 Key Configuration
@@ -634,12 +701,15 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Section 6 reports failed spans after a successful retry | Expand failed spans and correlated exceptions; one failed operation can create several failed spans. Earlier attempts sharing the same run ID remain in the strict gate. Restart the kernel and rerun the runtime cells for a new run ID; do not disable the failure check |
 | Span health passes but content is waiting/not recorded | Content availability is independent of span health. Check the local content policy, service-side capture, table permissions and ingestion; rerun Section 6 to refresh. No content does not mean an empty answer |
 | `AppGenAIContent` query is denied or the table is unavailable | Obtain appropriate read access, including protected-table access when configured, or verify content routing. Errors remain explicit; the notebook does not silently fall back to legacy content attributes |
+| Section 3 reports that the LiteLLM gateway is not ready or its token expires too soon | Run `gateway/start.sh` on the host and rerun Section 3. If the token expiry does not change, the Azure CLI is reusing its cached token; wait until about five minutes before expiry and rerun it |
+| A gateway-routed run reports no GenAI chat spans | Keep `forward_headers: true` on both routes in `gateway/config.yaml` so `traceparent` reaches Foundry, then restart the gateway with `gateway/start.sh` |
 
 ---
 
 ## ✅ Validation Checklist
 
 - [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
+- [ ] **Section 3** prints the `Responses route`; in gateway mode it also reports `Gateway health` with Neon connected and the remaining token lifetime
 - [ ] **Section 3.1** reports MAF workflow tracing and HTTPX2 enabled, 100% sampling, the intended content policy, and disabled log/metric/Live Metrics/performance-counter export
 - [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)
 - [ ] **Section 3.3** resolves or prints the Sentinel MCP project connection details

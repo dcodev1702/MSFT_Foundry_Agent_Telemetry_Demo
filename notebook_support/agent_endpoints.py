@@ -1,4 +1,4 @@
-"""Explicit project/agent-endpoint routing for the Windows notebook."""
+"""Explicit project/agent-endpoint routing for the notebooks, optionally through a local gateway."""
 
 from collections.abc import Mapping
 from copy import deepcopy
@@ -15,6 +15,8 @@ from azure.ai.projects.models import AgentDefinition, AgentDetails, AgentEndpoin
 from openai import OpenAI
 from opentelemetry.trace import Span
 
+from notebook_support.gateway import ROUTE_PREFIX, GatewayConfig
+
 
 @dataclass(frozen=True)
 class AgentTarget:
@@ -28,6 +30,7 @@ class AgentRuntimeConfig:
     main: AgentTarget | None = None
     sentinel: AgentTarget | None = None
     version_policy: str = "pinned"
+    gateway: GatewayConfig | None = None
 
     @property
     def uses_agent_endpoint(self) -> bool:
@@ -35,10 +38,11 @@ class AgentRuntimeConfig:
 
     @property
     def label(self) -> str:
-        return (
-            "responses.create + agent endpoint"
-            if self.uses_agent_endpoint else "responses.create + agent_reference"
-        )
+        if not self.uses_agent_endpoint:
+            return "responses.create + agent_reference"
+        if self.gateway is not None:
+            return "responses.create + agent endpoint via LiteLLM gateway"
+        return "responses.create + agent endpoint"
 
     def target(self, role: str) -> AgentTarget:
         if role not in {"main", "sentinel"}:
@@ -276,9 +280,19 @@ def get_agent_openai_client(
     client: AIProjectClient, runtime: AgentRuntimeConfig, agent_name: str,
 ) -> OpenAI:
     if runtime.uses_agent_endpoint:
-        if agent_name not in {runtime.target("main").name, runtime.target("sentinel").name}:
+        roles = {runtime.target(role).name: role for role in ("main", "sentinel")}
+        if agent_name not in roles:
             raise ValueError("Agent is not one of the configured backend endpoints.")
+        if runtime.gateway is not None:
+            # Keep the SDK's instrumented transport, headers and api-version; only the hop changes.
+            return client.get_openai_client(
+                agent_name=agent_name,
+                base_url=runtime.gateway.agent_base_url(roles[agent_name]),
+                api_key=runtime.gateway.api_key,
+            )
         return client.get_openai_client(agent_name=agent_name)
+    if runtime.gateway is not None:
+        raise ValueError("The LiteLLM gateway requires agent endpoint mode.")
     return client.get_openai_client()
 
 
@@ -291,6 +305,7 @@ def responses_url(client: OpenAI) -> str:
     parsed = urlsplit(base)
     if parsed.scheme not in {"https", "http"} or not parsed.netloc:
         raise ValueError("Responses client has no valid HTTP base URL.")
-    if not parsed.path.endswith(("/openai/v1/", "/endpoint/protocols/openai/")):
+    gateway_paths = tuple(f"{ROUTE_PREFIX}/{role}/" for role in ("main", "sentinel"))
+    if not parsed.path.endswith(("/openai/v1/", "/endpoint/protocols/openai/", *gateway_paths)):
         raise ValueError(f"Unsupported Responses client path: {parsed.path}")
     return urljoin(base, "responses")
