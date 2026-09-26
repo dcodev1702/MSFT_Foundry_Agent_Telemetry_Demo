@@ -3,10 +3,12 @@
 import ast
 import io
 import json
+import re
 import subprocess
 import sys
 import unittest
 from contextlib import redirect_stdout
+from html import unescape
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,6 +18,7 @@ from unittest.mock import patch
 import nbformat
 
 from test_notebook_dependencies import direct_pins
+import test_notebook_validation as validation_tests
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,6 +139,154 @@ class LinuxNotebookTests(unittest.TestCase):
             pins = direct_pins(REQUIREMENTS / name)
             for extension in ("azure-cli", "log-analytics", "azure-devops"):
                 self.assertNotIn(extension, pins)
+
+
+class LinuxPresentationTests(unittest.TestCase):
+    def test_original_title_is_a_visible_markdown_heading_with_logo_and_subtitle(self):
+        original = json.loads((ROOT / "zolab-ai-agent-demo-win11.ipynb").read_text(encoding="utf-8"))
+        windows_intro = "".join(original["cells"][0]["source"])
+        title = re.search(r"<h1[^>]*>(.*?)</h1>", windows_intro)
+        assert title is not None
+        first = next(iter(notebook_cells().values()))
+        self.assertEqual(first["cell_type"], "markdown")
+        lines = "".join(first["source"]).splitlines()
+        self.assertTrue(lines[0].startswith("# "))
+        heading = re.sub(r"<[^>]+>", "", lines[0][2:]).strip()
+        self.assertEqual(unescape(heading), unescape(title.group(1)))
+        self.assertIn('src="images/microsoft-symbol.svg"', lines[0])
+        self.assertIn("End-to-end proof of concept", "".join(first["source"]))
+        self.assertNotIn("<h1", "".join(first["source"]))
+        self.assertNotIn("source_hidden", first["metadata"])
+
+    def test_both_decks_match_win11_colors_sections_pagination_and_model_footer(self):
+        metadata = {
+            "type": "OpenAI", "name": "test-model", "version": "test-version",
+            "deployment": "test-deployment", "response_model": "test-model",
+        }
+        common = {
+            "Path": Path, "format_model_footer": lambda _metadata: "Verified model footer",
+            "generated_at_display": "2026-09-26 00:00:00Z",
+            "agent_runtime_label": "responses.create + agent_reference",
+            "main_agent_display_name": "main-agent", "sentinel_agent_display_name": "sentinel-agent",
+            "sentinel_workspace_name": "test-workspace", "sentinel_subscription_name": "test-subscription",
+            "sentinel_target_upn": "user@example.invalid",
+        }
+        for cell_id, names, kwargs, slides, gradient, classes in (
+            ("2692d274", ["strip_heading", "normalize_marp_text", "build_marp_deck"],
+             {"story_text": "Story.\n---\nNot a new slide.", "facts_text": "MSFT Learn Insights\nFacts.",
+              "conversation_map": {"story": "one", "facts": "two"},
+              "model_metadata": {"story": metadata, "facts": metadata}},
+             4, "#020617 0%, #0f172a 52%, #172554 100%", ("lead", "story-slide", "learn-slide")),
+            ("ef551c01", ["normalize_marp_text", "build_marp_deck"],
+             {"response_text": "Sentinel result.", "conversation_id": "three", "model_metadata": metadata},
+             3, "#7a3e1d 0%, #3d2116 44%, #110c0a 100%", ("lead", "sentinel-slide")),
+        ):
+            with self.subTest(cell=cell_id):
+                windows = validation_tests.load_functions(cell_id, names, common)["build_marp_deck"]
+                with patch.object(validation_tests, "NOTEBOOK", NOTEBOOK):
+                    linux = validation_tests.load_functions(cell_id, names, common)["build_marp_deck"]
+                arguments = dict(
+                    kwargs, story_id=1, marp_path=Path("marp/test.md"), stories_path=Path("stories.json"),
+                )
+                deck = linux(**arguments)
+                self.assertEqual(deck, windows(**arguments))
+                self.assertTrue(deck.startswith("---\nmarp: true\npaginate: true\n"))
+                self.assertEqual(deck.count("\n---\n"), slides)
+                self.assertIn(gradient, deck)
+                self.assertIn('footer: "Verified model footer"', deck)
+                for name in classes:
+                    self.assertIn(f"<!-- _class: {name} -->", deck)
+
+    def test_marp_renderer_is_recommended_and_preview_instructions_use_the_real_command(self):
+        extensions = json.loads((ROOT / ".vscode/extensions.json").read_text(encoding="utf-8"))
+        self.assertIn("marp-team.marp-vscode", extensions["recommendations"])
+        for cell_id in ("2692d274", "ef551c01"):
+            source = cell_source(cell_id)
+            self.assertIn("Open Preview to the Side (Ctrl+K V)", source)
+            self.assertIn("Marp for VS Code must be enabled", source)
+            self.assertNotIn("Marp: Open Preview", source)
+
+
+class LinuxSentinelDiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        source = cell_source("ef551c01")
+        tree = ast.parse(source)
+        markers = next(
+            node.value for node in ast.walk(tree) if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "ACCESS_ERROR_MARKERS" for target in node.targets)
+        )
+        with patch.object(validation_tests, "NOTEBOOK", NOTEBOOK):
+            self.scope = validation_tests.load_functions(
+                "ef551c01", [
+                    "_clip_text", "_to_plain", "_compact_json", "_is_access_related_error",
+                    "_is_defender_timeout", "_format_error_detail", "build_sentinel_error_message",
+                ],
+                {
+                    "json": json, "re": re, "ACCESS_ERROR_MARKERS": ast.literal_eval(markers),
+                    "sentinel_target_upn": "demo@example.invalid", "sentinel_workspace_name": "demo",
+                    "sentinel_subscription_name": "demo-subscription", "sentinel_workspace_id": "demo-workspace",
+                    "sentinel_agent_display_name": "demo-agent",
+                },
+            )
+
+    def message(self, details):
+        return self.scope["build_sentinel_error_message"](SimpleNamespace(id="response-demo"), details)
+
+    def test_reported_defender_timeout_has_network_guidance_not_pim_advice(self):
+        details = [{"type": "tool_error", "message": "DefenderForAI request exceeded 300ms timeout."}]
+        message = self.message(details)
+        self.assertIn("network/service timeout", message)
+        self.assertIn("network connectivity", message)
+        self.assertIn("DefenderForAI request exceeded 300ms timeout.", message)
+        self.assertIn("response-demo", message)
+        self.assertNotIn("PIM", message)
+        self.assertNotIn("permission check failed", message)
+
+    def test_authentication_and_authorization_errors_retain_access_guidance(self):
+        for detail in (
+            {"code": "403", "message": "Forbidden"},
+            {"code": "401", "message": "Unauthorized"},
+            {"code": "AuthorizationFailed", "message": "Not authorized for this workspace"},
+            {"message": "Insufficient permissions"},
+        ):
+            with self.subTest(detail=detail):
+                message = self.message([detail])
+                self.assertIn("permission check failed", message)
+                self.assertIn("PIM", message)
+
+    def test_identifiers_and_generic_tool_errors_are_not_permission_evidence(self):
+        for detail in (
+            {"type": "tool_error", "message": "DefenderForAI request exceeded 300ms timeout.",
+             "response_id": "resp_401_403_permission"},
+            {"type": "tool_user_error", "message": "Table not found", "response_id": "resp_403"},
+            {"message": "Unable to access the endpoint because of a networking error"},
+        ):
+            with self.subTest(detail=detail):
+                self.assertFalse(self.scope["_is_access_related_error"]([detail]))
+                self.assertNotIn("PIM", self.message([detail]))
+        self.assertIn("query/schema details", self.message([{"message": "Table not found"}]))
+
+    def test_policy_denials_and_mixed_errors_are_not_reclassified_as_defender_timeouts(self):
+        timeout = {"message": "DefenderForAI request exceeded 300ms timeout."}
+        for details in (
+            [timeout, {"code": "403", "message": "Forbidden"}],
+            [{"code": "content_filter", **timeout}],
+            [{"message": "Blocked: DefenderForAI request exceeded 300ms timeout."}],
+            [timeout, {"message": "Table not found"}],
+        ):
+            with self.subTest(details=details):
+                self.assertFalse(self.scope["_is_defender_timeout"](details))
+
+    def test_query_path_does_not_automatically_replay_a_network_failure(self):
+        tree = ast.parse(cell_source("ef551c01"))
+        query = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "query_sentinel_step")
+        loops = [node for node in ast.walk(query) if isinstance(node, ast.For)]
+        self.assertEqual(len(loops), 2)  # Approval loop plus printing at most three error details.
+        calls = [ast.unparse(node.func) for node in ast.walk(query) if isinstance(node, ast.Call)]
+        self.assertEqual(calls.count("openai_client.conversations.create"), 1)
+        self.assertEqual(calls.count("append_story"), 1)
+        self.assertNotIn("time.sleep", calls)
+        self.assertNotIn("sentinel.mcp.retry", cell_source("ef551c01"))
 
 
 class LinuxImportOutputTests(unittest.TestCase):

@@ -323,6 +323,29 @@ After selecting the platform's registered demo kernel, run sections in order:
 
 For bot and worker post-deploy validation, run [deployment/run-smoke-checks.sh](deployment/run-smoke-checks.sh) and then exercise the manual Teams smoke sequence from [deployment/OPERATIONS-RUNBOOK.md](deployment/OPERATIONS-RUNBOOK.md).
 
+### Viewing Styled Marp Decks on Linux
+
+Install and enable **Marp for VS Code** (`marp-team.marp-vscode`) on the machine
+or Remote/SSH host where the Markdown preview runs. It is included in the
+[workspace extension recommendations](.vscode/extensions.json). Without this
+renderer, the generated files appear as ordinary Markdown instead of slides.
+
+Open the generated file from [marp](marp), then choose **Open Preview to the Side**
+(`Ctrl+K V`). If a preview was already open when the extension was installed,
+close and reopen it, or run **Developer: Reload Window**.
+
+The Linux generators preserve the Win11 presentation exactly:
+
+- **Main deck:** dark blue gradient; title, fictional story, Microsoft Learn
+  insights, and run metadata on four separate slides.
+- **Sentinel deck:** rustic orange-to-dark gradient; title, Sentinel result,
+  and run metadata on three separate slides.
+- Both retain slide-specific classes, pagination, and the verified model footer.
+
+No new agent run is required to preview an existing deck. The notebook's original
+title and Microsoft logo are rendered as a native Markdown heading so the title
+is also visible in the notebook outline.
+
 ### Model Metadata in Marp Outputs
 
 Both the main story/Learn deck and the Sentinel deck display a footer on every

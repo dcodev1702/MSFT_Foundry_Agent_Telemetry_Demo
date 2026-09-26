@@ -10,6 +10,20 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-26
 
+### Linux presentation and Sentinel error guidance
+
+- Restore the original notebook title and Microsoft logo as a native Markdown
+  heading, retaining its subtitle and making the title visible in the outline.
+- Recommend Marp for VS Code for Linux/Remote hosts and correct both deck links'
+  preview instructions. Preserve the Win11 blue four-slide main deck and
+  orange three-slide Sentinel deck, including classes, pagination, and model footers.
+- Distinguish the reported DefenderForAI network/service timeout from genuine
+  authorization errors. Limit PIM guidance to access-related evidence rather
+  than generic errors or incidental digits in response IDs.
+- Keep query execution, approval limits, error propagation, and persistence
+  unchanged: no automatic replay or Defender/RBAC changes.
+- Add presentation-parity and error-classification regression coverage.
+
 ### Linux MCP tool-content observations
 
 - Support `OTEL_LOG_TOOL_CONTENT=1` as an explicit notebook-level compatibility

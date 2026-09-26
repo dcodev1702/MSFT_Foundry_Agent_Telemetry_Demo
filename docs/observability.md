@@ -263,6 +263,24 @@ it does not invoke agents. Older spans remain visible as not captured/unpriced,
 with missing MCP metadata identified. Event ingestion is asynchronous; missing
 events do not prove that a remote tool completed without errors.
 
+### Sentinel Network Timeouts Versus Authorization Errors
+
+A returned `DefenderForAI request exceeded 300ms timeout` is reported by the
+Linux notebook as a **network/service timeout**, not a PIM failure. In the
+reported demo incident, the networking problem was confirmed separately.
+Increasing the notebook's HTTP timeout does not change an upstream service's
+deadline. Check connectivity and service availability before rerunning Section 5.1;
+retain the response ID and failure time for support if the problem persists.
+
+PIM/role guidance is now limited to genuine authorization evidence such as
+401/403 error codes, `Forbidden`, `AuthorizationFailed`, or denied permissions.
+Response identifiers and generic words such as `access` or `role` are not used
+as proof of an authorization failure.
+
+The original error details and failure status remain visible. No automatic
+query retries, Defender bypass, role changes, or extra persistence are added.
+The existing approval-round limit and Section 6 failure gate are unchanged.
+
 ### Linux MCP Tool-Content Capture
 
 The Linux notebook supports **`OTEL_LOG_TOOL_CONTENT=1`** as a **notebook-level
