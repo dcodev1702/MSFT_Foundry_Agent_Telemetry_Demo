@@ -66,8 +66,9 @@ On Windows, Section 1 installs [requirements-notebook.txt](requirements/requirem
 ### Ubuntu 26.04 Linux Setup
 
 [zolab-ai-agent-demo-linux.ipynb](zolab-ai-agent-demo-linux.ipynb) uses an isolated
-`.venv-linux` and the `ai-agent-demo-linux` kernel. Its requirements and constraints
-do not include the Windows profiles, Windows-only packages, or Windows wheel-build
+`.venv-linux` and the `ai-agent-demo-linux` kernel. Its environment is defined by
+[pyproject.toml](pyproject.toml) and locked, with hashes, in [uv.lock](uv.lock);
+neither includes the Windows profiles, Windows-only packages, or Windows wheel-build
 scripts. The original Windows/macOS notebooks and the standalone demo are unchanged.
 
 This host has Ubuntu 26.04.1 x86_64, system Python 3.14.4, and `uv`, but no system
@@ -85,7 +86,7 @@ uv python install --no-bin --python-downloads-json-url \
   https://raw.githubusercontent.com/astral-sh/uv/716f320609fec9a36b27718be4c403d73fab7c9a/crates/uv-python/download-metadata.json \
   3.14.7
 uv venv --python 3.14.7 --no-python-downloads --seed .venv-linux
-.venv-linux/bin/python -m pip install --upgrade -r requirements/requirements-notebook-linux.txt
+UV_PROJECT_ENVIRONMENT=.venv-linux uv sync --locked --inexact --no-python-downloads
 .venv-linux/bin/python -m pip check
 .venv-linux/bin/python -m ipykernel install --user \
   --name ai-agent-demo-linux --display-name "AI Agent Demo (Linux, Python 3.14.7)"
@@ -125,7 +126,7 @@ provides the Azure Monitor KQL query command. Section 6 still uses the Logs API
 directly; installing this extension does not change the notebook's telemetry path.
 [`azure-devops`](https://learn.microsoft.com/azure/devops/cli/) is the Azure DevOps
 extension, not the separate Azure Developer CLI (`azd`). CLI extensions are not
-added to the Python requirements or constraints.
+added to `pyproject.toml` or `uv.lock`.
 
 For VS Code Remote/SSH or a headless host, sign in in a terminal **on that Linux host**:
 
@@ -165,23 +166,25 @@ installer does not enable prereleases globally.
 | `opentelemetry-instrumentation-httpx` | `0.65b0` | Includes the HTTPX2 instrumentor |
 | `nbclient` / `nbformat` | `0.11.0` / `5.11.1` | Optional validation profile |
 
-- [requirements-notebook-linux.txt](requirements/requirements-notebook-linux.txt):
-  exact direct runtime pins.
-- [requirements-notebook-linux-validation.txt](requirements/requirements-notebook-linux-validation.txt):
-  runtime plus notebook validation tools.
-- [constraints-notebook-linux.txt](requirements/constraints-notebook-linux.txt):
-  96 resolved package versions for these two Linux profiles, including Linux
-  terminal dependencies `pexpect`/`ptyprocess`. This is a version snapshot,
-  not a hash-verified lock or a promise of compatibility with other platforms.
-  Constraints do not install optional validation packages.
+- [pyproject.toml](pyproject.toml): the exact direct runtime pins and a
+  `validation` dependency group with the notebook validation tools. It requires
+  Python 3.14.7, and `tool.uv.environments` limits it to Linux, so uv refuses to
+  use it on Windows or macOS. The notebooks and `notebook_support` are not an
+  installable package (`package = false`).
+- [uv.lock](uv.lock): all 96 packages of the runtime and the validation group,
+  including the Linux terminal dependencies `pexpect`/`ptyprocess`, each with its
+  PyPI source and SHA-256 hashes. uv checks every download against them. The lock
+  holds the same versions as the constraints snapshot it replaces.
 
-Package installation uses the configured index with TLS verification enabled.
-If an approved feed lacks a release, have it admitted or supply approved
-Linux-compatible wheels; do not use Windows constraints or disable certificate
-verification. Upgrade the runtime and telemetry train together and rerun:
+Packages install from the public Python Package Index with TLS verification;
+unlike Windows, Linux needs no locally built wheels. `--locked` stops instead of
+re-resolving when `pyproject.toml` and `uv.lock` disagree, and `--inexact` keeps
+packages outside the synced groups, such as the validation tools. Change pins in
+`pyproject.toml`, keep the runtime and telemetry train together, then relock
+(`uv lock`, or `uv lock --upgrade-package <name>` for one package) and rerun:
 
 ```bash
-.venv-linux/bin/python -m pip install -r requirements/requirements-notebook-linux-validation.txt
+UV_PROJECT_ENVIRONMENT=.venv-linux uv sync --locked --inexact --group validation
 .venv-linux/bin/python -m pip check
 .venv-linux/bin/python -m unittest discover -s tests -p "test_notebook*.py" -v
 ```
@@ -259,9 +262,8 @@ requirements/
   requirements-notebook-shared.txt
   requirements-notebook-validation.txt
   constraints-notebook-win11.txt
-  requirements-notebook-linux.txt
-  requirements-notebook-linux-validation.txt
-  constraints-notebook-linux.txt
+pyproject.toml
+uv.lock
 docs/
   observability.md
   OTEL-Agent-Spans.md
@@ -273,9 +275,10 @@ docs/
   and `notebook_support.workflow`; no `sys.path` workaround is needed.
 - [gateway](gateway) contains the optional host-local LiteLLM proxy for the Linux
   notebook; see [Optional LiteLLM Gateway with Neon (Linux)](#optional-litellm-gateway-with-neon-linux).
-- [requirements](requirements) contains the root notebooks' platform-specific
-  dependency profiles and constraints. Linux is independent of the Windows
-  snapshot; `-r`/`-c` includes remain relative to their requirement files.
+- [requirements](requirements) contains the Windows notebook's dependency profiles
+  and constraints; `-r`/`-c` includes remain relative to their requirement files.
+  The Linux notebook's environment is [pyproject.toml](pyproject.toml) and
+  [uv.lock](uv.lock) at the repository root, independent of the Windows snapshot.
 - [docs](docs) contains the [observability guide](docs/observability.md) and
   [span reference](docs/OTEL-Agent-Spans.md).
 
@@ -334,25 +337,23 @@ Azure Monitor resolves exporter **1.0.0b57** on the matching OpenTelemetry train
 
 Section 0 also constrains the bootstrap kernel version. Installing the smaller profile does **not** uninstall existing shared packages. Do not prune the shared environment blindly; use a separate environment for a minimal installation. Azure Identity's previously validated preview version is retained, not silently downgraded.
 
-**Why requirements files rather than `pyproject.toml`:** a `pyproject.toml`
-dependency list describes an installable package, and dependency groups (PEP 735)
-with a `uv.lock` file are the modern way to lock an application. This repository is
-neither a package nor a single environment:
+**`pyproject.toml` on Linux, requirements files on Windows:** the Linux notebook
+installs everything from the public Python Package Index, so its environment is a
+`pyproject.toml` with a hash-verified `uv.lock` (see the
+[Linux dependency matrix](#linux-dependency-matrix)). The Windows notebook keeps
+these requirements and constraints files:
 
-- Each notebook installs its own platform snapshot with pip, and constraints files
-  pin every transitive dependency without installing optional packages.
-  Dependency groups have no equivalent of a constraints file.
-- On restricted package feeds the notebooks install wheels built locally from
-  verified source commits ([GitHub Release Wheels](#github-release-wheels-for-restricted-package-feeds)).
+- On the restricted company feed, it installs wheels built locally from verified
+  source commits ([GitHub Release Wheels](#github-release-wheels-for-restricted-package-feeds)).
   Their hashes differ from the published ones, so a hash-verified `uv.lock` would
   reject them.
-- The Agent Framework demo pins different versions in its own environment, so it
-  would need its own project file.
+- It installs with pip, and constraints files pin every transitive dependency
+  without installing optional packages. Dependency groups have no equivalent of a
+  constraints file.
 
-Moving the pins into `pyproject.toml` would add a second format without making
-installs more reproducible, so the requirements files stay. A `pyproject.toml` with
-`uv.lock` per environment is worth revisiting if every platform can install from
-the public index with uv.
+The Agent Framework demo's
+[requirements.txt](agent-framework-demo/requirements.txt) is shared by its Windows
+and Linux notebooks, so it also stays a requirements file.
 
 ### GitHub Release Wheels for Restricted Package Feeds
 

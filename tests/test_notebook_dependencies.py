@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import time
+import tomllib
 import unittest
 from contextlib import redirect_stdout
 from importlib.metadata import PackageNotFoundError, version
@@ -35,20 +36,28 @@ RUNTIME = REQUIREMENTS / "requirements-notebook.txt"
 SHARED = REQUIREMENTS / "requirements-notebook-shared.txt"
 VALIDATION = REQUIREMENTS / "requirements-notebook-validation.txt"
 CONSTRAINTS = REQUIREMENTS / "constraints-notebook-win11.txt"
+# The Linux notebook's environment: direct pins in pyproject.toml, every package in uv.lock.
+PYPROJECT = ROOT / "pyproject.toml"
 
 
-def direct_pins(path):
+def exact_pins(requirements, source="requirements"):
+    """Return {name: version} for exact-pinned requirement strings; anything else fails."""
     pins = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith(("#", "-c ", "-r ")):
-            continue
+    for line in requirements:
         requirement = Requirement(line)
         specifiers = list(requirement.specifier)
         if len(specifiers) != 1 or specifiers[0].operator != "==":
-            raise AssertionError(f"{path.name} must use exact pins: {line}")
+            raise AssertionError(f"{source} must use exact pins: {line}")
         pins[canonicalize_name(requirement.name)] = specifiers[0].version
     return pins
+
+
+def direct_pins(path):
+    """Return the exact pins of a requirements file, skipping comments and -c/-r includes."""
+    lines = (raw.strip() for raw in path.read_text(encoding="utf-8").splitlines())
+    return exact_pins(
+        [line for line in lines if line and not line.startswith(("#", "-c ", "-r "))], path.name,
+    )
 
 
 def installation_source():
@@ -70,13 +79,18 @@ class NotebookDependencyTests(unittest.TestCase):
         self.assertIn("-r requirements-notebook.txt", VALIDATION.read_text())
 
     def test_runtime_and_validation_pins_match_the_selected_environment(self):
-        profiles = (
-            (REQUIREMENTS / "requirements-notebook-linux.txt", REQUIREMENTS / "requirements-notebook-linux-validation.txt")
-            if sys.platform == "linux" else (RUNTIME, VALIDATION)
-        )
-        for profile in profiles:
-            for name, expected in direct_pins(profile).items():
-                with self.subTest(profile=profile.name, package=name):
+        if sys.platform == "linux":
+            project = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+            groups = project["dependency-groups"]
+            profiles = {
+                "pyproject.toml dependencies": exact_pins(project["project"]["dependencies"]),
+                "pyproject.toml validation group": exact_pins(groups["validation"]),
+            }
+        else:
+            profiles = {path.name: direct_pins(path) for path in (RUNTIME, VALIDATION)}
+        for profile, pins in profiles.items():
+            for name, expected in pins.items():
+                with self.subTest(profile=profile, package=name):
                     self.assertEqual(version(name), expected)
 
     def test_optional_shared_profile_matches_when_installed(self):

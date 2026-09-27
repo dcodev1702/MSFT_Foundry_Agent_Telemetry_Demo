@@ -1,0 +1,50 @@
+# =============================================================================
+# File: pyproject.toml
+# Author: dcodev1702 (with GitHub Copilot assistance)
+# Updated: 2026-09-27
+# Purpose: The Ubuntu 26.04 / CPython 3.14.7 environment, .venv-linux, of the
+#          Linux notebook zolab-ai-agent-demo-linux.ipynb. uv.lock pins every
+#          package, with hashes, from the public Python Package Index.
+# Usage: UV_PROJECT_ENVIRONMENT=.venv-linux uv sync --locked --inexact
+#        Add --group validation for the notebook validation tools.
+# Scope: Linux only. The Windows notebook keeps requirements/*.txt because it can
+#        install wheels built locally from verified source commits; the macOS
+#        notebook and the Agent Framework demo keep their own requirements.
+# =============================================================================
+
+[project]
+name = "zolab-ai-agent-demo-linux"
+version = "2026.9.27"
+description = "Linux environment of the Microsoft Foundry agent observability notebook"
+requires-python = "==3.14.7"
+dependencies = [
+    "pip==26.2.1",
+    "ipykernel==7.3.0",
+    "agent-framework-core==1.19.0",
+    "azure-ai-projects==2.7.0",
+    "openai==3.19.2",
+    "httpx2==2.13.1",
+    # Latest stable Identity release; the Windows preview pin is not needed here.
+    "azure-identity==1.25.3",
+    "azure-monitor-opentelemetry==1.8.10",
+    "azure-core-tracing-opentelemetry==1.0.0b13",
+    # Keep the Azure Monitor-compatible OpenTelemetry train together.
+    "opentelemetry-api==1.44.0",
+    "opentelemetry-sdk==1.44.0",
+    "opentelemetry-instrumentation-httpx==0.65b0",
+]
+
+[dependency-groups]
+# Offline regression tests and fresh-kernel validation.
+validation = [
+    "nbclient==0.11.0",
+    "nbformat==5.11.1",
+]
+
+[tool.uv]
+# Notebooks and notebook_support, not an installable package.
+package = false
+# Lock and sync for Linux only: uv refuses to use this project on Windows or macOS,
+# whose notebooks keep their own environments.
+environments = ["sys_platform == 'linux'"]
+required-version = ">=0.11"

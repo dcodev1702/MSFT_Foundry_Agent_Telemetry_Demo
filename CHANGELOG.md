@@ -10,6 +10,28 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Linux environment in pyproject.toml and uv.lock
+
+- Define the Linux notebook's `.venv-linux` in a root `pyproject.toml` (exact
+  direct pins, a `validation` dependency group, Python 3.14.7, Linux only) and lock
+  it in `uv.lock`: all 96 packages from the public Python Package Index, each with
+  its SHA-256 hashes, which uv checks on every install. The lock holds exactly the
+  versions of the constraints snapshot it replaces, so the validated environment
+  did not change.
+- Remove `requirements-notebook-linux.txt`,
+  `requirements-notebook-linux-validation.txt` and `constraints-notebook-linux.txt`.
+  The Windows notebook keeps its requirements files, since it can install locally
+  built wheels whose hashes a lock would reject, and the Agent Framework demo keeps
+  the `requirements.txt` its Windows and Linux notebooks share.
+- Sections 0 and 1 of the Linux notebook now run
+  `uv sync --locked --inexact` into `.venv-linux` and then `pip check`. Section 0
+  now requires Python 3.14.7 exactly, the version the lock is resolved for, and
+  needs uv even when it reuses the environment.
+- Tests check the pins, the lock's hashes and PyPI source, that the lock matches
+  `pyproject.toml`, and that the environment has every locked version. A fresh
+  environment built only from the lock passed the root suite, and the notebook's
+  setup cells and a full run passed against `.venv-linux`.
+
 ### Faster Section 6 report
 
 - Read Section 6's report views concurrently, five at a time, the number of

@@ -6,6 +6,7 @@ import json
 import re
 import subprocess
 import sys
+import tomllib
 import unittest
 from contextlib import redirect_stdout
 from html import unescape
@@ -17,13 +18,39 @@ from unittest.mock import patch
 
 import nbformat
 
-from test_notebook_dependencies import direct_pins
+from test_notebook_dependencies import exact_pins
 import test_notebook_validation as validation_tests
 
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTEBOOK = ROOT / "zolab-ai-agent-demo-linux.ipynb"
 REQUIREMENTS = ROOT / "requirements"
+PYPROJECT = ROOT / "pyproject.toml"
+LOCK = ROOT / "uv.lock"
+PROJECT_NAME = "zolab-ai-agent-demo-linux"
+
+
+def linux_project():
+    """Return the parsed pyproject.toml of the Linux notebook environment."""
+    return tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))
+
+
+def lock_data():
+    """Return the parsed uv.lock."""
+    return tomllib.loads(LOCK.read_text(encoding="utf-8"))
+
+
+def locked_packages():
+    """Every package that uv.lock installs, by name, without the virtual project entry."""
+    return {
+        package["name"]: package for package in lock_data()["package"]
+        if package["name"] != PROJECT_NAME
+    }
+
+
+def requested_pins(entries):
+    """Return {name: specifier} for the requirements that uv.lock records for the project."""
+    return {entry["name"]: entry["specifier"] for entry in entries}
 
 
 def notebook_cells():
@@ -95,29 +122,62 @@ class LinuxNotebookTests(unittest.TestCase):
             self.assertTrue(calls[0])
             self.assertEqual(calls[0], calls[1])
 
-    def test_profiles_are_exact_and_use_linux_constraints_only(self):
-        constraints = direct_pins(REQUIREMENTS / "constraints-notebook-linux.txt")
-        runtime = REQUIREMENTS / "requirements-notebook-linux.txt"
-        validation = REQUIREMENTS / "requirements-notebook-linux-validation.txt"
-        self.assertIn("-c constraints-notebook-linux.txt", runtime.read_text(encoding="utf-8"))
-        self.assertIn("-r requirements-notebook-linux.txt", validation.read_text(encoding="utf-8"))
-        for profile in (runtime, validation):
-            self.assertNotIn("win11", profile.read_text(encoding="utf-8"))
-            for name, expected in direct_pins(profile).items():
-                with self.subTest(profile=profile.name, package=name):
-                    self.assertEqual(constraints[name], expected)
-        self.assertIn("pexpect", constraints)
-        self.assertIn("ptyprocess", constraints)
+    def test_pyproject_pins_direct_dependencies_and_locks_linux_only(self):
+        project = linux_project()
+        runtime = exact_pins(project["project"]["dependencies"], "pyproject.toml")
+        validation = exact_pins(project["dependency-groups"]["validation"], "pyproject.toml")
+        self.assertEqual(project["project"]["requires-python"], "==3.14.7")
+        self.assertIs(project["tool"]["uv"]["package"], False)
+        self.assertEqual(project["tool"]["uv"]["environments"], ["sys_platform == 'linux'"])
+        # The validated snapshot lives in uv.lock, not in constraints kept in pyproject.toml.
+        self.assertNotIn("constraint-dependencies", project["tool"]["uv"])
+        self.assertEqual(set(validation), {"nbclient", "nbformat"})
+        locked = locked_packages()
+        for name, expected in {**runtime, **validation}.items():
+            with self.subTest(package=name):
+                self.assertEqual(locked[name]["version"], expected)
+        self.assertIn("pexpect", locked)
+        self.assertIn("ptyprocess", locked)
         for name in ("pywin32", "colorama", "appnope"):
-            self.assertNotIn(name, constraints)
+            self.assertNotIn(name, locked)
         for name in ("agent-framework-openai", "agent-framework-a2a", "a2a-sdk"):
-            self.assertNotIn(name, direct_pins(runtime))
+            self.assertNotIn(name, runtime)
+
+    def test_lock_matches_pyproject_and_pins_hashed_public_packages(self):
+        lock, project = lock_data(), linux_project()
+        root = next(package for package in lock["package"] if package["name"] == PROJECT_NAME)
+        runtime = exact_pins(project["project"]["dependencies"])
+        validation = exact_pins(project["dependency-groups"]["validation"])
+        self.assertEqual(
+            requested_pins(root["metadata"]["requires-dist"]),
+            {name: f"=={pin}" for name, pin in runtime.items()},
+        )
+        self.assertEqual(
+            requested_pins(root["metadata"]["requires-dev"]["validation"]),
+            {name: f"=={pin}" for name, pin in validation.items()},
+        )
+        self.assertEqual(lock["requires-python"], "==3.14.7")
+        self.assertEqual(lock["supported-markers"], ["sys_platform == 'linux'"])
+        self.assertNotIn("manifest", lock)
+        for name, package in locked_packages().items():
+            with self.subTest(package=name):
+                self.assertEqual(package["source"], {"registry": "https://pypi.org/simple"})
+                artifacts = [package.get("sdist", {}), *package.get("wheels", [])]
+                self.assertTrue(any(
+                    artifact.get("hash", "").startswith("sha256:") for artifact in artifacts
+                ))
+        # pyproject.toml and uv.lock replace the former Linux requirement and constraint files.
+        for name in (
+            "requirements-notebook-linux.txt", "requirements-notebook-linux-validation.txt",
+            "constraints-notebook-linux.txt",
+        ):
+            self.assertFalse((REQUIREMENTS / name).exists(), name)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux dependency snapshot")
-    def test_installed_packages_match_every_linux_constraint(self):
-        for name, expected in direct_pins(REQUIREMENTS / "constraints-notebook-linux.txt").items():
+    def test_installed_packages_match_every_locked_version(self):
+        for name, package in locked_packages().items():
             with self.subTest(package=name):
-                self.assertEqual(version(name), expected)
+                self.assertEqual(version(name), package["version"])
 
     def test_setup_has_no_windows_installer_or_global_python_override(self):
         source = "\n".join(cell_source(cell_id) for cell_id in ("fcc00444", "04fb2ced", "a2c70b8c", "8330c10b"))
@@ -138,10 +198,9 @@ class LinuxNotebookTests(unittest.TestCase):
             self.assertIn("az monitor log-analytics query --help", source)
             self.assertIn("az devops project list --help", source)
             self.assertNotIn("az extension add --name kql", source)
-        for name in ("requirements-notebook-linux.txt", "constraints-notebook-linux.txt"):
-            pins = direct_pins(REQUIREMENTS / name)
-            for extension in ("azure-cli", "log-analytics", "azure-devops"):
-                self.assertNotIn(extension, pins)
+        packages = {**exact_pins(linux_project()["project"]["dependencies"]), **locked_packages()}
+        for extension in ("azure-cli", "log-analytics", "azure-devops"):
+            self.assertNotIn(extension, packages)
 
 
 class LinuxPresentationTests(unittest.TestCase):
@@ -345,6 +404,17 @@ class LinuxImportOutputTests(unittest.TestCase):
         self.assertEqual(imports[0], imports[1])
 
 
+class Recorder:
+    """Record subprocess.check_call commands and the environment each one received."""
+
+    def __init__(self):
+        self.commands, self.environments = [], []
+
+    def __call__(self, command, **kwargs):
+        self.commands.append(command)
+        self.environments.append(kwargs.get("env"))
+
+
 class LinuxEnvironmentCellTests(unittest.TestCase):
     def execute(
         self, cell_id, root, *, prefix=None, runner=None, probe=None,
@@ -366,20 +436,32 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
 
     def make_root(self, directory, *, existing=False):
         root = Path(directory)
-        (root / "requirements").mkdir()
-        for name in ("requirements-notebook-linux.txt", "constraints-notebook-linux.txt"):
-            (root / "requirements" / name).write_text("# fixture\n", encoding="utf-8")
+        for name in ("pyproject.toml", "uv.lock"):
+            (root / name).write_text("# fixture\n", encoding="utf-8")
         if existing:
             (root / ".venv-linux" / "bin").mkdir(parents=True)
             (root / ".venv-linux" / "bin" / "python").touch()
             (root / ".venv-linux" / "pyvenv.cfg").touch()
         return root
 
-    def test_bootstrap_uses_uv_without_system_pip_and_registers_distinct_kernel(self):
+    def assert_locked_sync(self, command, environment, root):
+        """Check a uv sync of .venv-linux to exactly the committed lock."""
+        self.assertEqual(command[:2], ["/usr/bin/uv", "sync"])
+        for flag in ("--locked", "--inexact", "--no-python-downloads"):
+            self.assertIn(flag, command)
+        self.assertEqual(command[-2:], ["--project", str(root)])
+        self.assertEqual(environment["UV_PROJECT_ENVIRONMENT"], str(root / ".venv-linux"))
+        for forbidden in (
+            "--frozen", "--upgrade", "--pre", "--index-url", "--find-links", "--trusted-host",
+        ):
+            self.assertNotIn(forbidden, command)
+
+    def test_bootstrap_provisions_python_syncs_the_lock_and_registers_distinct_kernel(self):
         with TemporaryDirectory() as directory:
             root = self.make_root(directory)
-            commands = []
-            self.execute("fcc00444", root, runner=commands.append, python_version=(3, 14, 4))
+            runner = Recorder()
+            self.execute("fcc00444", root, runner=runner, python_version=(3, 14, 4))
+            commands = runner.commands
             self.assertEqual(commands[0][:3], ["/usr/bin/uv", "python", "install"])
             self.assertIn("--no-bin", commands[0])
             self.assertEqual(commands[0][-1], "3.14.7")
@@ -388,101 +470,102 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
             self.assertIn("--no-python-downloads", commands[1])
             self.assertIn("3.14.7", commands[1])
             self.assertEqual(commands[1][-1], str(root / ".venv-linux"))
-            install = commands[2]
-            self.assertIn(str(root / "requirements" / "constraints-notebook-linux.txt"), install)
-            self.assertEqual(install[-2:], ["pip", "ipykernel"])
-            self.assertEqual(commands[3][-2:], ["pip", "check"])
-            self.assertIn("ai-agent-demo-linux", commands[4])
             self.assertNotIn("--clear", commands[1])
+            self.assert_locked_sync(commands[2], runner.environments[2], root)
+            python = str(root / ".venv-linux" / "bin" / "python")
+            self.assertEqual(commands[3], [python, "-m", "pip", "check"])
+            self.assertIn("ai-agent-demo-linux", commands[4])
+            self.assertEqual(len(commands), 5)
 
-    def test_bootstrap_reuses_existing_environment_without_uv_or_recreation(self):
+    def test_bootstrap_reuses_existing_environment_and_resyncs_it_without_recreation(self):
         with TemporaryDirectory() as directory:
             root = self.make_root(directory, existing=True)
-            commands = []
-            self.execute("fcc00444", root, runner=commands.append, uv=None)
-            self.assertEqual(len(commands), 3)
-            self.assertTrue(all("venv" not in command for command in commands))
+            runner = Recorder()
+            self.execute("fcc00444", root, runner=runner)
+            self.assertEqual(len(runner.commands), 3)
+            self.assert_locked_sync(runner.commands[0], runner.environments[0], root)
+            self.assertTrue(all(
+                command[1] not in ("venv", "python") for command in runner.commands
+            ))
 
     def test_invalid_or_wrong_version_environment_cannot_be_overwritten(self):
         with TemporaryDirectory() as directory:
             root = self.make_root(directory)
             (root / ".venv-linux").mkdir()
-            commands = []
+            runner = Recorder()
             with self.assertRaisesRegex(RuntimeError, "not a usable Linux virtual environment"):
-                self.execute("fcc00444", root, runner=commands.append)
-            self.assertEqual(commands, [])
-        with TemporaryDirectory() as directory:
-            root = self.make_root(directory, existing=True)
-            commands = []
-            probe = {"python": [3, 14, 4], "prefix": str(root / ".venv-linux"), "platform": "linux"}
-            with self.assertRaisesRegex(RuntimeError, "must use Linux Python 3.14.7 or newer"):
-                self.execute("fcc00444", root, runner=commands.append, probe=probe)
-            self.assertEqual(commands, [])
-        with TemporaryDirectory() as directory:
-            root = self.make_root(directory, existing=True)
-            commands = []
-            probe = {"python": [3, 14, 8], "prefix": str(root / ".venv-linux"), "platform": "linux"}
-            self.execute("fcc00444", root, runner=commands.append, probe=probe)
-            self.assertEqual(len(commands), 3)
+                self.execute("fcc00444", root, runner=runner)
+            self.assertEqual(runner.commands, [])
+        # uv.lock is resolved for Python 3.14.7 exactly, so older and newer patches are refused.
+        for python in ([3, 14, 4], [3, 14, 8]):
+            with self.subTest(python=python), TemporaryDirectory() as directory:
+                root = self.make_root(directory, existing=True)
+                runner = Recorder()
+                probe = {"python": python, "prefix": str(root / ".venv-linux"), "platform": "linux"}
+                refused = r"must use Linux Python 3\.14\.7, as uv\.lock requires"
+                with self.assertRaisesRegex(RuntimeError, refused):
+                    self.execute("fcc00444", root, runner=runner, probe=probe)
+                self.assertEqual(runner.commands, [])
 
     def test_missing_uv_or_repository_fails_before_installation(self):
-        with TemporaryDirectory() as directory:
-            root = self.make_root(directory)
-            commands = []
-            with self.assertRaisesRegex(RuntimeError, "Install uv"):
-                self.execute("fcc00444", root, runner=commands.append, uv=None)
-            self.assertEqual(commands, [])
+        for cell_id, existing in (("fcc00444", False), ("fcc00444", True), ("a2c70b8c", True)):
+            with self.subTest(cell=cell_id, existing=existing), TemporaryDirectory() as directory:
+                root = self.make_root(directory, existing=existing)
+                runner = Recorder()
+                with self.assertRaisesRegex(RuntimeError, "Install uv"):
+                    self.execute(cell_id, root, runner=runner, uv=None)
+                self.assertEqual(runner.commands, [])
         for cell_id in ("fcc00444", "a2c70b8c"):
             with self.subTest(cell=cell_id), TemporaryDirectory() as directory:
-                commands = []
-                with self.assertRaisesRegex(FileNotFoundError, "repository root"):
-                    self.execute(cell_id, Path(directory), runner=commands.append)
-                self.assertEqual(commands, [])
+                runner = Recorder()
+                missing = "repository root containing pyproject.toml and uv.lock"
+                with self.assertRaisesRegex(FileNotFoundError, missing):
+                    self.execute(cell_id, Path(directory), runner=runner)
+                self.assertEqual(runner.commands, [])
 
     def test_wrong_kernel_is_rejected_even_when_python_symlinks_match(self):
         for cell_id in ("04fb2ced", "a2c70b8c"):
             with self.subTest(cell=cell_id), TemporaryDirectory() as directory:
                 root = self.make_root(directory, existing=True)
-                commands = []
+                runner = Recorder()
                 for prefix in (Path("/usr"), root / ".venv", root / "agent-framework-demo" / ".venv"):
                     with self.subTest(prefix=prefix), self.assertRaisesRegex(RuntimeError, "kernel"):
-                        self.execute(cell_id, root, prefix=prefix, runner=commands.append)
-                self.assertEqual(commands, [])
+                        self.execute(cell_id, root, prefix=prefix, runner=runner)
+                self.assertEqual(runner.commands, [])
 
-    def test_installation_uses_only_linux_manifest_and_checks_dependencies(self):
+    def test_installation_syncs_this_kernel_to_the_lock_and_checks_dependencies(self):
         with TemporaryDirectory() as directory:
             root = self.make_root(directory)
-            commands = []
-            self.execute("a2c70b8c", root, runner=commands.append)
-            self.assertEqual(len(commands), 2)
-            self.assertEqual(commands[0][-2:], ["--requirement", str(root / "requirements" / "requirements-notebook-linux.txt")])
-            self.assertEqual(commands[1][-2:], ["pip", "check"])
-            for forbidden in ("--pre", "--index-url", "--trusted-host", "--find-links"):
-                self.assertNotIn(forbidden, commands[0])
+            runner = Recorder()
+            self.execute("a2c70b8c", root, runner=runner)
+            self.assertEqual(len(runner.commands), 2)
+            self.assert_locked_sync(runner.commands[0], runner.environments[0], root)
+            self.assertEqual(runner.commands[1][-2:], ["pip", "check"])
 
     def test_verification_and_installation_require_the_exact_python_patch(self):
         for cell_id in ("04fb2ced", "a2c70b8c"):
             for python_version in ((3, 14, 4), (3, 14, 6), (3, 15, 0)):
                 with self.subTest(cell=cell_id, python=python_version), TemporaryDirectory() as directory:
                     root = self.make_root(directory)
-                    commands = []
+                    runner = Recorder()
                     with self.assertRaisesRegex(RuntimeError, r"Python 3\.14\.7"):
-                        self.execute(cell_id, root, runner=commands.append, python_version=python_version)
-                    self.assertEqual(commands, [])
+                        self.execute(cell_id, root, runner=runner, python_version=python_version)
+                    self.assertEqual(runner.commands, [])
 
     def test_bootstrap_rejects_non_linux_hosts_before_side_effects(self):
         with TemporaryDirectory() as directory:
             root = self.make_root(directory)
-            commands = []
+            runner = Recorder()
             with self.assertRaisesRegex(RuntimeError, "notebook on Linux"):
-                self.execute("fcc00444", root, runner=commands.append, platform_name="win32")
-            self.assertEqual(commands, [])
+                self.execute("fcc00444", root, runner=runner, platform_name="win32")
+            self.assertEqual(runner.commands, [])
 
     def test_installation_failure_is_not_reported_as_success(self):
         with TemporaryDirectory() as directory:
             root = self.make_root(directory)
             with self.assertRaisesRegex(RuntimeError, "Linux dependency installation failed") as error:
-                self.execute("a2c70b8c", root, runner=subprocess.CalledProcessError(1, ["pip"]))
+                failure = subprocess.CalledProcessError(1, ["uv", "sync"])
+                self.execute("a2c70b8c", root, runner=failure)
             self.assertIsInstance(error.exception.__cause__, subprocess.CalledProcessError)
 
 
