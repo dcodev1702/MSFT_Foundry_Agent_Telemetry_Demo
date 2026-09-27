@@ -31,11 +31,16 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 - Add `gateway/neon-latency.py`, which reports the configured database's Neon
   region and ranks every Neon region by median TCP connect time from the gateway
-  host. On this host, `aws-eu-central-1` (Frankfurt) measured about 8 ms, versus
-  116 ms for the current `aws-us-east-2` project.
-- Document moving the gateway database to a new project in the closest region
-  through `gateway/start.sh --prompt-database-url`. LiteLLM recreates its schema;
-  no data migration is needed while spend logging and usage limits are off.
+  host. On this host, `aws-eu-central-1` (Frankfurt) measured 6–8 ms, versus
+  116 ms for the original `aws-us-east-2` project.
+- Move the gateway database to a new Neon project in `aws-eu-central-1` through
+  `gateway/start.sh --prompt-database-url`; LiteLLM recreated its schema, and no
+  data migration was needed while spend logging and usage limits are off. Delete
+  the original `aws-us-east-2` project after verifying the switch.
+- LiteLLM's database check before forwarding fell from about 125 ms to a median of
+  about 14 ms on cache misses.
+- Keep hand-added keys, such as `NEON_API_KEY`, when `start.sh` rewrites
+  `gateway/.env`.
 
 ## 2026-09-26
 

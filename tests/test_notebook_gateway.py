@@ -360,6 +360,25 @@ class GatewayObservabilityTests(unittest.TestCase):
             self.assertIn(text, report)
 
 
+class RuntimeEnvRefreshTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("refresh_runtime_env", ROOT / "gateway" / "refresh_runtime_env.py")
+        assert spec is not None and spec.loader is not None
+        self.refresh = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.refresh)
+
+    def test_hand_added_keys_survive_a_refresh_and_managed_keys_are_replaced(self):
+        current = {"DATABASE_URL": "old-url", "NEON_API_KEY": "napi_test", "AZURE_AD_TOKEN": "old-token"}
+        managed = {"DATABASE_URL": "new-url", "AZURE_AD_TOKEN": "new-token"}
+        merged = self.refresh.merge_unmanaged(current, managed)
+        self.assertEqual(merged, {"DATABASE_URL": "new-url", "AZURE_AD_TOKEN": "new-token", "NEON_API_KEY": "napi_test"})
+        with TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            self.refresh.write_env(env_file, merged)
+            self.assertEqual(self.refresh.parse_env(env_file), merged)
+            self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
+
+
 class NeonLatencyProbeTests(unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location("neon_latency", ROOT / "gateway" / "neon-latency.py")

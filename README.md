@@ -513,8 +513,9 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   starts the container and fails unless LiteLLM is healthy and Neon is connected.
   Rerun it before the token expires, typically after 60–90 minutes; the CLI can
   reuse its cached token until about five minutes before expiry. Refreshing
-  recreates the container, so avoid it during a notebook run.
-  `gateway/smoke-test.sh` checks both routes.
+  recreates the container, so avoid it during a notebook run. Keys that `start.sh`
+  does not manage, such as a hand-added `NEON_API_KEY`, are kept when the file is
+  rewritten. `gateway/smoke-test.sh` checks both routes.
 - **Neon:** use the direct (non-`-pooler`) connection string with
   `sslmode=require`, because LiteLLM runs `prisma migrate deploy` at startup.
   After a password rotation, copy the direct string from the Neon Console
@@ -523,14 +524,16 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
 - **Neon region:** keep the database close to the gateway host, because LiteLLM
   checks it before forwarding any request whose cache has expired.
   `gateway/neon-latency.py` reports the configured database's region and ranks
-  every Neon region by median TCP connect time from the host. On this host,
-  `aws-eu-central-1` (Frankfurt) measured 7–8 ms and the current `aws-us-east-2`
-  project about 116 ms. A project's region is fixed, so to move, create a new
-  project in the closest region (Neon Console → **New project** → region), copy
-  its direct connection string, and run `gateway/start.sh --prompt-database-url`.
-  LiteLLM creates its schema on first start. No data needs copying while spend
-  logging and usage limits are off. Rerun `gateway/neon-latency.py` to confirm the
-  new region, then delete the old project.
+  every Neon region by median TCP connect time from the host. The gateway database
+  now runs in a Neon project in `aws-eu-central-1` (Frankfurt), 6–7 ms from this
+  host. The original `aws-us-east-2` project, about 116 ms away, was deleted after
+  the switch. LiteLLM's database check before forwarding fell from about 125 ms to
+  a median of about 14 ms (8–48 ms across four spaced requests). A project's region
+  is fixed, so to move again, create a new project in the closest region (Neon
+  Console → **New project** → region), copy its direct connection string, and run
+  `gateway/start.sh --prompt-database-url`. LiteLLM creates its schema on first
+  start. No data needs copying while spend logging and usage limits are off. Rerun
+  `gateway/neon-latency.py` to confirm the new region, then delete the old project.
 - **Notebook opt-in:** add `"agent_gateway": "litellm"` to the local build file or
   set `FOUNDRY_AGENT_GATEWAY=litellm`; the environment variable wins. Section 3
   prints the route and stops before any agent call unless LiteLLM is ready, Neon
@@ -552,10 +555,11 @@ Section 6 with LiteLLM tracing enabled. All 11 gateway requests (3 conversations
 and 8 Responses calls) returned HTTP 200, and all 34 LiteLLM spans (11 requests
 and 23 children) correlated to story, facts or Sentinel with zero failures.
 LiteLLM added about 2 ms before forwarding most Responses calls. Requests after a
-few idle seconds spent about 120 ms, one Neon round trip from this host, on a
-database-backed budget lookup. One Sentinel call waited 4.0 s when LiteLLM briefly
-could not reach Neon (`Budget lookup failed for user`) before continuing. No time
-was added after the upstream call returned.
+few idle seconds spent about 120 ms, one round trip to the original `aws-us-east-2`
+Neon project from this host, on a database-backed budget lookup; moving the
+database to Frankfurt later reduced this to a median of about 14 ms. One Sentinel
+call waited 4.0 s when LiteLLM briefly could not reach Neon (`Budget lookup failed
+for user`) before continuing. No time was added after the upstream call returned.
 [tests/test_notebook_gateway.py](tests/test_notebook_gateway.py) covers
 configuration, routing, readiness failures, SDK headers, trace export and
 notebook wiring without live calls.
