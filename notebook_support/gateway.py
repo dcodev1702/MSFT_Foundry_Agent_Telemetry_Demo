@@ -20,10 +20,17 @@ if TYPE_CHECKING:
 GATEWAY_MODES = ("direct", "litellm")
 GATEWAY_ROLES = ("main", "sentinel")
 ROUTE_PREFIX = "/foundry-agent"
-DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / "gateway" / ".env"
+GATEWAY_DIR = Path(__file__).resolve().parents[1] / "gateway"
+DEFAULT_ENV_FILE = GATEWAY_DIR / ".env"
 # Azure CLI can reuse a cached token until about five minutes before expiry.
 MINIMUM_TOKEN_LIFETIME = timedelta(minutes=10)
 COMPOSE_PROJECT = "foundry-agent-gateway"
+SERVICE_CONFIG_FILES = {"litellm": "config.yaml", "otel-collector": "otel-collector.yaml"}
+# Without this Collector rule, App Insights stores LiteLLM's OK status as ResultCode 1 and the
+# Foundry trace view flags every LiteLLM span as an error.
+COLLECTOR_STATUS_RULE = "set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK"
+_COLLECTOR_STATUS_PROCESSOR = re.compile(r"processors:\s*\[[^\]]*\btransform/litellm_status\b")
+_EXPORT_FAILURE = re.compile(r"(?i)\terror\t|failed to export|exporting failed|encountered while exporting")
 NEON_REGION_NAMES = {
     "us-east-1": "N. Virginia", "us-east-2": "Ohio", "us-west-2": "Oregon", "eu-central-1": "Frankfurt",
     "eu-west-2": "London", "ap-southeast-1": "Singapore", "ap-southeast-2": "Sydney", "sa-east-1": "São Paulo",
@@ -170,31 +177,129 @@ def _neon_location(database_url: str) -> str:
     return f"{database} in aws-{region} ({NEON_REGION_NAMES.get(region, region)})"
 
 
-def _collector_status(run: Callable[..., subprocess.CompletedProcess]) -> str:
+@dataclass(frozen=True)
+class _Container:
+    id: str
+    image: str
+    status: str
+    started_at: datetime | None
+
+
+def _docker_time(value: str) -> datetime | None:
+    # Docker reports nanoseconds; older Python versions parse at most microseconds.
     try:
-        result = run(
-            ["docker", "ps", "--filter", f"label=com.docker.compose.project={COMPOSE_PROJECT}",
-             "--filter", "label=com.docker.compose.service=otel-collector", "--format", "{{.Image}}\t{{.Status}}"],
-            capture_output=True, text=True, timeout=10,
+        parsed = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", value.strip()).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+
+def _compose_container(service: str, run: Callable[..., subprocess.CompletedProcess]) -> _Container | None:
+    """Return the running container for a gateway service, None when stopped; raise OSError without Docker."""
+    listed = run(
+        ["docker", "ps", "--filter", f"label=com.docker.compose.project={COMPOSE_PROJECT}",
+         "--filter", f"label=com.docker.compose.service={service}", "--format", "{{.ID}}\t{{.Image}}\t{{.Status}}"],
+        capture_output=True, text=True, timeout=10,
+    )
+    if listed.returncode != 0:
+        raise OSError(f"docker ps failed for {service}")
+    lines = listed.stdout.strip().splitlines()
+    if not lines:
+        return None
+    container_id, image, status = (lines[0].split("\t") + ["", ""])[:3]
+    inspected = run(
+        ["docker", "inspect", "--format", "{{.State.StartedAt}}", container_id],
+        capture_output=True, text=True, timeout=10,
+    )
+    started_at = _docker_time(inspected.stdout) if inspected.returncode == 0 else None
+    return _Container(container_id, image, status, started_at)
+
+
+def _config_changed_since_start(container: _Container, config_file: Path) -> bool:
+    if container.started_at is None or not config_file.is_file():
+        return False
+    return datetime.fromtimestamp(config_file.stat().st_mtime, timezone.utc) > container.started_at
+
+
+def collector_normalizes_litellm_status(config_file: Path) -> bool:
+    """Return whether the Collector config resets LiteLLM's OK span status before export."""
+    try:
+        text = config_file.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return COLLECTOR_STATUS_RULE in text and _COLLECTOR_STATUS_PROCESSOR.search(text) is not None
+
+
+def check_gateway_telemetry(
+    gateway: GatewayConfig, *, gateway_dir: Path = GATEWAY_DIR, log_window: str = "30m",
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> dict[str, object]:
+    """Fail before agent calls when LiteLLM spans would be lost, use stale settings, or show as errors."""
+    collector_config = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"]
+    if not collector_normalizes_litellm_status(collector_config):
+        raise RuntimeError(
+            f"{collector_config} does not reset LiteLLM's OK span status, so the Foundry trace view "
+            "would flag every LiteLLM span as an error. Restore the transform/litellm_status processor "
+            "from the repository, then run gateway/start.sh."
         )
+    containers = {}
+    for service, config_name in SERVICE_CONFIG_FILES.items():
+        try:
+            container = _compose_container(service, run)
+        except (OSError, subprocess.SubprocessError) as error:
+            raise RuntimeError(
+                "Docker is unavailable, so the gateway's trace export cannot be checked. "
+                "Start Docker, then run gateway/start.sh."
+            ) from error
+        if container is None:
+            raise RuntimeError(
+                f"The gateway's {service} container is not running, so {gateway.name} spans cannot "
+                "reach Application Insights. Run gateway/start.sh."
+            )
+        if _config_changed_since_start(container, gateway_dir / config_name):
+            raise RuntimeError(
+                f"gateway/{config_name} changed after the {service} container started, so it still "
+                "runs the old settings. Run gateway/start.sh to apply them."
+            )
+        containers[service] = container
+
+    export_failures = 0
+    for container in containers.values():
+        try:
+            logs = run(
+                ["docker", "logs", "--since", log_window, container.id],
+                capture_output=True, text=True, timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        lines = f"{logs.stdout or ''}\n{logs.stderr or ''}".splitlines()
+        export_failures += sum(1 for line in lines if _EXPORT_FAILURE.search(line))
+    return {"config": "current", "status_normalized": True, "export_failures": export_failures}
+
+
+def _collector_status(run: Callable[..., subprocess.CompletedProcess], gateway_dir: Path) -> str:
+    try:
+        container = _compose_container("otel-collector", run)
     except (OSError, subprocess.SubprocessError):
         return "⚠️ Docker status unavailable"
-    if result.returncode != 0:
-        return "⚠️ Docker status unavailable"
-    lines = result.stdout.strip().splitlines()
-    if not lines:
+    if container is None:
         return "❌ Not running; run gateway/start.sh"
-    image, _, status = lines[0].partition("\t")
-    name = image.split("@", 1)[0]
+    name = container.image.split("@", 1)[0]
     version = name.rsplit(":", 1)[1] if ":" in name.rsplit("/", 1)[-1] else "latest"
-    state = "✅" if status.startswith("Up") else "⚠️"
-    return f"{state} otelcol-contrib {version}, {status} → App Insights"
+    summary = f"otelcol-contrib {version}, {container.status}"
+    config_file = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"]
+    if _config_changed_since_start(container, config_file):
+        return f"⚠️ {summary}; config changed, run gateway/start.sh"
+    if not collector_normalizes_litellm_status(config_file):
+        return f"⚠️ {summary}; LiteLLM spans show as errors in Foundry traces"
+    state = "✅" if container.status.startswith("Up") else "⚠️"
+    return f"{state} {summary} → App Insights"
 
 
 def gateway_infrastructure_status(
     build_info: Mapping[str, object], environment: Mapping[str, str] | None = None, *,
     now: datetime | None = None, opener: Callable[..., object] = urllib.request.urlopen,
-    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run, gateway_dir: Path = GATEWAY_DIR,
 ) -> dict[str, str]:
     """Return deployment-table values for the "litellm", "otel_collector", and "neon" rows.
 
@@ -249,4 +354,4 @@ def gateway_infrastructure_status(
         neon_value = f"❌ {str(database_status).capitalize()}, {location}; check the Neon Console"
     else:
         neon_value = f"⚠️ Status unknown, {location}"
-    return {"litellm": gateway_value, "otel_collector": _collector_status(run), "neon": neon_value}
+    return {"litellm": gateway_value, "otel_collector": _collector_status(run, gateway_dir), "neon": neon_value}

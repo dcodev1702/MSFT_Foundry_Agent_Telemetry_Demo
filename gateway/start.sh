@@ -14,6 +14,23 @@ fi
 docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" config --quiet
 docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" up -d
 
+# `up -d` does not recreate containers when only a bind-mounted config file changed.
+for service_config in litellm:config.yaml otel-collector:otel-collector.yaml; do
+    service="${service_config%%:*}"
+    config_file="$gateway_dir/${service_config#*:}"
+    service_id="$(
+        docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" \
+            ps --quiet "$service"
+    )"
+    [[ -n "$service_id" ]] || continue
+    started_at="$(docker inspect --format '{{.State.StartedAt}}' "$service_id")"
+    if (( $(stat -c %Y "$config_file") > $(date -d "$started_at" +%s) )); then
+        printf 'Restarting %s to apply %s\n' "$service" "${config_file##*/}"
+        docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" \
+            restart "$service"
+    fi
+done
+
 container_id="$(
     docker compose \
         --project-directory "$gateway_dir" \

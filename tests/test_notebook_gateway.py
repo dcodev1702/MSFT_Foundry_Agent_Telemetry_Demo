@@ -33,7 +33,8 @@ from notebook_support.agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, responses_url,
 )
 from notebook_support.gateway import (
-    GatewayConfig, check_gateway_ready, configure_agent_gateway, gateway_infrastructure_status, gateway_mode,
+    COLLECTOR_STATUS_RULE, SERVICE_CONFIG_FILES, GatewayConfig, check_gateway_ready, check_gateway_telemetry,
+    collector_normalizes_litellm_status, configure_agent_gateway, gateway_infrastructure_status, gateway_mode,
     load_gateway_config,
 )
 from notebook_support.observability import build_observability_queries, render_observability_report
@@ -67,6 +68,40 @@ def write_env(directory, **overrides):
         encoding="utf-8",
     )
     return path
+
+
+def write_gateway_dir(directory, *, normalize_status=True):
+    gateway_dir = Path(directory) / "gateway"
+    gateway_dir.mkdir(exist_ok=True)
+    (gateway_dir / "config.yaml").write_text("general_settings: {}\n", encoding="utf-8")
+    collector = (ROOT / "gateway" / "otel-collector.yaml").read_text(encoding="utf-8")
+    if not normalize_status:
+        collector = collector.replace("processors: [transform/litellm_status, batch]", "processors: [batch]")
+    (gateway_dir / "otel-collector.yaml").write_text(collector, encoding="utf-8")
+    return gateway_dir
+
+
+def fake_docker(containers, *, started_at=None, logs=None, error=None):
+    """Answer the gateway's docker ps/inspect/logs calls; containers maps service -> "image\\tstatus"."""
+    started_at = started_at or f"{datetime.now(timezone.utc) + timedelta(minutes=1):%Y-%m-%dT%H:%M:%S}.123456789Z"
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if error is not None:
+            raise error
+        if command[:2] == ["docker", "ps"]:
+            service = next(item.rsplit("=", 1)[1] for item in command if "compose.service=" in item)
+            listed = containers.get(service)
+            return SimpleNamespace(returncode=0, stdout=f"id-{service}\t{listed}\n" if listed else "", stderr="")
+        if command[:2] == ["docker", "inspect"]:
+            return SimpleNamespace(returncode=0, stdout=f"{started_at}\n", stderr="")
+        if command[:2] == ["docker", "logs"]:
+            return SimpleNamespace(returncode=0, stdout="", stderr=(logs or {}).get(command[-1], ""))
+        raise AssertionError(f"unexpected command: {command}")
+
+    run.calls = calls
+    return run
 
 
 class GatewayConfigurationTests(unittest.TestCase):
@@ -276,6 +311,49 @@ class GatewayReadinessTests(unittest.TestCase):
             check_gateway_ready(self.gateway(NOW + timedelta(hours=1)), now=NOW, opener=opener)
 
 
+class GatewayTelemetryCheckTests(unittest.TestCase):
+    RUNNING = {
+        "litellm": "ghcr.io/berriai/litellm:main-stable@sha256:abc\tUp 2 hours (healthy)",
+        "otel-collector": "otel/opentelemetry-collector-contrib:0.161.0@sha256:abc\tUp 2 hours",
+    }
+
+    def test_running_current_normalized_stack_counts_recent_export_failures(self):
+        logs = {
+            "id-otel-collector": "2026-09-27T08:00:00Z\terror\tqueue_sender.go:1\tExporting failed. Dropping data.\n",
+            "id-litellm": "Failed to export span batch code: 503\nPOST /foundry-agent/main/responses 200\n",
+        }
+        with TemporaryDirectory() as directory:
+            run = fake_docker(self.RUNNING, logs=logs)
+            status = check_gateway_telemetry(GATEWAY, gateway_dir=write_gateway_dir(directory), run=run)
+        self.assertEqual(status, {"config": "current", "status_normalized": True, "export_failures": 2})
+        self.assertIn(["docker", "logs", "--since", "30m", "id-otel-collector"], run.calls)
+
+    def test_missing_status_rule_fails_before_docker_is_queried(self):
+        with TemporaryDirectory() as directory:
+            run = fake_docker(self.RUNNING)
+            with self.assertRaisesRegex(RuntimeError, "flag every LiteLLM span as an error"):
+                check_gateway_telemetry(
+                    GATEWAY, gateway_dir=write_gateway_dir(directory, normalize_status=False), run=run,
+                )
+        self.assertEqual(run.calls, [])
+
+    def test_stopped_stale_or_unavailable_containers_fail_with_start_guidance(self):
+        cases = {
+            "otel-collector container is not running": ({"litellm": self.RUNNING["litellm"]}, {}),
+            "config.yaml changed after the litellm container started": (
+                self.RUNNING, {"started_at": "2000-01-01T00:00:00.000000001Z"},
+            ),
+            "Docker is unavailable": (self.RUNNING, {"error": FileNotFoundError("docker")}),
+        }
+        with TemporaryDirectory() as directory:
+            gateway_dir = write_gateway_dir(directory)
+            for message, (containers, options) in cases.items():
+                with self.subTest(message):
+                    with self.assertRaisesRegex(RuntimeError, message) as raised:
+                        check_gateway_telemetry(GATEWAY, gateway_dir=gateway_dir, run=fake_docker(containers, **options))
+                    self.assertIn("gateway/start.sh", str(raised.exception))
+
+
 class GatewayConfigFileTests(unittest.TestCase):
     def test_each_agent_route_forwards_trace_context_and_replaces_client_authorization(self):
         settings_block = yaml.safe_load((ROOT / "gateway" / "config.yaml").read_text(encoding="utf-8"))["general_settings"]
@@ -327,6 +405,22 @@ class GatewayConfigFileTests(unittest.TestCase):
             "${env:APPLICATIONINSIGHTS_CONNECTION_STRING}",
         )
 
+    def test_collector_resets_litellm_ok_status_before_azure_monitor_export(self):
+        config_file = ROOT / "gateway" / "otel-collector.yaml"
+        pipeline = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        statements = pipeline["processors"]["transform/litellm_status"]["trace_statements"]
+        self.assertEqual(statements, [COLLECTOR_STATUS_RULE])
+        self.assertEqual(
+            pipeline["service"]["pipelines"]["traces"]["processors"], ["transform/litellm_status", "batch"],
+        )
+        self.assertTrue(collector_normalizes_litellm_status(config_file))
+
+    def test_start_script_restarts_services_whose_mounted_config_changed(self):
+        script = (ROOT / "gateway" / "start.sh").read_text(encoding="utf-8")
+        for service, config_name in SERVICE_CONFIG_FILES.items():
+            self.assertIn(f"{service}:{config_name}", script)
+        self.assertLess(script.index(" up -d"), script.index('restart "$service"'))
+
 
 class GatewayObservabilityTests(unittest.TestCase):
     def setUp(self):
@@ -373,7 +467,10 @@ class GatewayInfrastructureStatusTests(unittest.TestCase):
         "?sslmode=require&channel_binding=require"
     )
 
-    def status(self, directory, *, readiness=None, error=None, docker=None, docker_error=None, expires_in=45):
+    def status(
+        self, directory, *, readiness=None, error=None, docker=None, docker_error=None, expires_in=45,
+        started_at=None, gateway_dir=ROOT / "gateway",
+    ):
         env_file = write_env(
             directory, DATABASE_URL=self.FRANKFURT_URL,
             AZURE_AD_TOKEN_EXPIRES_ON=(NOW + timedelta(minutes=expires_in)).isoformat(),
@@ -384,14 +481,10 @@ class GatewayInfrastructureStatusTests(unittest.TestCase):
                 raise error
             return io.BytesIO(json.dumps(readiness or {}).encode())
 
-        def run(command, **kwargs):
-            if docker_error is not None:
-                raise docker_error
-            return SimpleNamespace(returncode=0, stdout=docker or "")
-
+        run = fake_docker({"otel-collector": docker} if docker else {}, started_at=started_at, error=docker_error)
         return gateway_infrastructure_status(
             {"agent_gateway": "litellm"}, {"FOUNDRY_AGENT_GATEWAY_ENV_FILE": str(env_file)},
-            now=NOW, opener=opener, run=run,
+            now=NOW, opener=opener, run=run, gateway_dir=gateway_dir,
         )
 
     def assert_no_secrets(self, status):
@@ -408,12 +501,26 @@ class GatewayInfrastructureStatusTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             status = self.status(
                 directory, readiness={"status": "healthy", "db": "connected"},
-                docker="otel/opentelemetry-collector-contrib:0.161.0@sha256:abc\tUp 2 hours\n",
+                docker="otel/opentelemetry-collector-contrib:0.161.0@sha256:abc\tUp 2 hours",
             )
         self.assertEqual(status["litellm"], "✅ Ready at http://127.0.0.1:4000, Foundry token valid 45 min")
         self.assertEqual(status["otel_collector"], "✅ otelcol-contrib 0.161.0, Up 2 hours → App Insights")
         self.assertEqual(status["neon"], "✅ Connected, neondb in aws-eu-central-1 (Frankfurt)")
         self.assert_no_secrets(status)
+
+    def test_collector_with_stale_or_unnormalized_config_is_flagged(self):
+        image = "otel/opentelemetry-collector-contrib:0.161.0@sha256:abc\tUp 2 hours"
+        with TemporaryDirectory() as directory:
+            stale = self.status(directory, readiness={"db": "connected"}, docker=image, started_at="2000-01-01T00:00:00Z")
+            gateway_dir = write_gateway_dir(directory, normalize_status=False)
+            unnormalized = self.status(directory, readiness={"db": "connected"}, docker=image, gateway_dir=gateway_dir)
+        self.assertEqual(
+            stale["otel_collector"], "⚠️ otelcol-contrib 0.161.0, Up 2 hours; config changed, run gateway/start.sh",
+        )
+        self.assertEqual(
+            unnormalized["otel_collector"],
+            "⚠️ otelcol-contrib 0.161.0, Up 2 hours; LiteLLM spans show as errors in Foundry traces",
+        )
 
     def test_unreachable_gateway_and_stopped_collector_are_marked(self):
         with TemporaryDirectory() as directory:
@@ -511,8 +618,20 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
             "configure_agent_gateway(AgentRuntimeConfig.from_build_info(build_info), build_info)", source,
         )
         self.assertIn("check_gateway_ready(agent_runtime.gateway)", source)
+        self.assertLess(
+            source.index("check_gateway_ready(agent_runtime.gateway)"),
+            source.index("check_gateway_telemetry(agent_runtime.gateway)"),
+        )
         self.assertIn("agent_gateway_span_attributes = ", source)
         self.assertNotIn("gateway.api_key", source)
+
+    def test_tracing_summary_lists_gateway_components_in_gateway_mode(self):
+        source = self.cells()["3c78effc"]
+        self.assertIn("from notebook_support.gateway import gateway_infrastructure_status", source)
+        self.assertIn("gateway_status = gateway_infrastructure_status(build_info)", source)
+        for label in ("LiteLLM gateway tracing", "OTEL Collector", "Neon DB"):
+            self.assertIn(label, source)
+        self.assertIn("{gateway_trace_html}", source)
 
     def test_validation_reads_and_reports_the_gateway_view(self):
         source = self.cells()["6e3dcab6"]
@@ -524,12 +643,10 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
         source = self.cells()["e1b420fd"]
         self.assertIn("from notebook_support.gateway import gateway_infrastructure_status", source)
         self.assertIn("gateway_status = gateway_infrastructure_status(build_info)", source)
-        for row in (
-            '("🚦 LiteLLM Gateway", gateway_status["litellm"]),',
-            '("🔭 OTEL Collector", gateway_status["otel_collector"]),',
-            '("🐘 Neon DB", gateway_status["neon"]),',
+        for label, key in (
+            ("🚦 LiteLLM Gateway", "litellm"), ("🔭 OTEL Collector", "otel_collector"), ("🐘 Neon DB", "neon"),
         ):
-            self.assertIn(row, source)
+            self.assertRegex(source, rf'\("{label}[^"]*", gateway_status\["{key}"\]\),')
         for attention, headline in ((True, "needs attention"), (False, "all green")):
             with self.subTest(attention=attention):
                 litellm = "❌ Unreachable at http://127.0.0.1:4000; run gateway/start.sh" if attention else "✅ Ready"

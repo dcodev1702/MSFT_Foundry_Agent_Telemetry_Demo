@@ -5,6 +5,13 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
+  # LiteLLM marks successful spans with status OK. The Azure Monitor exporter writes that
+  # status (1) into ResultCode, and the Foundry trace view flags non-zero codes as errors.
+  # Reset OK to UNSET (ResultCode 0, like Foundry's own spans); real ERROR spans stay errors.
+  transform/litellm_status:
+    error_mode: ignore
+    trace_statements:
+      - set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK
   batch:
     timeout: 5s
 
@@ -21,5 +28,5 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [transform/litellm_status, batch]
       exporters: [azure_monitor]

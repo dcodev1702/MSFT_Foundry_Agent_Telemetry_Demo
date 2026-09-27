@@ -10,6 +10,38 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### LiteLLM spans flagged as errors in Foundry traces
+
+- Diagnose the 16 errors that the Foundry trace view showed for trace
+  `67b4f4c415213e2d8d2aea8880beb288`. They were exactly the 16 LiteLLM spans. The
+  cause was neither the token nor routing: every gateway request returned HTTP
+  200, all spans had `Success` true, and Section 6 passed with zero failed spans.
+  LiteLLM marks successful spans with status OK, and the Collector's Azure Monitor
+  exporter wrote that status into `ResultCode` as 1 (`otel.status_code`
+  `STATUS_CODE_OK`). No other service in the workspace used that code; Foundry's
+  own spans record 0.
+- Add a `transform/litellm_status` processor to `gateway/otel-collector.yaml`
+  that resets OK to unset before export and keeps error statuses. New LiteLLM
+  spans record `ResultCode` 0 and `STATUS_CODE_UNSET`. Spans ingested before the
+  fix keep their flag.
+- Make `gateway/start.sh` restart LiteLLM or the Collector when `config.yaml` or
+  `otel-collector.yaml` changed after that container started, because
+  `docker compose up -d` ignores edits to bind-mounted files.
+- Add a telemetry pre-flight to Section 3: `check_gateway_telemetry` stops before
+  any agent call unless both gateway containers are running, neither config file
+  changed after its container started, and the Collector config keeps the status
+  rule. It warns, without stopping, about export failures logged in the last 30
+  minutes. The deployment table's 🔭 OTEL Collector row shows ⚠️ for a stale or
+  unnormalized Collector config.
+
+### Gateway telemetry in Section 3.1
+
+- In gateway mode, list LiteLLM gateway tracing (the
+  `foundry-agent-demo.litellm-gateway` role and `llm-gateway` category), the OTEL
+  Collector's status and export target, and Neon's status in the Section 3.1
+  tracing summary. Neon is not traced directly; its checks appear inside LiteLLM
+  spans. Direct mode shows `Not used`.
+
 ### Gateway container memory caps
 
 - Cap the LiteLLM container at 5 GiB of RAM and the OpenTelemetry Collector at
