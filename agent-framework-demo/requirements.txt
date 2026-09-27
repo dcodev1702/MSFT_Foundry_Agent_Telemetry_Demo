@@ -1,4 +1,5 @@
-# Reviewed 2026-09-18 for Windows and CPython 3.14.
+# Reviewed 2026-09-18 for CPython 3.14 on Windows; installed and validated on
+# Linux (Ubuntu 26.04) on 2026-09-27.
 # Pin direct notebook dependencies so reruns do not silently change the demo.
 # If a mirror lags, build_source_wheels.ps1 builds these official GitHub releases.
 agent-framework-core==1.19.0

@@ -1,9 +1,13 @@
 # =============================================================================
+# File: agent_framework_reviewer_a2a_server.py
 # Author: dcodev1702 (with GitHub Copilot assistance)
-# Updated: 2026-09-18
+# Updated: 2026-09-27
 # Purpose: Host the notebook's ReviewerAgent in a separate, authenticated A2A
 #          process while ArchitectAgent and CoachAgent remain local.
-# Usage: Launched by agent_framework_reviewer_a2a_client.py with the demo .venv.
+# Usage: Launched by agent_framework_reviewer_a2a_client.py with the demo
+#        interpreter (.venv on Windows, .venv-linux on Linux). The process
+#        prints one readiness JSON line on stdout, then serves until an
+#        authenticated POST /shutdown.
 # Configuration: AGENT_DEMO_REVIEWER_SPEC, AGENT_DEMO_A2A_TOKEN,
 #                AZURE_OPENAI_ENDPOINT, and the notebook's OTLP settings.
 # Boundary: Loopback HTTP and one ephemeral bearer credential are for this local
@@ -57,10 +61,14 @@ from agent_framework_menu_mcp_server import finish_telemetry
 SERVICE_NAME = "zolab-agent-framework-a2a-reviewer"
 CARD_PATH = "/.well-known/agent-card.json"
 REVIEW_TIMEOUT_SECONDS = 120
+# Matches the notebook's service.version; the notebook passes OTEL_SERVICE_VERSION.
+DEFAULT_SERVICE_VERSION = "2026.09.27"
 
 
 @dataclass(frozen=True)
 class ReviewerSpec:
+    """Definition of the hosted ReviewerAgent; its hash is the agent revision."""
+
     name: str
     description: str
     instructions: str
@@ -78,11 +86,14 @@ class ReviewerSpec:
 
     @property
     def revision(self) -> str:
+        """Return the first 12 hex digits of the canonical spec's SHA-256."""
         canonical = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
 class DemoCallContextBuilder(ServerCallContextBuilder):
+    """Build A2A call contexts that keep only the protocol version header."""
+
     def build(self, request: Request) -> ServerCallContext:
         # Do not copy Authorization or other request headers into task state.
         return ServerCallContext(
@@ -94,6 +105,13 @@ class DemoCallContextBuilder(ServerCallContextBuilder):
 
 
 class AuthenticatedTracingMiddleware:
+    """Require the demo bearer token and trace every HTTP request as a server span.
+
+    Only GET of the Agent Card is public. Each span joins the caller's trace
+    through traceparent/tracestate, so notebook, client and reviewer spans share
+    one trace in Aspire.
+    """
+
     def __init__(
         self, app: ASGIApp, token: str, revision: str, export_enabled: bool
     ) -> None:
@@ -153,11 +171,14 @@ class AuthenticatedTracingMiddleware:
             else:
                 scope["user"] = SimpleUser("notebook")
                 await self.app(scope, receive, record_status)
+        # Flush after each request so the notebook sees reviewer spans promptly.
         if self.export_enabled:
             await asyncio.to_thread(finish_telemetry)
 
 
 class BoundedReviewerExecutor(A2AExecutor):
+    """Run the reviewer with a hard deadline so a stalled model call ends the task."""
+
     async def execute(self, context, event_queue) -> None:
         # Cancellation is translated to a terminal canceled task by A2AExecutor.
         async with asyncio.timeout(REVIEW_TIMEOUT_SECONDS):
@@ -165,6 +186,7 @@ class BoundedReviewerExecutor(A2AExecutor):
 
 
 def reviewer_card(spec: ReviewerSpec, base_url: str) -> AgentCard:
+    """Describe the reviewer's skill, JSON-RPC endpoint and bearer scheme as an A2A Agent Card."""
     return AgentCard(
         name=spec.name,
         description=spec.description,
@@ -209,6 +231,7 @@ def create_app(
     *,
     export_enabled: bool = False,
 ) -> Starlette:
+    """Assemble the Agent Card, JSON-RPC task routes and an authenticated shutdown route."""
     card = reviewer_card(spec, base_url)
     handler = DefaultRequestHandler(
         agent_executor=BoundedReviewerExecutor(agent, stream=True),
@@ -241,6 +264,7 @@ def create_app(
 
 
 def required_environment(name: str) -> str:
+    """Return a required, non-empty environment setting or fail with its name."""
     value = os.environ.get(name, "").strip()
     if not value:
         raise RuntimeError(f"Missing required environment setting: {name}")
@@ -248,6 +272,7 @@ def required_environment(name: str) -> str:
 
 
 def boolean_environment(name: str, default: bool) -> bool:
+    """Parse a strict true/false environment setting."""
     value = os.environ.get(name, str(default)).strip().lower()
     if value not in {"true", "false"}:
         raise ValueError(f"{name} must be true or false.")
@@ -255,13 +280,14 @@ def boolean_environment(name: str, default: bool) -> bool:
 
 
 async def main() -> None:
+    """Configure telemetry, bind an ephemeral loopback port, report readiness and serve."""
     spec = ReviewerSpec(**json.loads(required_environment("AGENT_DEMO_REVIEWER_SPEC")))
     token = required_environment("AGENT_DEMO_A2A_TOKEN")
     endpoint = required_environment("AZURE_OPENAI_ENDPOINT")
     otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
     configure_otel_providers(
         service_name=SERVICE_NAME,
-        service_version=os.environ.get("OTEL_SERVICE_VERSION", "2026.09.18"),
+        service_version=os.environ.get("OTEL_SERVICE_VERSION", DEFAULT_SERVICE_VERSION),
         resource_attributes={
             "service.namespace": "zolab-agent-framework",
             "service.instance.id": required_environment("OTEL_SERVICE_INSTANCE_ID"),
@@ -277,6 +303,7 @@ async def main() -> None:
         otel_semconv_stability_opt_in="gen_ai_latest_experimental",
     )
     logging.getLogger().setLevel(logging.WARNING)
+    # Bind before reporting readiness so the client can connect as soon as it reads the URL.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen(128)

@@ -1,13 +1,20 @@
 # Author: dcodev1702 (with GitHub Copilot assistance)
-# Updated: 2026-09-18
+# Updated: 2026-09-27
 # Purpose: Build the pinned official release wheels when the package mirror lags.
 # Usage: Run after notebook environment bootstrap; then rerun package installation.
+#        Windows: .\build_source_wheels.ps1   Linux: pwsh ./build_source_wheels.ps1
+#        The default interpreter is the demo's .venv (Windows) or .venv-linux (Linux).
 # Safety: Verify immutable commits, never change upstream source, never delete a
 #         checkout, and only build wheels; never install into a runtime environment.
 [CmdletBinding()]
 param(
     [string]$SourceRoot = (Join-Path $PSScriptRoot '.source-builds'),
-    [string]$PythonPath = (Join-Path $PSScriptRoot '.venv\Scripts\python.exe'),
+    # $env:OS is Windows_NT in both Windows PowerShell 5.1 and PowerShell 7 on Windows.
+    [string]$PythonPath = $(if ($env:OS -eq 'Windows_NT') {
+        Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+    } else {
+        Join-Path $PSScriptRoot '.venv-linux/bin/python'
+    }),
     [string]$Wheelhouse = (Join-Path $PSScriptRoot '.wheels'),
     [string]$ReleaseManifest
 )

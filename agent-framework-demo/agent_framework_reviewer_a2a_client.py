@@ -1,8 +1,11 @@
 # =============================================================================
+# File: agent_framework_reviewer_a2a_client.py
 # Author: dcodev1702 (with GitHub Copilot assistance)
-# Updated: 2026-09-18
+# Updated: 2026-09-27
 # Purpose: Discover, authenticate, invoke and close the separately hosted reviewer.
-# Usage: Imported by the notebook's group-chat setup and cleanup cells.
+# Usage: Imported by the notebook's group-chat setup and cleanup cells in both the
+#        Windows and Linux notebooks. It starts the reviewer with the running
+#        kernel's interpreter, so the reviewer uses the same demo environment.
 # Security: The token stays in memory and the child environment, never in command
 #           arguments, notebook output, task metadata, or committed files.
 # =============================================================================
@@ -43,6 +46,11 @@ logger = logging.getLogger(__name__)
 
 
 def review_request(messages: AgentRunInputs | None) -> str:
+    """Serialize the group-chat transcript into one reviewer request.
+
+    A2AAgent sends only the last message, so the request carries the original
+    task and the ArchitectAgent draft as untrusted JSON artifacts.
+    """
     if isinstance(messages, (str, Content, Message)):
         items = [messages]
     elif messages is None:
@@ -76,6 +84,8 @@ def review_request(messages: AgentRunInputs | None) -> str:
 
 
 class RemoteReviewer(A2AAgent):
+    """A2A client agent that sends the full review context and verifies the completed task."""
+
     last_task: dict[str, object] | None = None
 
     @overload
@@ -109,6 +119,7 @@ class RemoteReviewer(A2AAgent):
         Awaitable[AgentResponse[Any]]
         | ResponseStream[AgentResponseUpdate, AgentResponse[Any]]
     ):
+        """Stream the remote review; the final response requires a completed task with an artifact."""
         self.last_task = None
         active_session = session or self.create_session()
         # A2AAgent sends only the last message; carry the complete review context.
@@ -152,6 +163,8 @@ class RemoteReviewer(A2AAgent):
 
 
 class ReviewerService:
+    """Own the reviewer child process, its authenticated HTTP client and its A2A agent."""
+
     def __init__(self, spec: ReviewerSpec) -> None:
         self.spec = spec
         self.process: subprocess.Popen[str] | None = None
@@ -172,6 +185,11 @@ class ReviewerService:
         capture_content: bool,
         message_events: bool,
     ) -> "ReviewerService":
+        """Launch the reviewer, verify its identity, card and authentication, and return it.
+
+        Startup is bounded to 30 seconds. Any failure stops the child process
+        before the error is raised.
+        """
         service = cls(spec)
         env = os.environ.copy()
         env.update(
@@ -209,6 +227,9 @@ class ReviewerService:
                         "The reviewer exited before reporting readiness."
                     )
                 ready = json.loads(ready_line)
+                # On Windows the venv's python.exe is a launcher that starts the base
+                # interpreter as a child, so the reported PID can be that child.
+                # Accept only processes this service started.
                 owned_pids = {service.process.pid}
                 owned_pids.update(
                     process.pid
@@ -296,9 +317,16 @@ class ReviewerService:
 
     @property
     def running(self) -> bool:
+        """Return whether the reviewer child process is still alive."""
         return self.process is not None and self.process.poll() is None
 
     async def close(self, *, startup_failed: bool = False) -> None:
+        """Stop the reviewer gracefully, force-kill it if needed, and release resources.
+
+        A graceful stop uses the authenticated /shutdown route; a timeout or HTTP
+        error kills the tracked process tree. Buffered reviewer diagnostics are
+        replayed to stderr, and the token is cleared.
+        """
         shutdown_error = None
         process = self.process
         try:

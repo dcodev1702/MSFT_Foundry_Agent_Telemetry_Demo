@@ -11,7 +11,7 @@ import unittest
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, redirect_stderr, redirect_stdout
 from pathlib import Path
-from tempfile import TemporaryFile
+from tempfile import TemporaryDirectory, TemporaryFile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -455,11 +455,10 @@ class McpGeneratedHelperTests(unittest.TestCase):
         tree = ast.parse(source)
         prefix = []
         for node in tree.body:
-            if (
-                isinstance(node, ast.Expr)
-                and isinstance(node.value, ast.Call)
-                and isinstance(node.value.func, ast.Attribute)
-                and node.value.func.attr == "write_text"
+            # Stop at the statement that writes the helper (it may sit inside an if).
+            if any(
+                isinstance(child, ast.Attribute) and child.attr == "write_text"
+                for child in ast.walk(node)
             ):
                 break
             prefix.append(node)
@@ -488,6 +487,37 @@ class McpGeneratedHelperTests(unittest.TestCase):
                 ):
                     node.value = ast.Constant("revision-for-selected-model")
         self.assertEqual(ast.dump(generated_tree), ast.dump(checked_in_tree))
+
+    def test_helper_is_rewritten_only_when_its_generated_content_changes(self):
+        source = compile(notebook_cells()["0a79b228"], str(NOTEBOOK_PATH), "exec")
+        statuses = []
+        with TemporaryDirectory() as directory:
+            demo_dir = Path(directory) / "agent-framework-demo"
+            demo_dir.mkdir()
+            helper_path = demo_dir / "agent_framework_menu_mcp_server.py"
+
+            def run_template():
+                scope = {
+                    "model_name": "test-model",
+                    "capture_prompt_content": helper.CAPTURE_PROMPT_CONTENT,
+                    "message_events_enabled": helper.MESSAGE_EVENTS_ENABLED,
+                    "service_version": helper.SERVICE_VERSION,
+                    "demo_status": lambda text, enabled: text,
+                    "demo_text": lambda text, tone: str(text),
+                    "display_demo_panel": lambda title, rows: statuses.append(dict(rows)["Status"]),
+                }
+                with patch("pathlib.Path.cwd", return_value=demo_dir):
+                    exec(source, scope)
+
+            run_template()
+            written = helper_path.stat().st_mtime_ns
+            run_template()
+            unchanged = helper_path.stat().st_mtime_ns
+            helper_path.write_text("# edited by hand\n", encoding="utf-8")
+            run_template()
+            self.assertIn("RestaurantAgent", helper_path.read_text(encoding="utf-8"))
+        self.assertEqual(statuses, ["Written", "Unchanged", "Written"])
+        self.assertEqual(written, unchanged)
 
     def test_header_and_formatting_survive_notebook_regeneration(self):
         scope = self.generated_scope()

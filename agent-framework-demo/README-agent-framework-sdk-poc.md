@@ -198,7 +198,9 @@ remains below 7 because the A2A SDK requires it. Key pins are:
 
 If the configured Python feed cannot supply these published releases, run
 [build_source_wheels.ps1](./build_source_wheels.ps1) after the environment
-bootstrap. It checks out official GitHub release tags, verifies their immutable
+bootstrap: `.\build_source_wheels.ps1` on Windows, or `pwsh ./build_source_wheels.ps1`
+(PowerShell 7) on Linux. It uses the demo's `.venv` or `.venv-linux` interpreter
+by default, checks out official GitHub release tags, verifies their immutable
 commit IDs and clean source, and builds wheels with isolated build dependencies.
 The Python MAF tag is `python-1.19.0`, not the independent .NET release tag.
 WinGet is not used to install Python-library packages.
@@ -243,9 +245,9 @@ if any other cell drifts from the Windows version.
 | Environment | `agent-framework-demo/.venv` | `agent-framework-demo/.venv-linux`, created with the selected kernel's Python; the Windows `.venv` is left untouched |
 | Kernel | Agent Framework SDK Demo (.venv) | Agent Framework SDK Demo (Linux, .venv-linux), `agent-framework-sdk-demo-linux` |
 | Azure CLI | `az.cmd`, installed with winget | `az`, installed with `curl -sL https://aka.ms/InstallAzureCLIDeb \| sudo bash` |
-| Aspire Dashboard | Docker Desktop, started on demand | Docker Engine; the container publishes its UI and OTLP ports on `127.0.0.1` only |
+| Aspire Dashboard | Docker Desktop, started on demand | Docker Engine; forward the UI port in VS Code over Remote-SSH |
 | MCP stdio | Refreshes `pywin32` paths if needed | Standard pipes to the `.venv-linux` interpreter; no extra transport packages |
-| Package source | Package index or `build_source_wheels.ps1` cache | Package index, or an existing `.wheels` cache |
+| Package source | Package index or a `.wheels` cache from `.\build_source_wheels.ps1` | Package index or a `.wheels` cache from `pwsh ./build_source_wheels.ps1` |
 | Workflow grounding | Windows 11 and VS Code | Ubuntu Linux and VS Code |
 
 To run it:
@@ -261,8 +263,9 @@ To run it:
    port (18888 by default) in the **Ports** panel, then open the printed login URL.
 
 The MCP helper cell writes the same `agent_framework_menu_mcp_server.py` as the
-Windows notebook, so running either notebook leaves the checked-in helper
-unchanged.
+Windows notebook and rewrites it only when the generated content changes, so
+running either notebook leaves the checked-in helper unchanged. The content
+depends on the model deployment and the content-capture settings.
 
 **Validated Linux run (2026-09-27):** all 20 code cells ran without errors on
 Ubuntu 26.04 with Docker Engine. The package inventory verified 20 of 20 pins,
@@ -329,13 +332,24 @@ launcher when upgrading a running notebook; run that cleanup before reconnecting
 
 ### Aspire Dashboard Startup Behavior
 
-The Windows notebook now handles the common Docker Desktop cold-start case explicitly:
+Both notebooks start the same dashboard container:
 
+- The image is pinned to `mcr.microsoft.com/dotnet/aspire-dashboard:13.5.2` by digest, like the Python dependencies. To upgrade, change the tag and digest together in the startup cell and the cleanup cell's fallback. An existing container created from another image, such as an earlier `latest` run, is removed and recreated.
+- The container publishes the UI and OTLP ports on `127.0.0.1` only. The dashboard's OTLP receiver does not authenticate senders, so it is not exposed to the network.
 - If Docker CLI is missing, the notebook skips Aspire and continues with console exporters.
-- If Docker CLI is present but the Docker Desktop Linux engine is unavailable, the notebook attempts to start Docker Desktop and waits for the engine.
+- On Windows, if Docker CLI is present but the Docker Desktop Linux engine is unavailable, the notebook attempts to start Docker Desktop and waits for the engine. On Linux, the notebook asks you to start the Docker engine and rerun the cell.
 - If ports `18888` or `4317` are already busy, the notebook chooses available local ports and prints the actual Aspire UI and OTLP endpoint.
 - If container startup fails, the notebook prints Docker stderr and keeps the rest of the demo runnable with console exporters.
 - Cleanup flushes and shuts down the OpenTelemetry meter, tracer, and logger providers before removing Aspire. This stops the metrics export thread and prevents repeated `StatusCode.UNAVAILABLE` retries after the local receiver is gone.
+
+### Code Conventions
+
+Each Python module in this folder starts with a header naming the file, author,
+update date, purpose, usage and boundaries, and every top-level function and
+class has a docstring. Every notebook code cell starts with a one-line comment
+naming its section and purpose, and each notebook's introduction states its
+author and update date. [tests/test_agent_framework_linux.py](../tests/test_agent_framework_linux.py)
+checks these conventions.
 
 ## Scope Boundaries
 

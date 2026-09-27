@@ -10,6 +10,27 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Agent Framework demo audit
+
+- Pin the Aspire Dashboard image to `aspire-dashboard:13.5.2` by digest in both
+  notebooks, like the Python dependencies, and recreate an existing container
+  that was created from another image, such as an earlier `latest` run.
+- Publish the dashboard's UI and OTLP ports on `127.0.0.1` in the Windows notebook
+  too; the dashboard's OTLP receiver does not authenticate senders.
+- Rewrite the checked-in MCP helper only when its generated content changes, and
+  report **Written** or **Unchanged**, so a notebook run no longer touches it.
+- Use one telemetry `service.version`, `2026.09.27`, for the notebook, the MCP
+  helper and the A2A reviewer, which previously reported `2026.09.17` and
+  `2026.09.18`.
+- Default `build_source_wheels.ps1` to the demo's `.venv-linux` interpreter on
+  Linux, so `pwsh ./build_source_wheels.ps1` builds the verified wheel cache
+  there too. A Linux run built all nine pinned wheels from their verified commits.
+- Add author and update-date lines to both notebooks, a section-and-purpose
+  comment to every code cell, and file headers and docstrings to the MCP helper
+  and the A2A reviewer server and client. Record the Linux validation in
+  `requirements.txt`. Tests check these conventions.
+- Fix the indentation of the Aspire cleanup cell.
+
 ### Agent Framework demo on Linux
 
 - Add `agent-framework-demo/zolab-agent-framework-sdk-linux.ipynb`, a Linux

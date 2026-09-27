@@ -1,5 +1,6 @@
-"""Linux edition of the Agent Framework SDK notebook."""
+"""Linux edition of the Agent Framework SDK notebook, and checks shared by both editions."""
 
+import ast
 import json
 import os
 import re
@@ -14,16 +15,24 @@ ROOT = Path(__file__).resolve().parents[1]
 DEMO_DIR = ROOT / "agent-framework-demo"
 LINUX_NOTEBOOK = DEMO_DIR / "zolab-agent-framework-sdk-linux.ipynb"
 WINDOWS_NOTEBOOK = DEMO_DIR / "zolab-agent-framework-sdk-win11.ipynb"
+NOTEBOOKS = (WINDOWS_NOTEBOOK, LINUX_NOTEBOOK)
 KERNEL_NAME = "agent-framework-sdk-demo-linux"
 KERNEL_DISPLAY = "Agent Framework SDK Demo (Linux, .venv-linux)"
+ASPIRE_CONTAINER = "zolab-agent-framework-aspire"
+PINNED_ASPIRE_IMAGE = re.compile(r"^mcr\.microsoft\.com/dotnet/aspire-dashboard:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
 # The only cells that differ from the Windows notebook; the Windows notebook's tests cover the rest.
 LINUX_CELLS = {
     "2ea36b16", "1bc8dbb9", "40b63ed3", "eba4152c", "e6f2c7e3", "beca7704",
     "dc65fb6a", "cc566261", "8ec9f476", "91a844a6", "0f3f5f40", "4dd2f39c",
 }
 WINDOWS_ONLY = (
-    "winget", "PowerShell", "powershell", "Scripts", "python.exe", "Docker Desktop",
+    "winget", "PowerShell terminal", "powershell", "Scripts", "python.exe", "Docker Desktop",
     "pywin32", "pywintypes", "py -3", "Windows 11", "os.name == 'nt'",
+)
+MODULES = (
+    "agent_framework_menu_mcp_server.py",
+    "agent_framework_reviewer_a2a_server.py",
+    "agent_framework_reviewer_a2a_client.py",
 )
 
 
@@ -33,6 +42,48 @@ def load(path):
 
 def sources(notebook):
     return {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
+
+
+def run_aspire_cell(notebook_path, *, engine_ready=True, existing=None):
+    """Run a notebook's Aspire cell against a fake Docker CLI.
+
+    existing=(status, image) simulates a container that already exists.
+    """
+    commands, panels = [], []
+
+    def ok(stdout=""):
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        action = command[1]
+        if action == "info":
+            if engine_ready:
+                return ok("27.0\n")
+            return SimpleNamespace(returncode=1, stdout="", stderr="Cannot connect")
+        if action == "ps":
+            return ok(f"{ASPIRE_CONTAINER}\t{existing[0]}\n" if existing else "")
+        if action == "inspect":
+            return ok(f"{existing[1]}\n" if existing else "")
+        if action == "port":
+            return ok(f"127.0.0.1:{'18888' if command[3].startswith('18888') else '4317'}\n")
+        if action in {"run", "logs", "rm", "start"}:
+            return ok()
+        raise AssertionError(f"unexpected docker command: {command}")
+
+    scope = {
+        "demo_status": lambda text, enabled: text,
+        "demo_text": lambda text, tone: text,
+        "display_demo_panel": lambda title, rows: panels.append((title, dict(rows))),
+    }
+    source = sources(load(notebook_path))["cc566261"]
+    with (
+        patch("subprocess.run", side_effect=fake_run),
+        patch("shutil.which", return_value="/usr/bin/docker"),
+        patch.dict(os.environ, {"PATH": os.environ.get("PATH", "")}, clear=True),
+    ):
+        exec(compile(source, f"{notebook_path}#cc566261", "exec"), scope)
+    return commands, panels, scope
 
 
 class LinuxNotebookParityTests(unittest.TestCase):
@@ -69,6 +120,9 @@ class LinuxNotebookParityTests(unittest.TestCase):
             self.assertNotIn("Windows", linux[cell_id])
         self.assertIn("an independent agent-framework-demo/.venv-linux.", linux["4dd2f39c"])
 
+    def test_linux_package_source_uses_the_cross_platform_wheel_helper(self):
+        self.assertIn("pwsh ./build_source_wheels.ps1", sources(self.linux)["beca7704"])
+
 
 class LinuxEnvironmentCellTests(unittest.TestCase):
     def setUp(self):
@@ -103,9 +157,7 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
             html = self.run_cell("40b63ed3", repository, check_call=check_call)
         self.assertEqual(commands[0], [sys.executable, "-m", "venv", str(demo_dir / ".venv-linux")])
         self.assertEqual(commands[1][0], str(python))
-        self.assertEqual(
-            commands[2][-4:], ["--name", KERNEL_NAME, "--display-name", KERNEL_DISPLAY],
-        )
+        self.assertEqual(commands[2][-4:], ["--name", KERNEL_NAME, "--display-name", KERNEL_DISPLAY])
         self.assertIn("Created", html)
         self.assertIn(KERNEL_DISPLAY, html)
 
@@ -126,52 +178,76 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
                 self.run_cell("e6f2c7e3", demo_dir, executable=str(Path(directory) / "other-python"))
 
 
-class LinuxAspireDashboardTests(unittest.TestCase):
-    def run_aspire(self, *, engine_ready=True):
-        commands, panels = [], []
+class AspireDashboardCellTests(unittest.TestCase):
+    def test_both_notebooks_publish_a_pinned_dashboard_on_loopback_only(self):
+        for notebook in NOTEBOOKS:
+            with self.subTest(notebook=notebook.name):
+                commands, _, scope = run_aspire_cell(notebook)
+                run = next(command for command in commands if command[1] == "run")
+                published = [run[index + 1] for index, argument in enumerate(run) if argument == "-p"]
+                self.assertEqual(len(published), 2)
+                self.assertTrue(all(mapping.startswith("127.0.0.1:") for mapping in published), published)
+                self.assertEqual({mapping.rsplit(":", 1)[1] for mapping in published}, {"18888", "18889"})
+                self.assertRegex(run[-1], PINNED_ASPIRE_IMAGE)
+                self.assertTrue(scope["ASPIRE_DASHBOARD_RUNNING"])
+                self.assertEqual(scope["OTEL_EXPORTER_ENDPOINT"], "http://localhost:4317")
+                cleanup = sources(load(notebook))["81348edc"]
+                self.assertIn(f"globals().get('ASPIRE_IMAGE_REF', '{scope['ASPIRE_IMAGE_REF']}')", cleanup)
 
-        def fake_run(command, **kwargs):
-            commands.append(command)
-            action = command[1]
-            if action == "info":
-                return SimpleNamespace(returncode=0 if engine_ready else 1, stdout="27.0\n", stderr="" if engine_ready else "Cannot connect")
-            if action == "port":
-                host_port = "18888" if command[3].startswith("18888") else "4317"
-                return SimpleNamespace(returncode=0, stdout=f"127.0.0.1:{host_port}\n", stderr="")
-            if action in {"ps", "run", "logs"}:
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
-            raise AssertionError(f"unexpected docker command: {command}")
+    def test_a_container_from_another_image_is_recreated_and_a_pinned_one_is_reused(self):
+        for notebook in NOTEBOOKS:
+            with self.subTest(notebook=notebook.name):
+                commands, _, scope = run_aspire_cell(
+                    notebook, existing=("Up 5 minutes", "mcr.microsoft.com/dotnet/aspire-dashboard:latest"),
+                )
+                actions = [command[1] for command in commands]
+                self.assertLess(actions.index("rm"), actions.index("run"))
+                pinned = scope["ASPIRE_IMAGE_REF"]
+                commands, _, scope = run_aspire_cell(notebook, existing=("Up 5 minutes", pinned))
+                self.assertNotIn("run", [command[1] for command in commands])
+                self.assertNotIn("rm", [command[1] for command in commands])
+                self.assertTrue(scope["ASPIRE_DASHBOARD_RUNNING"])
 
-        scope = {
-            "demo_status": lambda text, enabled: text,
-            "demo_text": lambda text, tone: text,
-            "display_demo_panel": lambda title, rows: panels.append((title, dict(rows))),
-        }
-        source = sources(load(LINUX_NOTEBOOK))["cc566261"]
-        with (
-            patch("subprocess.run", side_effect=fake_run),
-            patch("shutil.which", return_value="/usr/bin/docker"),
-            patch.dict(os.environ, {"PATH": os.environ.get("PATH", "")}, clear=True),
-        ):
-            exec(compile(source, f"{LINUX_NOTEBOOK}#cc566261", "exec"), scope)
-        return commands, panels, scope
-
-    def test_dashboard_ports_are_published_on_loopback_only(self):
-        commands, panels, scope = self.run_aspire()
-        run = next(command for command in commands if command[1] == "run")
-        published = [run[index + 1] for index, argument in enumerate(run) if argument == "-p"]
-        self.assertEqual(len(published), 2)
-        self.assertTrue(all(mapping.startswith("127.0.0.1:") for mapping in published), published)
-        self.assertEqual({mapping.rsplit(":", 1)[1] for mapping in published}, {"18888", "18889"})
-        self.assertTrue(scope["ASPIRE_DASHBOARD_RUNNING"])
-        self.assertEqual(scope["OTEL_EXPORTER_ENDPOINT"], "http://localhost:4317")
+    def test_linux_shows_port_forwarding_only_while_running(self):
+        _, panels, _ = run_aspire_cell(LINUX_NOTEBOOK)
         self.assertIn("VS Code Ports panel", panels[-1][1]["Remote access"])
-
-    def test_unreachable_engine_gives_linux_guidance_without_docker_desktop(self):
-        commands, _, scope = self.run_aspire(engine_ready=False)
+        commands, panels, scope = run_aspire_cell(LINUX_NOTEBOOK, engine_ready=False)
         self.assertEqual([command[1] for command in commands], ["info"])
+        self.assertNotIn("Remote access", panels[-1][1])
         self.assertFalse(scope["ASPIRE_DASHBOARD_RUNNING"])
         self.assertEqual(scope["OTEL_EXPORTER_ENDPOINT"], "")
+
+
+class DocumentationTests(unittest.TestCase):
+    def test_notebooks_state_author_and_update_date(self):
+        for notebook in NOTEBOOKS:
+            with self.subTest(notebook=notebook.name):
+                intro = sources(load(notebook))["2ea36b16"]
+                self.assertRegex(intro, r"Author: dcodev1702 \(with GitHub Copilot assistance\) · Updated: \d{4}-\d{2}-\d{2}")
+
+    def test_every_code_cell_starts_with_its_section_and_purpose(self):
+        for notebook in NOTEBOOKS:
+            for cell in load(notebook)["cells"]:
+                if cell["cell_type"] == "code":
+                    with self.subTest(notebook=notebook.name, cell=cell["id"]):
+                        self.assertRegex("".join(cell["source"]).splitlines()[0], r"^# \d+(\.\d+)?\.? [A-Z].+\.$")
+
+    def test_modules_have_headers_and_documented_top_level_definitions(self):
+        for module in MODULES:
+            source = (DEMO_DIR / module).read_text(encoding="utf-8")
+            with self.subTest(module=module):
+                self.assertIn(f"# File: {module}", source)
+                self.assertIn("# Author: dcodev1702 (with GitHub Copilot assistance)", source)
+                self.assertRegex(source, r"# Updated: \d{4}-\d{2}-\d{2}")
+                for node in ast.parse(source).body:
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        self.assertIsNotNone(ast.get_docstring(node), f"{module}: {node.name}")
+
+    def test_wheel_helper_defaults_to_the_platform_environment(self):
+        script = (DEMO_DIR / "build_source_wheels.ps1").read_text(encoding="utf-8")
+        self.assertIn("if ($env:OS -eq 'Windows_NT')", script)
+        self.assertIn("'.venv\\Scripts\\python.exe'", script)
+        self.assertIn("'.venv-linux/bin/python'", script)
 
 
 if __name__ == "__main__":

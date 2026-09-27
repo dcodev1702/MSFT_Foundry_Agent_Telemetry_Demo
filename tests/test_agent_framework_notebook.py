@@ -339,7 +339,7 @@ class NotebookStructureTests(unittest.TestCase):
             "display": rendered.append,
             "HTML": lambda value: value,
             "service_name": "service",
-            "service_version": "2026.09.17",
+            "service_version": "2026.09.27",
             "otel_endpoint": "http://localhost:4317",
             "telemetry_session_id": "session-id",
             "otel_provider_state": "Initialized",
@@ -437,7 +437,7 @@ class NotebookStructureTests(unittest.TestCase):
         self.assertIn("read_bool_env('AGENT_DEMO_ROOT_DEBUG', False)", source)
         self.assertIn("read_bool_env('AGENT_DEMO_MESSAGE_EVENTS', False)", source)
         self.assertIn("not bool(otel_endpoint)", source)
-        self.assertIn("service_version = '2026.09.17'", source)
+        self.assertIn("service_version = '2026.09.27'", source)
         self.assertIn("otlp_protocol='grpc' if otel_endpoint else None", source)
         self.assertIn("otel_semconv_stability_opt_in='gen_ai_latest_experimental'", source)
         self.assertIn("Restart the kernel", source)
@@ -835,7 +835,7 @@ class McpHelperTests(unittest.TestCase):
                 for target in node.targets
             )
         )
-        self.assertEqual(ast.literal_eval(service_version), "2026.09.17")
+        self.assertEqual(ast.literal_eval(service_version), "2026.09.27")
         self.assertIn("file=sys.stderr", source)
         self.assertIn("enable_console_exporters=False", source)
         self.assertIn('os.environ.get("AZURE_OPENAI_ENDPOINT"', source)
