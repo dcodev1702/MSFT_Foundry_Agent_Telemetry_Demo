@@ -12,8 +12,6 @@ services:
       - "4000"
       - --num_workers
       - "1"
-    env_file:
-      - .env
     environment:
       AZURE_AD_TOKEN: ${AZURE_AD_TOKEN:?run ./start.sh to refresh Azure authentication}
       DATABASE_URL: ${DATABASE_URL:?set a direct Neon connection string}
@@ -23,10 +21,17 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?run ./start.sh to generate the proxy key}
       LITELLM_MODE: PRODUCTION
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?run ./start.sh to generate the database encryption key}
+      OTEL_EXPORTER: otlp_http
+      OTEL_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_SERVICE_NAME: litellm-gateway
+      OTEL_RESOURCE_ATTRIBUTES: service.namespace=foundry-agent-demo
     volumes:
       - ./config.yaml:/app/config.yaml:ro
     ports:
       - "${LITELLM_BIND_ADDRESS:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"
+    depends_on:
+      otel-collector:
+        condition: service_started
     healthcheck:
       test:
         - CMD
@@ -42,3 +47,14 @@ services:
       retries: 18
       start_period: 120s
     stop_grace_period: 30s
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
+    restart: unless-stopped
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    environment:
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:?run ./start.sh to resolve the Application Insights connection string}
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    stop_grace_period: 15s

@@ -1,5 +1,6 @@
 """Opt-in LiteLLM gateway routing for the Linux notebook."""
 
+import importlib.util
 import io
 import json
 import os
@@ -33,6 +34,8 @@ from notebook_support.agent_endpoints import (
 from notebook_support.gateway import (
     GatewayConfig, check_gateway_ready, configure_agent_gateway, gateway_mode, load_gateway_config,
 )
+from notebook_support.observability import build_observability_queries, render_observability_report
+from test_notebook_observability import RUN_ID, passing_coverage, report_results
 import test_notebook_validation as validation_tests
 
 
@@ -293,6 +296,107 @@ class GatewayConfigFileTests(unittest.TestCase):
             self.assertIn(key, service["environment"])
         self.assertEqual(service["ports"], ["${LITELLM_BIND_ADDRESS:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"])
 
+    def test_litellm_exports_metadata_only_spans_through_the_collector(self):
+        config = yaml.safe_load((ROOT / "gateway" / "config.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(config["litellm_settings"]["callbacks"], ["otel"])
+        self.assertTrue(config["litellm_settings"]["turn_off_message_logging"])
+        services = yaml.safe_load((ROOT / "gateway" / "compose.yaml").read_text(encoding="utf-8"))["services"]
+        litellm, collector = services["litellm"], services["otel-collector"]
+        self.assertNotIn("env_file", litellm)
+        self.assertEqual(litellm["environment"]["OTEL_EXPORTER"], "otlp_http")
+        self.assertEqual(litellm["environment"]["OTEL_ENDPOINT"], "http://otel-collector:4318/v1/traces")
+        self.assertEqual(litellm["environment"]["OTEL_SERVICE_NAME"], "litellm-gateway")
+        self.assertEqual(litellm["environment"]["OTEL_RESOURCE_ATTRIBUTES"], "service.namespace=foundry-agent-demo")
+        self.assertNotIn("APPLICATIONINSIGHTS_CONNECTION_STRING", litellm["environment"])
+        self.assertIn("otel-collector", litellm["depends_on"])
+        self.assertRegex(collector["image"], r"^otel/opentelemetry-collector-contrib:[0-9.]+@sha256:[0-9a-f]{64}$")
+        self.assertNotIn("ports", collector)
+        self.assertEqual(list(collector["environment"]), ["APPLICATIONINSIGHTS_CONNECTION_STRING"])
+        pipeline = yaml.safe_load((ROOT / "gateway" / "otel-collector.yaml").read_text(encoding="utf-8"))
+        traces = pipeline["service"]["pipelines"]["traces"]
+        self.assertEqual((traces["receivers"], traces["exporters"]), (["otlp"], ["azure_monitor"]))
+        self.assertEqual(
+            pipeline["exporters"]["azure_monitor"]["connection_string"],
+            "${env:APPLICATIONINSIGHTS_CONNECTION_STRING}",
+        )
+
+
+class GatewayObservabilityTests(unittest.TestCase):
+    def setUp(self):
+        self.queries = build_observability_queries(RUN_ID)
+
+    def test_gateway_server_spans_join_the_graph_without_widening_the_run_scope(self):
+        for name, query in self.queries.items():
+            with self.subTest(query=name):
+                self.assertIn("let run_operations = AppDependencies", query)
+                self.assertIn("let spans = materialize(union AppDependencies, AppRequests", query)
+                self.assertIn('IsGatewaySpan=AppRoleName endswith "litellm-gateway"', query)
+        self.assertIn('IsGatewaySpan, "llm-gateway"', self.queries["end_to_end"])
+        self.assertNotIn('IsGatewaySpan, "gateway"', self.queries["end_to_end"])
+
+    def test_gateway_view_joins_client_gateway_upstream_and_foundry_timings(self):
+        query = self.queries["gateway"]
+        self.assertIn('where IsGatewaySpan and Type == "AppRequests"', query)
+        self.assertIn('where IsGatewaySpan and Name == "litellm_request"', query)
+        self.assertIn('where AppRoleName == "responsesapi" and Name startswith "invoke_agent"', query)
+        self.assertIn("GatewayOverheadMs=round(DurationMs - UpstreamMs, 1)", query)
+
+    def render(self, results):
+        return render_observability_report(
+            RUN_ID, "workspace", passing_coverage(), results, self.queries,
+            {"story", "facts", "sentinel"}, content_recording_enabled=True,
+        )
+
+    def test_report_shows_gateway_hops_only_when_the_view_was_read(self):
+        self.assertNotIn("LiteLLM gateway hops", self.render(report_results()))
+        results = report_results()
+        results["gateway"] = [{
+            "TimeGenerated": "2026-09-26T21:00:00Z", "Interaction": "story", "Route": "/foundry-agent/main/responses",
+            "Status": "200", "Success": True, "ClientMs": 1205.4, "GatewayMs": 1190.9, "UpstreamMs": 1189.1,
+            "GatewayOverheadMs": 1.8, "FoundryAgentMs": 670.4, "OperationId": "trace-1", "SpanId": "span-1",
+        }]
+        report = self.render(results)
+        for text in ("LiteLLM gateway hops (1 requests", "/foundry-agent/main/responses", "GatewayOverheadMs", "1.8"):
+            self.assertIn(text, report)
+
+
+class NeonLatencyProbeTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("neon_latency", ROOT / "gateway" / "neon-latency.py")
+        assert spec is not None and spec.loader is not None
+        self.probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.probe)
+
+    def test_region_is_read_from_direct_and_cell_neon_hostnames(self):
+        self.assertEqual(self.probe.neon_region("ep-misty-tooth-b5n6zzc8.c-7.us-east-2.aws.neon.tech"), "aws-us-east-2")
+        self.assertEqual(self.probe.neon_region("ep-cool-darkness-123456.eu-central-1.aws.neon.tech"), "aws-eu-central-1")
+        self.assertIsNone(self.probe.neon_region("db.example.invalid"))
+
+    def test_regions_are_ranked_by_median_latency_and_failures_sort_last(self):
+        timings = {"eu-central-1": [9.0, 7.0, 8.0], "us-east-2": [116.0, 115.0, 117.0]}
+
+        def fake_probe(host):
+            region = host.split(".")[1]
+            if region not in timings:
+                raise OSError("unreachable in test")
+            return timings[region].pop(0)
+
+        ranked = self.probe.rank_regions(3, fake_probe)
+        self.assertEqual(ranked[0], ("aws-eu-central-1", 8.0))
+        self.assertEqual(ranked[1], ("aws-us-east-2", 116.0))
+        self.assertTrue(all(latency is None for _, latency in ranked[2:]))
+
+    def test_configured_database_host_is_read_without_the_credentials(self):
+        with TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "DATABASE_URL='postgresql://role:secret@ep-test-00000000.eu-central-1.aws.neon.tech/neondb?sslmode=require'\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                self.probe.configured_database_host(env_file), "ep-test-00000000.eu-central-1.aws.neon.tech",
+            )
+
 
 class LinuxNotebookGatewayWiringTests(unittest.TestCase):
     def cells(self):
@@ -307,6 +411,12 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
         self.assertIn("check_gateway_ready(agent_runtime.gateway)", source)
         self.assertIn("agent_gateway_span_attributes = ", source)
         self.assertNotIn("gateway.api_key", source)
+
+    def test_validation_reads_and_reports_the_gateway_view(self):
+        source = self.cells()["6e3dcab6"]
+        self.assertIn('"end_to_end", "gateway", "runs_trend"', source)
+        self.assertIn("if agent_runtime.gateway is not None:", source)
+        self.assertIn("observability_results['gateway']", source)
 
     def test_both_response_paths_tag_gateway_requests_and_leave_direct_requests_unchanged(self):
         provider = TracerProvider()

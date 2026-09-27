@@ -1,0 +1,25 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+
+exporters:
+  # Same Application Insights resource as the notebook, so LiteLLM spans join its traces.
+  azure_monitor:
+    connection_string: ${env:APPLICATIONINSIGHTS_CONNECTION_STRING}
+    maxbatchinterval: 5s
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [azure_monitor]

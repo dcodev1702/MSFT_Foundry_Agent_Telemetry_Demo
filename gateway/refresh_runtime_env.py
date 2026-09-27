@@ -163,6 +163,9 @@ def main() -> None:
             raise RuntimeError(f"Foundry agent {agent_name} is not enabled")
         openai_client = project_client.get_openai_client(agent_name=agent_name)
         agent_base_urls[role] = (agent_name, str(openai_client.base_url).rstrip("/"))
+    connection_string = project_client.telemetry.get_application_insights_connection_string()
+    if not connection_string or "InstrumentationKey=" not in connection_string:
+        raise RuntimeError("The Foundry project has no connected Application Insights resource")
     access_token = credential.get_token("https://ai.azure.com/.default")
 
     values = {
@@ -173,6 +176,7 @@ def main() -> None:
         or f"sk-{secrets.token_hex(32)}",
         "FOUNDRY_MAIN_AGENT_BASE_URL": agent_base_urls["main"][1],
         "FOUNDRY_SENTINEL_AGENT_BASE_URL": agent_base_urls["sentinel"][1],
+        "APPLICATIONINSIGHTS_CONNECTION_STRING": connection_string,
         "AZURE_AD_TOKEN": access_token.token,
         "AZURE_AD_TOKEN_EXPIRES_ON": datetime.fromtimestamp(
             access_token.expires_on, timezone.utc,
@@ -184,6 +188,7 @@ def main() -> None:
     print(f"Refreshed {env_path}")
     for role, (agent_name, _) in agent_base_urls.items():
         print(f"Foundry {role} agent: {agent_name}")
+    print("Application Insights: resolved from the Foundry project")
     print(f"Azure token expires at {values['AZURE_AD_TOKEN_EXPIRES_ON']}")
 
 

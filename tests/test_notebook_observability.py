@@ -63,7 +63,7 @@ class QueryTests(unittest.TestCase):
 
     def test_every_query_is_current_run_scoped_and_bounded_in_time(self):
         self.assertEqual(set(self.queries), {
-            "coverage", "interactions", "workflows", "runs_trend", "end_to_end",
+            "coverage", "interactions", "workflows", "runs_trend", "end_to_end", "gateway",
             "content_coverage", "content", "failures", "exceptions",
             "usage", "mcp", "mcp_events",
         })

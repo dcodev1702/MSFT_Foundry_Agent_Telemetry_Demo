@@ -36,3 +36,8 @@ litellm_settings:
   request_timeout: 600
   set_verbose: false
   json_logs: true
+  # Export LiteLLM's own spans (through the Collector) into the notebook's traces.
+  # Message logging stays off: the notebook's content policy already governs payloads.
+  callbacks:
+    - otel
+  turn_off_message_logging: true

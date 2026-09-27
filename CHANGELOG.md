@@ -8,6 +8,35 @@ formatting edits, and notebook-output refreshes are consolidated. Each
 `## YYYY-MM-DD` heading covers one commit day, with related change groups nested
 under `###` topic headings. Local stash snapshots are excluded.
 
+## 2026-09-27
+
+### Linux LiteLLM gateway traces
+
+- Export LiteLLM's own OpenTelemetry spans through a pinned OpenTelemetry
+  Collector to the Foundry project's Application Insights, with message logging
+  off so gateway spans carry metadata only. `gateway/start.sh` resolves the
+  connection string from the project, passes it only to the Collector, and
+  verifies that the Collector is running.
+- Keep LiteLLM on explicit environment variables instead of the whole local
+  `.env`.
+- Read `AppRequests` as well as `AppDependencies` in the Section 6 span graph, so
+  LiteLLM's server spans link their children to the notebook interaction.
+  Classify them as `llm-gateway`, and add a **LiteLLM gateway hops** view with
+  client, gateway, upstream, overhead, and Foundry `invoke_agent` timings.
+- Validate run `ac32240c` with 11 correlated gateway requests, 34 LiteLLM spans,
+  and zero failures. Most Responses calls gained about 2 ms; database-backed
+  budget lookups added about one 120 ms Neon round trip on cache misses.
+
+### Neon region latency
+
+- Add `gateway/neon-latency.py`, which reports the configured database's Neon
+  region and ranks every Neon region by median TCP connect time from the gateway
+  host. On this host, `aws-eu-central-1` (Frankfurt) measured about 8 ms, versus
+  116 ms for the current `aws-us-east-2` project.
+- Document moving the gateway database to a new project in the closest region
+  through `gateway/start.sh --prompt-database-url`. LiteLLM recreates its schema;
+  no data migration is needed while spend logging and usage limits are off.
+
 ## 2026-09-26
 
 ### Linux LiteLLM gateway with Neon

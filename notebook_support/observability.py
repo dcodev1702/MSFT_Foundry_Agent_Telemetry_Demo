@@ -27,7 +27,8 @@ let run_operations = AppDependencies
 | where TimeGenerated > ago(6h)
 | where tostring(Properties["demo.run_id"]) == run_id
 | distinct OperationId;
-let spans = materialize(AppDependencies
+// AppRequests holds server spans, such as the optional LiteLLM gateway's, that parent other spans in the run.
+let spans = materialize(union AppDependencies, AppRequests
 | where TimeGenerated > ago(6h) and OperationId in (run_operations)
 | summarize arg_max(TimeGenerated, *) by _ResourceId, OperationId, Id);
 let span_context = materialize(spans
@@ -51,7 +52,8 @@ let span_context = materialize(spans
     IsResponseDependency=Name endswith "/responses" and GenAiOperation == "responses.create",
     IsGenAiSpan=Name == "chat" or Name startswith "chat " or GenAiOperation in ("chat", "generate_content", "text_completion"),
     IsToolSpan=Name == "execute_tool" or Name startswith "execute_tool " or GenAiOperation == "execute_tool",
-    IsToolObservation=coalesce(tobool(Properties["app.tool.observation"]), false)
+    IsToolObservation=coalesce(tobool(Properties["app.tool.observation"]), false),
+    IsGatewaySpan=AppRoleName endswith "litellm-gateway"
 | extend IsWorkflowPlumbing=Name startswith "workflow." or Name startswith "edge." or Name startswith "message."
         or (Name startswith "executor." and not(IsNotebookRoot)),
     IsCriticalSpan=IsNotebookRoot or IsExecutor or IsResponseDependency or IsGenAiSpan or IsToolSpan or IsToolObservation
@@ -146,7 +148,7 @@ let correlated_spans = materialize(span_context
     SpanCategory=case(IsNotebookRoot and IsExecutor, "executor",
         IsWorkflowPlumbing or IsWorkflowRoot, "workflow / setup",
         IsResponseDependency, "responses", IsGenAiSpan, "model", IsToolObservation, "tool observation",
-        IsToolSpan, "tool", "dependency / setup")
+        IsToolSpan, "tool", IsGatewaySpan, "llm-gateway", "dependency / setup")
 );
 '''
     content = '''let content_records = AppGenAIContent
@@ -304,6 +306,28 @@ correlated_spans
     Role=AppRoleName, Host=AppRoleInstance, Region=tostring(Properties["cloud.region"]),
     OperationId, SpanId=Id, ParentId, ResourceId=_ResourceId,
     ContentRecords, ContentIds, Conversations, WithInput, WithOutput, WithInstructions
+| order by TimeGenerated asc, OperationId asc, SpanId asc
+| take {DETAIL_LIMIT}
+''',
+        "gateway": scope + f'''let gateway_calls = correlated_spans
+| where IsGatewaySpan and Name == "litellm_request"
+| summarize UpstreamMs=max(DurationMs) by OperationId, GatewayId=ParentId;
+let client_spans = correlated_spans
+| project OperationId, ClientId=Id, ClientSpan=Name, ClientMs=DurationMs;
+let foundry_agent_spans = correlated_spans
+| where AppRoleName == "responsesapi" and Name startswith "invoke_agent"
+| summarize FoundryAgentMs=max(DurationMs) by OperationId, ClientId=ParentId;
+correlated_spans
+| where IsGatewaySpan and Type == "AppRequests"
+| extend GatewayId=Id, ClientId=ParentId, Route=tostring(Properties["url.path"]),
+    Status=tostring(Properties["http.response.status_code"])
+| join kind=leftouter (gateway_calls) on OperationId, GatewayId
+| join kind=leftouter (client_spans) on OperationId, ClientId
+| join kind=leftouter (foundry_agent_spans) on OperationId, ClientId
+| project TimeGenerated, Interaction, CorrelationState, Route, Status, Success,
+    ClientMs=round(ClientMs, 1), GatewayMs=round(DurationMs, 1), UpstreamMs=round(UpstreamMs, 1),
+    GatewayOverheadMs=round(DurationMs - UpstreamMs, 1), FoundryAgentMs=round(FoundryAgentMs, 1),
+    ClientSpan, OperationId, SpanId=Id, ParentId
 | order by TimeGenerated asc, OperationId asc, SpanId asc
 | take {DETAIL_LIMIT}
 ''',
@@ -848,6 +872,18 @@ Client and service snapshots can repeat conversation history: do not sum them as
         "WorkflowName", "WorkflowStep", "Name", "Agent", "AgentVersion", "Model", "Success", "DurationMs",
         "Role", "Host", "Region", "OperationId", "SpanId", "ParentId", "ContentRecords", "ContentIds",
     ])
+    if "gateway" in results:
+        body += _section(f"LiteLLM gateway hops ({len(results['gateway'])} requests; up to 200)", results["gateway"], [
+            "TimeGenerated", "Interaction", "Route", "Status", "Success", "ClientMs", "GatewayMs",
+            "UpstreamMs", "GatewayOverheadMs", "FoundryAgentMs", "OperationId", "SpanId",
+        ])
+        body += (
+            "<p>Each row is one notebook request handled by the local LiteLLM gateway, joined from its "
+            "<code>Received Proxy Server Request</code> span. ClientMs is the notebook's HTTP call, GatewayMs "
+            "LiteLLM's handling, UpstreamMs its Foundry call, GatewayOverheadMs the difference, and FoundryAgentMs "
+            "Foundry's server-side <code>invoke_agent</code> span in the same trace. No rows means the run used "
+            "direct routing or gateway spans have not been ingested yet.</p>"
+        )
     body += _section("Root-call trend (15-minute UTC bins; this run only)", results["runs_trend"], [
         "TimeGenerated", "Interaction", "Agent", "AgentVersion", "Model", "Calls", "Failures", "AvgDurationMs", "P95DurationMs",
     ])

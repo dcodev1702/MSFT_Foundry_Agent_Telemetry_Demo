@@ -198,6 +198,8 @@ gateway/
   refresh_runtime_env.py
   start.sh
   smoke-test.sh
+  neon-latency.py
+  otel-collector.yaml
   .env.example
 requirements/
   requirements-notebook.txt
@@ -488,9 +490,23 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   Responses payloads, including MCP approvals, through unchanged.
 - **Trace context:** Foundry's server-side `responsesapi` service emits the GenAI
   `chat` spans that Section 6 requires. Both routes set `forward_headers: true`
-  so `traceparent`, `baggage` and `Foundry-Features` reach Foundry; the configured
-  Entra token still replaces the client's master key. Do not enable LiteLLM's own
-  OpenTelemetry callback unless it exports to the same Application Insights resource.
+  so `traceparent`, `baggage` and `Foundry-Features` reach Foundry unchanged; the
+  configured Entra token still replaces the client's master key.
+- **LiteLLM traces:** LiteLLM's OpenTelemetry callback exports its own spans over
+  OTLP to a pinned OpenTelemetry Collector ([gateway/otel-collector.yaml](gateway/otel-collector.yaml)),
+  which forwards them to the Foundry project's Application Insights, the same
+  resource as the notebook. `start.sh` resolves that connection string from the
+  project and passes it only to the Collector. Message logging is off, so LiteLLM
+  spans carry route, status, timing and auth metadata but no prompts. Each request
+  produces `Received Proxy Server Request` (a SERVER span in `AppRequests`, parented
+  to the notebook's request through `traceparent`) with `litellm_request`, `auth`
+  and `batch_write_to_db` children in `AppDependencies`, under the role
+  `foundry-agent-demo.litellm-gateway`. Foundry's spans remain children of the
+  notebook's request, beside LiteLLM's. Section 6 therefore reads `AppRequests`
+  as well as `AppDependencies`, so gateway spans correlate to their interaction
+  and appear in the span inventory with the category `llm-gateway`,
+  and it adds a **LiteLLM gateway hops** table with client, gateway, upstream,
+  overhead and Foundry `invoke_agent` timings for every gateway request.
 - **Start and refresh:** run `gateway/start.sh` from the repository root. It
   resolves both agent endpoints from `build_info-*.json`, obtains an Entra token
   from the Azure CLI session, writes the Git-ignored `gateway/.env` (mode `0600`),
@@ -504,6 +520,17 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   After a password rotation, copy the direct string from the Neon Console
   (**Connect**, pooling off) and run `gateway/start.sh --prompt-database-url`;
   the value is not echoed.
+- **Neon region:** keep the database close to the gateway host, because LiteLLM
+  checks it before forwarding any request whose cache has expired.
+  `gateway/neon-latency.py` reports the configured database's region and ranks
+  every Neon region by median TCP connect time from the host. On this host,
+  `aws-eu-central-1` (Frankfurt) measured 7–8 ms and the current `aws-us-east-2`
+  project about 116 ms. A project's region is fixed, so to move, create a new
+  project in the closest region (Neon Console → **New project** → region), copy
+  its direct connection string, and run `gateway/start.sh --prompt-database-url`.
+  LiteLLM creates its schema on first start. No data needs copying while spend
+  logging and usage limits are off. Rerun `gateway/neon-latency.py` to confirm the
+  new region, then delete the old project.
 - **Notebook opt-in:** add `"agent_gateway": "litellm"` to the local build file or
   set `FOUNDRY_AGENT_GATEWAY=litellm`; the environment variable wins. Section 3
   prints the route and stops before any agent call unless LiteLLM is ready, Neon
@@ -519,9 +546,19 @@ conversations and 8 Responses requests (5 main and 3 Sentinel, including 5 MCP
 approval rounds) through LiteLLM with no gateway errors. Section 6 passed with
 zero failed spans; all 8 notebook Responses spans carried the gateway tag, and 13
 Foundry server-side `chat` spans joined the run's traces.
+
+**Validated gateway traces:** run `ac32240c-641c-4bac-ace4-70f5b1848ff2` passed
+Section 6 with LiteLLM tracing enabled. All 11 gateway requests (3 conversations
+and 8 Responses calls) returned HTTP 200, and all 34 LiteLLM spans (11 requests
+and 23 children) correlated to story, facts or Sentinel with zero failures.
+LiteLLM added about 2 ms before forwarding most Responses calls. Requests after a
+few idle seconds spent about 120 ms, one Neon round trip from this host, on a
+database-backed budget lookup. One Sentinel call waited 4.0 s when LiteLLM briefly
+could not reach Neon (`Budget lookup failed for user`) before continuing. No time
+was added after the upstream call returned.
 [tests/test_notebook_gateway.py](tests/test_notebook_gateway.py) covers
-configuration, routing, readiness failures, SDK headers and notebook wiring
-without live calls.
+configuration, routing, readiness failures, SDK headers, trace export and
+notebook wiring without live calls.
 
 ---
 
@@ -703,6 +740,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | `AppGenAIContent` query is denied or the table is unavailable | Obtain appropriate read access, including protected-table access when configured, or verify content routing. Errors remain explicit; the notebook does not silently fall back to legacy content attributes |
 | Section 3 reports that the LiteLLM gateway is not ready or its token expires too soon | Run `gateway/start.sh` on the host and rerun Section 3. If the token expiry does not change, the Azure CLI is reusing its cached token; wait until about five minutes before expiry and rerun it |
 | A gateway-routed run reports no GenAI chat spans | Keep `forward_headers: true` on both routes in `gateway/config.yaml` so `traceparent` reaches Foundry, then restart the gateway with `gateway/start.sh` |
+| Section 6 shows no LiteLLM gateway hops | Confirm the run used gateway mode and that `otel-collector` is running (`docker compose --project-directory gateway --env-file gateway/.env ps`). Rerun Section 6 after a minute if gateway spans are still being ingested |
 
 ---
 

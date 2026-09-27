@@ -76,4 +76,12 @@ if [[ "$database_status" != "connected" ]]; then
 fi
 printf 'Neon database: connected\n'
 
+if ! docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" \
+    ps --status running --services | grep -qx otel-collector; then
+    printf 'The OpenTelemetry Collector is not running; LiteLLM spans cannot reach Application Insights.\n' >&2
+    docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" logs --tail=20 otel-collector >&2
+    exit 1
+fi
+printf 'Trace export: OpenTelemetry Collector running\n'
+
 docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" ps
