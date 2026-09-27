@@ -41,6 +41,10 @@ under `###` topic headings. Local stash snapshots are excluded.
   about 14 ms on cache misses.
 - Keep hand-added keys, such as `NEON_API_KEY`, when `start.sh` rewrites
   `gateway/.env`.
+- Document the Neon project in the README's gateway section: the Neon Console
+  link, what Neon provides, the AWS `aws-eu-central-1` location and settings, how
+  LiteLLM uses the database, credential and region management, and how Neon's
+  effect appears in LiteLLM's spans in Application Insights and Section 6.
 
 ## 2026-09-26
 

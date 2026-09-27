@@ -472,7 +472,8 @@ label on the metadata slide.
 
 The Linux notebook can send both backend agents' Responses traffic through a
 host-local [LiteLLM](https://docs.litellm.ai/) proxy in [gateway](gateway), backed
-by a [Neon](https://neon.com/) database. Direct calls to Foundry remain the
+by a [Neon](https://neon.com/) Postgres database
+([details](#neon-postgres-for-the-gateway)). Direct calls to Foundry remain the
 default. The gateway uses one LiteLLM master key and disables spend logging; it
 configures no virtual keys, users, budgets or limits.
 
@@ -480,7 +481,7 @@ configures no virtual keys, users, budgets or limits.
 Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
     /foundry-agent/main/*     --> main agent endpoint     (Entra token)
     /foundry-agent/sentinel/* --> Sentinel agent endpoint (Entra token)
-    LiteLLM --(TLS)--> Neon
+    LiteLLM --(TLS)--> Neon Postgres (AWS eu-central-1, Frankfurt)
 ```
 
 - **Routes:** [gateway/config.yaml](gateway/config.yaml) defines one authenticated
@@ -516,24 +517,9 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   recreates the container, so avoid it during a notebook run. Keys that `start.sh`
   does not manage, such as a hand-added `NEON_API_KEY`, are kept when the file is
   rewritten. `gateway/smoke-test.sh` checks both routes.
-- **Neon:** use the direct (non-`-pooler`) connection string with
-  `sslmode=require`, because LiteLLM runs `prisma migrate deploy` at startup.
-  After a password rotation, copy the direct string from the Neon Console
-  (**Connect**, pooling off) and run `gateway/start.sh --prompt-database-url`;
-  the value is not echoed.
-- **Neon region:** keep the database close to the gateway host, because LiteLLM
-  checks it before forwarding any request whose cache has expired.
-  `gateway/neon-latency.py` reports the configured database's region and ranks
-  every Neon region by median TCP connect time from the host. The gateway database
-  now runs in a Neon project in `aws-eu-central-1` (Frankfurt), 6–7 ms from this
-  host. The original `aws-us-east-2` project, about 116 ms away, was deleted after
-  the switch. LiteLLM's database check before forwarding fell from about 125 ms to
-  a median of about 14 ms (8–48 ms across four spaced requests). A project's region
-  is fixed, so to move again, create a new project in the closest region (Neon
-  Console → **New project** → region), copy its direct connection string, and run
-  `gateway/start.sh --prompt-database-url`. LiteLLM creates its schema on first
-  start. No data needs copying while spend logging and usage limits are off. Rerun
-  `gateway/neon-latency.py` to confirm the new region, then delete the old project.
+- **Neon:** LiteLLM keeps its state in Neon Postgres. The project, its location,
+  credentials and observability are described in
+  [Neon Postgres for the gateway](#neon-postgres-for-the-gateway).
 - **Notebook opt-in:** add `"agent_gateway": "litellm"` to the local build file or
   set `FOUNDRY_AGENT_GATEWAY=litellm`; the environment variable wins. Section 3
   prints the route and stops before any agent call unless LiteLLM is ready, Neon
@@ -543,6 +529,102 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   carry `app.gateway.name=litellm` and `app.upstream.server.address`. Agent
   preparation and deployment lookups still call Foundry directly. Set
   `agent_gateway` to `direct`, or remove it, to switch back.
+
+#### Neon Postgres for the gateway
+
+**Neon Console:** [console.neon.tech](https://console.neon.tech). Sign in, then
+open the project [foundry-observability-gateway-eu](https://console.neon.tech/app/projects/silent-river-13598320).
+
+[Neon](https://neon.com/) is a managed, serverless Postgres service that runs on
+AWS. It separates storage from compute, autoscales compute between set limits,
+and scales an idle compute to zero after 5 minutes, waking it on the next
+connection. In this project, Neon is the LiteLLM gateway's system database only.
+The notebook, Foundry and the Collector never connect to it.
+
+| Item | Value |
+|---|---|
+| Console | [console.neon.tech](https://console.neon.tech) → project `foundry-observability-gateway-eu` |
+| Project ID | `silent-river-13598320` |
+| Cloud and region | AWS `aws-eu-central-1` (Europe, Frankfurt) |
+| Latency from the gateway host | 6–7 ms median TCP connect, from `gateway/neon-latency.py` |
+| Branch / database / role | `production` (default) / `neondb` / `neondb_owner` |
+| Postgres version | 18 |
+| Compute | Read-write endpoint, 0.25–8 CU autoscaling, scale to zero after 5 minutes idle |
+| Connection | Direct endpoint (connection pooling off) with `sslmode=require` and `channel_binding=require` |
+| History | Created 2026-09-27. It replaced the original `aws-us-east-2` (Ohio) project, about 116 ms away, which was deleted after the switch |
+
+**How LiteLLM uses Neon**
+
+- LiteLLM reads the connection string from `DATABASE_URL` in the Git-ignored
+  `gateway/.env` (mode `0600`). Only the LiteLLM container receives it, and it is
+  never committed.
+- On every start, LiteLLM runs `prisma migrate deploy`, which creates or upgrades
+  its `LiteLLM_*` tables. Migrations need the direct endpoint; Neon's `-pooler`
+  endpoint runs PgBouncer in transaction mode, which migrations cannot use.
+- Neon stores LiteLLM's key, user, team and budget records and periodically
+  flushed spend counters. With `disable_spend_logs: true` there are no
+  per-request spend logs, and with message logging off, no prompts or responses
+  are written.
+- Before forwarding a request, LiteLLM checks cached user and budget data. When
+  that cache has expired, it queries Neon first, which is why the region matters.
+  Moving from Ohio to Frankfurt cut this check from about 125 ms to a median of
+  about 14 ms (8–48 ms across four spaced requests). If Neon is unreachable,
+  LiteLLM logs `Budget lookup failed for user` and forwards anyway; this happened
+  once, as a 4.0 s wait.
+- `gateway/start.sh` fails unless LiteLLM's readiness endpoint reports
+  `db: connected`, and notebook Section 3 checks the same status before any agent
+  call (`Gateway health: LiteLLM ready, Neon connected`).
+
+**Manage credentials and region**
+
+- **Connection string:** Neon Console → project → **Connect** → branch
+  `production`, database `neondb`, role `neondb_owner` → turn **Connection
+  pooling** off → copy. Then run `gateway/start.sh --prompt-database-url`; the
+  value is not echoed. Resetting the role password or claiming a project rotates
+  the string.
+- **Region:** `gateway/neon-latency.py` reports the configured database's region
+  and ranks every Neon region by latency from this host. A project's region is
+  fixed. To move, create a new project in the closest region (**New project** →
+  region), switch with `gateway/start.sh --prompt-database-url`, confirm with
+  `gateway/neon-latency.py`, then delete the old project. LiteLLM recreates its
+  schema; no data needs copying while spend logging and usage limits are off.
+- **API key (optional):** a hand-added organization key, `NEON_API_KEY` in
+  `gateway/.env`, enables Neon API operations such as listing or deleting
+  projects. `start.sh` keeps it, and neither container receives it. Create or
+  revoke it in the Neon Console: switch to your organization, then go to
+  **Settings → API keys**.
+
+**How Neon appears in the traces**
+
+Neon sends no telemetry to Application Insights. Its work shows up in LiteLLM's
+OpenTelemetry spans, which follow this path:
+
+```text
+LiteLLM otel callback --OTLP/HTTP--> OpenTelemetry Collector (gateway/otel-collector.yaml)
+  --azure_monitor exporter--> Application Insights (same resource as the notebook)
+  --> Log Analytics AppRequests + AppDependencies --> notebook Section 6
+```
+
+| Signal | Where to look | What it shows about Neon |
+|---|---|---|
+| `batch_write_to_db` span | `AppDependencies`, role `foundry-agent-demo.litellm-gateway`, category `llm-gateway` | LiteLLM queuing the request's spend update for its periodic batched write to Neon. The span times the queuing, typically under 1 ms, not the later background flush |
+| Time outside `litellm_request` within `Received Proxy Server Request` | Section 6 **LiteLLM gateway hops**, `GatewayOverheadMs` | Includes the Neon lookup on a cache miss |
+| Gateway readiness `db` | `gateway/start.sh` output and Section 3 `Gateway health` | Whether LiteLLM can reach Neon |
+| LiteLLM logs | `docker compose --project-directory gateway --env-file gateway/.env logs litellm` | Neon connection errors, such as `Budget lookup failed for user` |
+| Neon **Monitoring** | Neon Console → project → **Monitoring** | Database-side connections, compute and CPU; not exported to Application Insights |
+
+This query lists the gateway's recent batched-write spans, one per gateway request:
+
+```kusto
+AppDependencies
+| where TimeGenerated > ago(6h)
+| where AppRoleName == "foundry-agent-demo.litellm-gateway" and Name == "batch_write_to_db"
+| project TimeGenerated, OperationId, ParentId, DurationMs
+| order by TimeGenerated desc
+```
+
+Each row's `OperationId` is the notebook trace that the gateway request belongs to,
+so it can be opened in the Application Insights end-to-end transaction view.
 
 **Validated gateway run:** run `be4d66dc-840f-4b4a-813f-8e9908123210` routed 3
 conversations and 8 Responses requests (5 main and 3 Sentinel, including 5 MCP
@@ -745,6 +827,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Section 3 reports that the LiteLLM gateway is not ready or its token expires too soon | Run `gateway/start.sh` on the host and rerun Section 3. If the token expiry does not change, the Azure CLI is reusing its cached token; wait until about five minutes before expiry and rerun it |
 | A gateway-routed run reports no GenAI chat spans | Keep `forward_headers: true` on both routes in `gateway/config.yaml` so `traceparent` reaches Foundry, then restart the gateway with `gateway/start.sh` |
 | Section 6 shows no LiteLLM gateway hops | Confirm the run used gateway mode and that `otel-collector` is running (`docker compose --project-directory gateway --env-file gateway/.env ps`). Rerun Section 6 after a minute if gateway spans are still being ingested |
+| `gateway/start.sh` or Section 3 reports that Neon is not connected | Open the [Neon Console](https://console.neon.tech) and check that the project exists. If its password was reset or the project was replaced, copy the direct connection string (**Connect**, pooling off) and run `gateway/start.sh --prompt-database-url`. See [Neon Postgres for the gateway](#neon-postgres-for-the-gateway) |
 
 ---
 
@@ -773,4 +856,6 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 - [Foundry client-side tracing (preview)](https://learn.microsoft.com/azure/foundry/observability/how-to/trace-agent-client-side)
 - [Windows dependency matrix](requirements/requirements-notebook.txt)
 - [Observability notes and validation evidence](docs/observability.md)
+- [Neon Console](https://console.neon.tech) and [Neon documentation](https://neon.com/docs)
+- [LiteLLM proxy documentation](https://docs.litellm.ai/docs/simple_proxy)
 - [Change history](CHANGELOG.md)
