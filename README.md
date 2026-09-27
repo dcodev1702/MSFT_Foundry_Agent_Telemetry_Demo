@@ -182,6 +182,14 @@ agent-framework-demo/.venv-linux/bin/python -m unittest discover -s tests -p "te
 The environment is Git-ignored through the `.gitignore` that `venv` writes into
 it. Two Windows-only MCP transport tests skip on Linux.
 
+The same environment runs the standalone demo's Linux notebook,
+[agent-framework-demo/zolab-agent-framework-sdk-linux.ipynb](agent-framework-demo/zolab-agent-framework-sdk-linux.ipynb),
+with the **Agent Framework SDK Demo (Linux, .venv-linux)** kernel that its first
+setup cell registers. It shows traces in the Aspire Dashboard container on the
+local Docker engine, published on `127.0.0.1`; forward its UI port in VS Code's
+**Ports** panel when working over Remote-SSH. See
+[Running on Linux](agent-framework-demo/README-agent-framework-sdk-poc.md#running-on-linux).
+
 ### Linux Tool-Content Tracing
 
 Section 3.1 enables `OTEL_LOG_TOOL_CONTENT=1` by default for this demo. This

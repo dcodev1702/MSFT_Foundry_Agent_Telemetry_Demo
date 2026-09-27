@@ -10,6 +10,23 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Agent Framework demo on Linux
+
+- Add `agent-framework-demo/zolab-agent-framework-sdk-linux.ipynb`, a Linux
+  edition of the standalone Agent Framework demo with the same cells as the
+  Windows notebook. Only the platform cells differ: the `.venv-linux`
+  environment and **Agent Framework SDK Demo (Linux, .venv-linux)** kernel, Ubuntu
+  Azure CLI and Docker Engine prerequisites, an MCP stdio transport without
+  `pywin32`, and workflow prompts grounded in Ubuntu Linux.
+- Run the Aspire Dashboard container on the local Docker engine with its UI and
+  OTLP ports published on `127.0.0.1` only, and describe forwarding the UI port
+  in VS Code over Remote-SSH.
+- Add `tests/test_agent_framework_linux.py`. It checks that the notebook matches
+  the Windows notebook except for the platform cells, and covers the
+  environment bootstrap, kernel verification and Aspire startup.
+- Validate a full Linux run: all 20 code cells, including the Azure OpenAI
+  agent, MCP call and A2A workflow, ran without errors or OTLP export failures.
+
 ### Linux notebook environment, telemetry and prompt updates
 
 - Accept Python 3.14.7 or newer for an existing `.venv-linux` in the Linux

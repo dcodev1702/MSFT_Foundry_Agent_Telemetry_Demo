@@ -1,8 +1,8 @@
 # Microsoft Agent Framework SDK + Aspire Observability PoC
 
-A standalone companion README for the Windows notebook PoC in this repo.
+A standalone companion README for the Windows and Linux notebook PoC in this repo.
 
-This document covers the Agent Framework-first notebook experience in [zolab-agent-framework-sdk-win11.ipynb](./zolab-agent-framework-sdk-win11.ipynb). It does not replace the main repo README, which continues to describe the broader Foundry deployment and bot workspace.
+This document covers the Agent Framework-first notebook experience in [zolab-agent-framework-sdk-win11.ipynb](./zolab-agent-framework-sdk-win11.ipynb) and its Linux edition, [zolab-agent-framework-sdk-linux.ipynb](./zolab-agent-framework-sdk-linux.ipynb) ([Running on Linux](#running-on-linux)). It does not replace the main repo README, which continues to describe the broader Foundry deployment and bot workspace.
 
 ## Executive Summary
 
@@ -166,7 +166,7 @@ For a local teaching PoC, Aspire is the fastest way to make those questions visi
 - Python 3.13+
 - VS Code with Jupyter support
 - Azure CLI logged in with access to the target Azure OpenAI resource
-- Docker Desktop for Aspire Dashboard. The notebook startup cell attempts to launch Docker Desktop on Windows when the Docker CLI is installed but the Linux engine is not ready.
+- Docker for Aspire Dashboard: Docker Desktop on Windows, where the notebook startup cell attempts to launch Docker Desktop when the Docker CLI is installed but the Linux engine is not ready; Docker Engine on Linux
 - An Azure OpenAI endpoint and deployment name
 
 ### Notebook Install Set
@@ -229,6 +229,48 @@ environment. Select a working Python kernel, or use the **PowerShell recovery**
 block in the notebook's first setup description from an `agent-framework-demo`
 terminal. That block creates the missing environment and registers the kernel
 without requiring a running notebook. Then continue from step 3.
+
+## Running on Linux
+
+[zolab-agent-framework-sdk-linux.ipynb](./zolab-agent-framework-sdk-linux.ipynb)
+runs the same demo on Linux (Ubuntu 26.04). It has the same cells as the Windows
+notebook; only the platform cells differ, and
+[tests/test_agent_framework_linux.py](../tests/test_agent_framework_linux.py) fails
+if any other cell drifts from the Windows version.
+
+| Area | Windows notebook | Linux notebook |
+|---|---|---|
+| Environment | `agent-framework-demo/.venv` | `agent-framework-demo/.venv-linux`, created with the selected kernel's Python; the Windows `.venv` is left untouched |
+| Kernel | Agent Framework SDK Demo (.venv) | Agent Framework SDK Demo (Linux, .venv-linux), `agent-framework-sdk-demo-linux` |
+| Azure CLI | `az.cmd`, installed with winget | `az`, installed with `curl -sL https://aka.ms/InstallAzureCLIDeb \| sudo bash` |
+| Aspire Dashboard | Docker Desktop, started on demand | Docker Engine; the container publishes its UI and OTLP ports on `127.0.0.1` only |
+| MCP stdio | Refreshes `pywin32` paths if needed | Standard pipes to the `.venv-linux` interpreter; no extra transport packages |
+| Package source | Package index or `build_source_wheels.ps1` cache | Package index, or an existing `.wheels` cache |
+| Workflow grounding | Windows 11 and VS Code | Ubuntu Linux and VS Code |
+
+To run it:
+
+1. Make sure the Docker engine is running and your account can use `docker`
+   without `sudo`, and that `az login` has an active session.
+2. Open the notebook and select any Python 3.13+ kernel, such as the repository's
+   **AI Agent Demo (Linux, Python 3.14.7)**, then run the first setup cell. It
+   creates or reuses `.venv-linux` and registers the demo kernel.
+3. Select **Agent Framework SDK Demo (Linux, .venv-linux)** and continue from the
+   kernel verification cell, as in the Quick Start.
+4. When the Aspire cell reports **Running** over VS Code Remote-SSH, forward the UI
+   port (18888 by default) in the **Ports** panel, then open the printed login URL.
+
+The MCP helper cell writes the same `agent_framework_menu_mcp_server.py` as the
+Windows notebook, so running either notebook leaves the checked-in helper
+unchanged.
+
+**Validated Linux run (2026-09-27):** all 20 code cells ran without errors on
+Ubuntu 26.04 with Docker Engine. The package inventory verified 20 of 20 pins,
+Aspire started on `localhost:18888` with OTLP on 4317, the MCP menu call passed,
+and the Architect → A2A Reviewer → Coach workflow completed with the A2A task in
+`TASK_STATE_COMPLETED`. No OTLP export errors were reported, and cleanup closed
+MCP, stopped the reviewer, shut down OpenTelemetry, removed the Aspire container
+and image, and closed the credential.
 
 ## Observability Design Notes
 
