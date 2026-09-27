@@ -72,6 +72,32 @@ That gives three useful observability surfaces:
 
 In other words, Foundry gives the agent/operator view, while Azure Monitor gives the platform/operations view. OpenTelemetry is the glue that makes the same run observable across both.
 
+### Linux LiteLLM Gateway Path
+
+With the optional [LiteLLM gateway](../README.md#optional-litellm-gateway-with-neon-linux),
+the Linux notebook's Responses calls pass through a LiteLLM proxy container on the
+Ubuntu 26.04 host. LiteLLM exports its own spans over OTLP/HTTP to an OpenTelemetry
+Collector container, which forwards them with the `azure_monitor` exporter to the
+same Application Insights resource that the notebook and Foundry use. LiteLLM keeps
+its keys, users, teams and spend counters in a Neon Postgres database in AWS
+Frankfurt; the notebook, Foundry and the Collector never connect to it. Direct
+calls to Foundry remain the default.
+
+![Linux gateway architecture: the notebook and the LiteLLM and OpenTelemetry Collector containers on the Ubuntu 26.04 host, Neon Postgres in AWS Frankfurt, and Microsoft Foundry, Application Insights, Log Analytics, Key Vault and Storage in Azure](../images/linux-gateway-architecture-dark.svg)
+
+LiteLLM forwards `traceparent`, so its spans and Foundry's join the notebook's
+trace. The three exporters send asynchronously; the order of the export steps is
+illustrative:
+
+![Gateway runtime sequence: the notebook calls LiteLLM, which checks Neon and forwards to the Foundry agent; LiteLLM, the Collector, Foundry and the notebook export spans to Azure Monitor, and Section 6 reads them back](../images/linux-gateway-runtime-dark.svg)
+
+The trace view shows one of those calls as `AppRequests` and `AppDependencies`
+store it, from a validated run on 2026-09-27: the facts step's Responses call that
+used the Microsoft Learn MCP tool. LiteLLM's server span is the only request row;
+Foundry's `invoke_agent` is its sibling under the notebook's `responses` span.
+
+![Trace view of one gateway Responses call: the notebook's HTTP and responses spans, LiteLLM's server span with auth, postgres, litellm_request, raw_gen_ai_request and batch_write_to_db children, and Foundry's invoke_agent, chat and execute_tool spans, with roles, tables, types and a timing waterfall](../images/linux-gateway-trace-dark.svg)
+
 ## Why This Brings Observability to Agents
 
 Agent observability is useful only if it answers more than "did the call succeed?" The current design gets close to that goal because it makes these layers visible:

@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 944" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a0e1a"/><stop offset="1" stop-color="#0c1322"/></linearGradient>
+    <filter id="gviolet" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#a855f7" flood-opacity="0.45"/></filter>
+    <marker id="mviolet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a855f7"/></marker>
+    <filter id="gcyan" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#22d3ee" flood-opacity="0.45"/></filter>
+    <marker id="mcyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#22d3ee"/></marker>
+    <filter id="gmagenta" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#ec4899" flood-opacity="0.45"/></filter>
+    <marker id="mmagenta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ec4899"/></marker>
+    <filter id="ggold" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#fbbf24" flood-opacity="0.45"/></filter>
+    <marker id="mgold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fbbf24"/></marker>
+    <filter id="gorange" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#fb923c" flood-opacity="0.45"/></filter>
+    <marker id="morange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fb923c"/></marker>
+    <filter id="gblue" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#60a5fa" flood-opacity="0.45"/></filter>
+    <marker id="mblue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#60a5fa"/></marker>
+    <filter id="ggreen" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#34d399" flood-opacity="0.45"/></filter>
+    <marker id="mgreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#34d399"/></marker>
+    <filter id="gslate" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#94a3b8" flood-opacity="0.45"/></filter>
+    <marker id="mslate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#94a3b8"/></marker>
+  </defs>
+  <rect width="1400" height="944" fill="url(#bg)"/>
+  <text x="56" y="58" font-size="30" font-weight="800" fill="#e8edf5" letter-spacing="0.5">TRACE VIEW <tspan font-weight="300" fill="#9aa7ba">// One Gateway Responses Call</tspan></text>
+  <text x="56" y="80" font-size="12" letter-spacing="0.3" fill="#6b7689">Log Analytics AppRequests + AppDependencies · validated run 2026-09-27 · facts step, Responses call with an MCP tool</text>
+  <circle cx="1070" cy="50" r="5" fill="#34d399" filter="url(#ggreen)"/>
+  <text x="1084" y="54" font-size="12" fill="#aeb8c7">17 spans · 3 roles · one trace</text>
+  <text x="1084" y="69" font-size="10" fill="#5b6678">timings vary per run</text>
+  <line x1="56" y1="96" x2="1344" y2="96" stroke="#1c2740" stroke-width="1"/>
+  <g>
+  <text x="56" y="132" font-size="9" font-weight="700" letter-spacing="0.8" fill="#5b6678">ANCESTORS</text>
+  <text x="134" y="132" font-size="10.5" fill="#8b97a8">notebook.workflow story-facts  ›  workflow.run  ›  executor.process facts  ›  invoke_agent ZoDEfendersAgent-1702-backend  ›</text>
+  </g>
+  <rect x="40" y="152" width="1320" height="530" rx="16" fill="#0c1322" fill-opacity="0.4" stroke="#1c2740" stroke-width="1.5"/>
+  <text x="60" y="178" font-size="9" font-weight="700" letter-spacing="0.8" fill="#7d8aa0">SPAN</text>
+  <text x="520" y="178" font-size="9" font-weight="700" letter-spacing="0.8" fill="#7d8aa0">ROLE</text>
+  <text x="660" y="178" font-size="9" font-weight="700" letter-spacing="0.8" fill="#7d8aa0">TABLE</text>
+  <text x="790" y="178" font-size="9" font-weight="700" letter-spacing="0.8" fill="#7d8aa0">TYPE</text>
+  <text x="1340" y="178" font-size="9" font-weight="700" letter-spacing="0.8" text-anchor="end" fill="#7d8aa0">DURATION</text>
+  <line x1="920.0" y1="190" x2="920.0" y2="672" stroke="#1c2740" stroke-width="1" stroke-dasharray="3 4"/>
+  <text x="920" y="178" font-size="9" font-weight="700" text-anchor="middle" fill="#7d8aa0">0 s</text>
+  <line x1="1009.2" y1="190" x2="1009.2" y2="672" stroke="#1c2740" stroke-width="1" stroke-dasharray="3 4"/>
+  <text x="1009.19" y="178" font-size="9" font-weight="700" text-anchor="middle" fill="#7d8aa0">1 s</text>
+  <line x1="1098.4" y1="190" x2="1098.4" y2="672" stroke="#1c2740" stroke-width="1" stroke-dasharray="3 4"/>
+  <text x="1098.38" y="178" font-size="9" font-weight="700" text-anchor="middle" fill="#7d8aa0">2 s</text>
+  <line x1="1187.6" y1="190" x2="1187.6" y2="672" stroke="#1c2740" stroke-width="1" stroke-dasharray="3 4"/>
+  <text x="1187.57" y="178" font-size="9" font-weight="700" text-anchor="middle" fill="#7d8aa0">3 s</text>
+  <line x1="56" y1="190" x2="1344" y2="190" stroke="#243150" stroke-width="1"/>
+  <circle cx="65" cy="213" r="3.5" fill="#a855f7"/>
+  <text x="76" y="217" font-size="11" fill="#e3e9f2">POST /foundry-agent/main/responses</text>
+  <rect x="520" y="203" width="70" height="20" rx="10" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
+  <text x="555.223" y="216.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#cdb6f7">notebook</text>
+  <text x="660" y="217" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="217" font-size="10.5" fill="#8b97a8">HTTP · 200</text>
+  <rect x="920.0" y="208" width="321.2" height="10" rx="3" fill="#a855f7" fill-opacity="0.85"/>
+  <text x="1340" y="217" font-size="10.5" text-anchor="end" fill="#cbd5e1">3,601 ms</text>
+  <rect x="48" y="230" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M65 221 V247 H76" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="85" cy="247" r="3.5" fill="#a855f7"/>
+  <text x="96" y="251" font-size="11" fill="#e3e9f2">responses</text>
+  <rect x="520" y="237" width="70" height="20" rx="10" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
+  <text x="555.223" y="250.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#cdb6f7">notebook</text>
+  <text x="660" y="251" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="251" font-size="10.5" fill="#8b97a8">CognitiveServices</text>
+  <rect x="920.0" y="242" width="321.1" height="10" rx="3" fill="#a855f7" fill-opacity="0.85"/>
+  <text x="1340" y="251" font-size="10.5" text-anchor="end" fill="#cbd5e1">3,600 ms</text>
+  <path d="M85 255 V281 H96" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="105" cy="281" r="3.5" fill="#22d3ee"/>
+  <text x="116" y="285" font-size="11" font-weight="600" fill="#e3e9f2">POST /foundry-agent/main/responses</text>
+  <rect x="520" y="271" width="103" height="20" rx="10" fill="#0a2a30" stroke="#0891b2" stroke-width="0.8"/>
+  <text x="571.568" y="284.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#a5f0fa">litellm-gateway</text>
+  <text x="660" y="285" font-size="10.5" fill="#fcd34d">AppRequests</text>
+  <text x="790" y="285" font-size="10.5" fill="#8b97a8">request · 200</text>
+  <rect x="920.5" y="276" width="320.4" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <text x="1340" y="285" font-size="10.5" text-anchor="end" fill="#cbd5e1">3,592 ms</text>
+  <rect x="48" y="298" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M105 289 V315 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="315" r="3.5" fill="#22d3ee"/>
+  <text x="136" y="319" font-size="11" fill="#cbd5e1">auth</text>
+  <rect x="520" y="305" width="103" height="20" rx="10" fill="#0a2a30" stroke="#0891b2" stroke-width="0.8"/>
+  <text x="571.568" y="318.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#a5f0fa">litellm-gateway</text>
+  <text x="660" y="319" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="319" font-size="10.5" fill="#8b97a8">InProc</text>
+  <rect x="920.5" y="310" width="2.5" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <text x="1340" y="319" font-size="10.5" text-anchor="end" fill="#cbd5e1">11 ms</text>
+  <path d="M105 289 V349 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="349" r="3.5" fill="#22d3ee"/>
+  <text x="136" y="353" font-size="11" fill="#cbd5e1">postgres × 4</text>
+  <rect x="520" y="339" width="103" height="20" rx="10" fill="#0a2a30" stroke="#0891b2" stroke-width="0.8"/>
+  <text x="571.568" y="352.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#a5f0fa">litellm-gateway</text>
+  <text x="660" y="353" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="353" font-size="10.5" fill="#8b97a8">postgresql</text>
+  <rect x="920.5" y="344" width="2.5" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <rect x="921.5" y="344" width="2.5" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <rect x="921.6" y="344" width="2.5" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <rect x="921.6" y="344" width="2.5" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <text x="1340" y="353" font-size="10.5" text-anchor="end" fill="#cbd5e1">&lt; 1 ms each</text>
+  <rect x="48" y="366" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M105 289 V383 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="383" r="3.5" fill="#22d3ee"/>
+  <text x="136" y="387" font-size="11" fill="#cbd5e1">litellm_request</text>
+  <rect x="520" y="373" width="103" height="20" rx="10" fill="#0a2a30" stroke="#0891b2" stroke-width="0.8"/>
+  <text x="571.568" y="386.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#a5f0fa">litellm-gateway</text>
+  <text x="660" y="387" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="387" font-size="10.5" fill="#8b97a8">InProc</text>
+  <rect x="922.2" y="378" width="318.6" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <text x="1340" y="387" font-size="10.5" text-anchor="end" fill="#cbd5e1">3,572 ms</text>
+  <path d="M125 391 V417 H136" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="145" cy="417" r="3.5" fill="#22d3ee"/>
+  <text x="156" y="421" font-size="11" fill="#cbd5e1">raw_gen_ai_request</text>
+  <rect x="520" y="407" width="103" height="20" rx="10" fill="#0a2a30" stroke="#0891b2" stroke-width="0.8"/>
+  <text x="571.568" y="420.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#a5f0fa">litellm-gateway</text>
+  <text x="660" y="421" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="421" font-size="10.5" fill="#8b97a8">InProc</text>
+  <rect x="922.2" y="412" width="318.6" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <text x="1340" y="421" font-size="10.5" text-anchor="end" fill="#cbd5e1">3,572 ms</text>
+  <rect x="48" y="434" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M105 289 V451 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="451" r="3.5" fill="#22d3ee"/>
+  <text x="136" y="455" font-size="11" fill="#cbd5e1">batch_write_to_db</text>
+  <rect x="520" y="441" width="103" height="20" rx="10" fill="#0a2a30" stroke="#0891b2" stroke-width="0.8"/>
+  <text x="571.568" y="454.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#a5f0fa">litellm-gateway</text>
+  <text x="660" y="455" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="455" font-size="10.5" fill="#8b97a8">postgresql</text>
+  <rect x="1241.1" y="446" width="2.5" height="10" rx="3" fill="#22d3ee" fill-opacity="0.85"/>
+  <text x="1340" y="455" font-size="10.5" text-anchor="end" fill="#cbd5e1">2.1 ms</text>
+  <path d="M85 255 V485 H96" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="105" cy="485" r="3.5" fill="#60a5fa"/>
+  <text x="116" y="489" font-size="11" fill="#e3e9f2">invoke_agent ZoDEfendersAgent-1702-backend:17</text>
+  <rect x="520" y="475" width="91" height="20" rx="10" fill="#0b1a33" stroke="#2563eb" stroke-width="0.8"/>
+  <text x="565.547" y="488.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#bfdbfe">responsesapi</text>
+  <text x="660" y="489" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="489" font-size="10.5" fill="#8b97a8">AI</text>
+  <rect x="961.2" y="480" width="260.7" height="10" rx="3" fill="#60a5fa" fill-opacity="0.85"/>
+  <text x="1340" y="489" font-size="10.5" text-anchor="end" fill="#cbd5e1">2,923 ms</text>
+  <rect x="48" y="502" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M105 493 V519 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="519" r="3.5" fill="#60a5fa"/>
+  <text x="136" y="523" font-size="11" fill="#cbd5e1">chat gpt-5.6-terra-2026-07-09</text>
+  <rect x="520" y="509" width="91" height="20" rx="10" fill="#0b1a33" stroke="#2563eb" stroke-width="0.8"/>
+  <text x="565.547" y="522.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#bfdbfe">responsesapi</text>
+  <text x="660" y="523" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="523" font-size="10.5" fill="#8b97a8">AI</text>
+  <rect x="961.3" y="514" width="93.3" height="10" rx="3" fill="#60a5fa" fill-opacity="0.85"/>
+  <text x="1340" y="523" font-size="10.5" text-anchor="end" fill="#cbd5e1">1,046 ms</text>
+  <path d="M105 493 V553 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="553" r="3.5" fill="#60a5fa"/>
+  <text x="136" y="557" font-size="11" fill="#cbd5e1">execute_tool mcp_msft-learn.microsoft_docs_search</text>
+  <rect x="520" y="543" width="91" height="20" rx="10" fill="#0b1a33" stroke="#2563eb" stroke-width="0.8"/>
+  <text x="565.547" y="556.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#bfdbfe">responsesapi</text>
+  <text x="660" y="557" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="557" font-size="10.5" fill="#8b97a8">AI</text>
+  <rect x="1054.6" y="548" width="82.5" height="10" rx="3" fill="#60a5fa" fill-opacity="0.85"/>
+  <text x="1340" y="557" font-size="10.5" text-anchor="end" fill="#cbd5e1">925 ms</text>
+  <rect x="48" y="570" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M105 493 V587 H116" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="125" cy="587" r="3.5" fill="#60a5fa"/>
+  <text x="136" y="591" font-size="11" fill="#cbd5e1">chat gpt-5.6-terra-2026-07-09</text>
+  <rect x="520" y="577" width="91" height="20" rx="10" fill="#0b1a33" stroke="#2563eb" stroke-width="0.8"/>
+  <text x="565.547" y="590.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#bfdbfe">responsesapi</text>
+  <text x="660" y="591" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="591" font-size="10.5" fill="#8b97a8">AI</text>
+  <rect x="1206.5" y="582" width="2.5" height="10" rx="3" fill="#60a5fa" fill-opacity="0.85"/>
+  <text x="1340" y="591" font-size="10.5" text-anchor="end" fill="#cbd5e1">0.8 ms</text>
+  <path d="M65 221 V621 H76" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="85" cy="621" r="3.5" fill="#a855f7"/>
+  <text x="96" y="625" font-size="11" fill="#e3e9f2">notebook.mcp.observe mcp_call</text>
+  <rect x="520" y="611" width="70" height="20" rx="10" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
+  <text x="555.223" y="624.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#cdb6f7">notebook</text>
+  <text x="660" y="625" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="625" font-size="10.5" fill="#8b97a8">InProc</text>
+  <rect x="1241.2" y="616" width="2.5" height="10" rx="3" fill="#a855f7" fill-opacity="0.85"/>
+  <text x="1340" y="625" font-size="10.5" text-anchor="end" fill="#cbd5e1">0 ms</text>
+  <rect x="48" y="638" width="1304" height="34" fill="#ffffff" fill-opacity="0.02"/>
+  <path d="M65 221 V655 H76" fill="none" stroke="#2a3a57" stroke-width="1.2"/>
+  <circle cx="85" cy="655" r="3.5" fill="#a855f7"/>
+  <text x="96" y="659" font-size="11" fill="#e3e9f2">notebook.mcp.observe mcp_approval_request</text>
+  <rect x="520" y="645" width="70" height="20" rx="10" fill="#1a1130" stroke="#7c3aed" stroke-width="0.8"/>
+  <text x="555.223" y="658.5" font-size="9.5" font-weight="700" text-anchor="middle" fill="#cdb6f7">notebook</text>
+  <text x="660" y="659" font-size="10.5" fill="#aeb8c7">AppDependencies</text>
+  <text x="790" y="659" font-size="10.5" fill="#8b97a8">InProc</text>
+  <rect x="1241.2" y="650" width="2.5" height="10" rx="3" fill="#a855f7" fill-opacity="0.85"/>
+  <text x="1340" y="659" font-size="10.5" text-anchor="end" fill="#cbd5e1">0 ms</text>
+  <g>
+  <rect x="40" y="704" width="1320" height="168" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#1c2740" stroke-width="1.2"/>
+  <text x="60" y="730" font-size="9" font-weight="700" letter-spacing="0.8" fill="#7d8aa0">READING THIS TRACE</text>
+  <circle cx="68" cy="756" r="9" fill="#0e1626" stroke="#22d3ee" stroke-width="1.3"/>
+  <text x="68" y="759.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#67e8f9">1</text>
+  <text x="86" y="760" font-size="10.5" fill="#b8c2d2">LiteLLM forwards about 20 ms after the request arrives, after auth and its</text>
+  <text x="86" y="776" font-size="10.5" fill="#b8c2d2">key, user and team checks. The postgres spans time those Neon queries:</text>
+  <text x="86" y="792" font-size="10.5" fill="#b8c2d2">under 1 ms here, 14–20 ms on the run's first request.</text>
+  <circle cx="68" cy="818" r="9" fill="#0e1626" stroke="#60a5fa" stroke-width="1.3"/>
+  <text x="68" y="821.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#93c5fd">2</text>
+  <text x="86" y="822" font-size="10.5" fill="#b8c2d2">Foundry's invoke_agent is a sibling of LiteLLM's server span. Both are</text>
+  <text x="86" y="838" font-size="10.5" fill="#b8c2d2">children of the notebook's responses span, because LiteLLM forwards</text>
+  <text x="86" y="854" font-size="10.5" fill="#b8c2d2">traceparent unchanged.</text>
+  <circle cx="718" cy="756" r="9" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="718" y="759.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">3</text>
+  <text x="736" y="760" font-size="10.5" fill="#b8c2d2">After the Collector's status rules, the server span is an HTTP request</text>
+  <text x="736" y="776" font-size="10.5" fill="#b8c2d2">(ResultCode 200) and in-process spans report 0, so the Foundry trace</text>
+  <text x="736" y="792" font-size="10.5" fill="#b8c2d2">view flags none of them.</text>
+  <circle cx="718" cy="818" r="9" fill="#0e1626" stroke="#34d399" stroke-width="1.3"/>
+  <text x="718" y="821.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#6ee7b7">4</text>
+  <text x="736" y="822" font-size="10.5" fill="#b8c2d2">batch_write_to_db flushes spend counters to Neon after the response.</text>
+  <text x="736" y="838" font-size="10.5" fill="#b8c2d2">The notebook records MCP call and approval observations once the</text>
+  <text x="736" y="854" font-size="10.5" fill="#b8c2d2">call returns.</text>
+  </g>
+  <text x="56" y="907" font-size="9" font-weight="700" letter-spacing="0.8" fill="#5b6678">LEGEND</text>
+  <circle cx="124" cy="904" r="5" fill="#a855f7"/>
+  <text x="134" y="907.5" font-size="10.5" fill="#8b97a8">Notebook span</text>
+  <circle cx="239.016" cy="904" r="5" fill="#22d3ee"/>
+  <text x="249.016" y="907.5" font-size="10.5" fill="#8b97a8">LiteLLM span</text>
+  <circle cx="343.684" cy="904" r="5" fill="#60a5fa"/>
+  <text x="353.684" y="907.5" font-size="10.5" fill="#8b97a8">Foundry span</text>
+  <text x="1344" y="930" font-size="10" text-anchor="end" fill="#5b6678">zolab-ai-agent-demo-linux · gateway trace view · 2026</text>
+</svg>

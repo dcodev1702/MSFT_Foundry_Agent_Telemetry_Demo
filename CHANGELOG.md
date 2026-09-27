@@ -10,6 +10,19 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Linux gateway diagrams
+
+- Add three diagrams in the style of the Agent Framework demo's. The architecture
+  view shows the notebook and the LiteLLM and OpenTelemetry Collector containers on
+  the Ubuntu 26.04 host, Neon Postgres in AWS Frankfurt, and the existing Foundry,
+  Application Insights, Log Analytics, Key Vault and Storage resources, with
+  numbered flows for both modes. The runtime view follows one Responses call
+  through the gateway and its telemetry export. The trace view draws one call's
+  spans, roles, tables and timings from a validated run's Log Analytics data.
+- The README's new **Architecture** section shows the architecture and runtime
+  views; `docs/observability.md` shows all three under **Linux LiteLLM Gateway
+  Path**.
+
 ### Pylint and the separate environments
 
 - Add a workspace `.pylintrc`. VS Code's Pylint checks every file with the root

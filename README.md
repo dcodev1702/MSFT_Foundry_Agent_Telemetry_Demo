@@ -6,6 +6,32 @@ Jupyter notebooks that configure and query Microsoft Foundry agents with **end-t
 
 ---
 
+<a id="architecture"></a>
+
+## 🗺️ Architecture
+
+The Linux notebook calls the Foundry agents' Responses endpoints directly by
+default. With the optional gateway, a LiteLLM proxy and an OpenTelemetry Collector
+run as Docker containers on the Ubuntu 26.04 host, and LiteLLM keeps its state in
+a Neon Postgres database in AWS Frankfurt. The notebook, the Collector and Foundry
+all send their spans to the Foundry project's Application Insights, whose data is
+stored in the Security subscription's Log Analytics workspace. Setup and details
+are in [Optional LiteLLM Gateway with Neon (Linux)](#optional-litellm-gateway-with-neon-linux).
+
+![Linux gateway architecture: the notebook and the LiteLLM and OpenTelemetry Collector containers on the Ubuntu 26.04 host, Neon Postgres in AWS Frankfurt, and Microsoft Foundry, Application Insights, Log Analytics, Key Vault and Storage in Azure](images/linux-gateway-architecture-dark.svg)
+
+### Runtime View
+
+One Responses call through the gateway, and how the notebook's, LiteLLM's and
+Foundry's spans reach Application Insights:
+
+![Gateway runtime sequence: the notebook calls LiteLLM, which checks Neon and forwards to the Foundry agent; LiteLLM, the Collector, Foundry and the notebook export spans to Azure Monitor, and Section 6 reads them back](images/linux-gateway-runtime-dark.svg)
+
+The [observability guide](docs/observability.md#linux-litellm-gateway-path) shows
+the resulting trace as Log Analytics stores it.
+
+---
+
 ## 📋 Prerequisites
 
 | Requirement | Details |
@@ -516,7 +542,8 @@ The Linux notebook can send both backend agents' Responses traffic through a
 host-local [LiteLLM](https://docs.litellm.ai/) proxy in [gateway](gateway), backed
 by a [Neon](https://neon.com/) Postgres database
 ([details](#neon-postgres-for-the-gateway)). Direct calls to Foundry remain the
-default. The notebook calls the gateway with a LiteLLM virtual key that
+default. The [architecture and runtime diagrams](#architecture) at the top of this
+README show both modes. The notebook calls the gateway with a LiteLLM virtual key that
 `start.sh` provisions for the signed-in account and a demo team
 ([Identity](#litellm-identity)); the master key is kept for administration. Spend
 logs are disabled, and no budgets or rate limits are set.
