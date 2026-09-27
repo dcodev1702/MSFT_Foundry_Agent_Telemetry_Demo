@@ -142,18 +142,35 @@ class LinuxNotebookTests(unittest.TestCase):
 
 
 class LinuxPresentationTests(unittest.TestCase):
-    def test_original_title_is_a_visible_markdown_heading_with_logo_and_subtitle(self):
+    def test_original_title_is_a_visible_markdown_heading_with_win11_style_logo_and_subtitle(self):
         original = json.loads((ROOT / "zolab-ai-agent-demo-win11.ipynb").read_text(encoding="utf-8"))
         windows_intro = "".join(original["cells"][0]["source"])
-        title = re.search(r"<h1[^>]*>(.*?)</h1>", windows_intro)
+        title = re.search(r'<h1 style="([^"]*)">(.*?)</h1>', windows_intro)
         assert title is not None
         first = next(iter(notebook_cells().values()))
         self.assertEqual(first["cell_type"], "markdown")
         lines = "".join(first["source"]).splitlines()
+        # A native Markdown heading keeps the title in the notebook outline; the span carries the
+        # Windows notebook's title color and weight.
         self.assertTrue(lines[0].startswith("# "))
         heading = re.sub(r"<[^>]+>", "", lines[0][2:]).strip()
-        self.assertEqual(unescape(heading), unescape(title.group(1)))
+        self.assertEqual(unescape(heading), unescape(title.group(2)))
+        styled = re.search(r'<span style="([^"]*)">(.*?)</span>', lines[0])
+        assert styled is not None
+
+        def style(value):
+            return dict(
+                (name.strip(), setting.strip())
+                for name, _, setting in (part.partition(":") for part in value.split(";") if part.strip())
+            )
+
+        self.assertEqual(
+            {key: style(styled.group(1)).get(key) for key in ("color", "font-weight")},
+            {key: style(title.group(1))[key] for key in ("color", "font-weight")},
+        )
+        self.assertEqual(unescape(styled.group(2)), unescape(title.group(2)))
         self.assertIn('src="images/microsoft-symbol.svg"', lines[0])
+        self.assertIn("border-radius: 8px", lines[0])
         self.assertIn("End-to-end proof of concept", "".join(first["source"]))
         self.assertNotIn("<h1", "".join(first["source"]))
         self.assertNotIn("source_hidden", first["metadata"])

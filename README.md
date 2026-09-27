@@ -375,7 +375,9 @@ The Linux generators preserve the Win11 presentation exactly:
 
 No new agent run is required to preview an existing deck. The notebook's original
 title and Microsoft logo are rendered as a native Markdown heading so the title
-is also visible in the notebook outline.
+is also visible in the notebook outline. An inline style gives the title the
+Windows notebook's purple (`#4A2D6F`) and 800 font weight, and the logo its
+rounded corners.
 
 ### Model Metadata in Marp Outputs
 
@@ -633,6 +635,10 @@ master key to create or reuse:
   `allowed_passthrough_routes` before a virtual key can use an `auth: true`
   pass-through route. It is written to `gateway/.env` as `LITELLM_NOTEBOOK_KEY`
   and never printed. A valid key is reused on later runs.
+
+Lookups use LiteLLM's list endpoints, which return empty results instead of 404s,
+so a first run records no failed requests in Application Insights, and a lookup
+is retried if Neon or LiteLLM briefly fails.
 
 No budgets or rate limits are set. The notebook sends the key and the
 `x-litellm-end-user-id` header (`LITELLM_END_USER_ID`, the same account by

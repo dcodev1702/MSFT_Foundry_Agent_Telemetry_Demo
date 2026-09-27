@@ -1,6 +1,7 @@
 """Opt-in LiteLLM gateway routing for the Linux notebook."""
 
 import base64
+import hashlib
 import importlib.util
 import io
 import json
@@ -635,56 +636,64 @@ class IdentityProvisioningTests(unittest.TestCase):
         calls = []
 
         class FakeAdmin:
-            def call(self, method, path, body=None, *, missing_ok=False):
+            def call(self, method, path, body=None):
                 calls.append((method, path.split("?")[0], body))
                 return responses.get((method, path.split("?")[0]))
 
         return FakeAdmin(), calls
 
-    def valid_key_info(self, **overrides):
-        info = {
-            "key_alias": self.provision.KEY_ALIAS, "user_id": "analyst@example.com", "team_id": self.provision.TEAM_ID,
+    def assert_list_lookups_only(self, calls):
+        # LiteLLM's /info endpoints answer a missing team, user or key with 404, a failed request in App Insights.
+        self.assertTrue(all(path in {"/team/list", "/user/list", "/key/list"} for method, path, _ in calls if method == "GET"))
+
+    def key(self, current_key, **overrides):
+        key = {
+            "token": hashlib.sha256(current_key.encode()).hexdigest(), "key_alias": self.provision.KEY_ALIAS,
+            "user_id": "analyst@example.com", "team_id": self.provision.TEAM_ID,
             "metadata": {"allowed_passthrough_routes": ["/foundry-agent/main", "/foundry-agent/sentinel"]},
         }
-        return {"info": {**info, **overrides}}
+        return {**key, **overrides}
 
-    def test_first_run_creates_team_user_and_a_route_scoped_key(self):
-        admin, calls = self.admin({("POST", "/key/generate"): {"key": "sk-test-virtual"}})
+    def test_first_run_creates_team_user_and_a_route_scoped_key_without_failed_lookups(self):
+        admin, calls = self.admin({
+            ("GET", "/team/list"): [], ("GET", "/user/list"): {"users": []}, ("GET", "/key/list"): {"keys": []},
+            ("POST", "/key/generate"): {"key": "sk-test-virtual"},
+        })
         key, created = self.provision.ensure_identity(
             admin, user_id="analyst@example.com", user_email="analyst@example.com", current_key=None,
         )
         self.assertEqual((key, created), ("sk-test-virtual", True))
+        self.assert_list_lookups_only(calls)
         bodies = {path: body for method, path, body in calls if method == "POST"}
+        self.assertEqual(list(bodies), ["/team/new", "/user/new", "/key/generate"])
         self.assertEqual(bodies["/team/new"]["team_id"], "foundry-agent-demo")
         self.assertEqual(
             bodies["/user/new"],
             {"user_id": "analyst@example.com", "user_role": "internal_user", "auto_create_key": False,
              "teams": ["foundry-agent-demo"], "user_email": "analyst@example.com"},
         )
-        self.assertEqual(bodies["/key/delete"], {"key_aliases": ["zolab-notebook-linux"]})
         self.assertEqual(bodies["/key/generate"]["metadata"]["allowed_passthrough_routes"],
                          ["/foundry-agent/main", "/foundry-agent/sentinel"])
         self.assertNotIn("max_budget", bodies["/key/generate"])
 
     def test_valid_key_is_reused_and_a_user_outside_the_team_is_added(self):
         admin, calls = self.admin({
-            ("GET", "/team/info"): {"team_id": "foundry-agent-demo"},
-            ("GET", "/user/info"): {"user_info": {"user_id": "analyst@example.com", "teams": []}},
-            ("GET", "/key/info"): self.valid_key_info(),
+            ("GET", "/team/list"): [{"team_id": "foundry-agent-demo"}],
+            ("GET", "/user/list"): {"users": [{"user_id": "analyst@example.com", "teams": []}]},
+            ("GET", "/key/list"): {"keys": [self.key("sk-test-virtual")]},
         })
         key, created = self.provision.ensure_identity(
             admin, user_id="analyst@example.com", user_email=None, current_key="sk-test-virtual",
         )
         self.assertEqual((key, created), ("sk-test-virtual", False))
-        self.assertEqual(
-            [path for method, path, _ in calls if method == "POST"], ["/team/member_add"],
-        )
+        self.assert_list_lookups_only(calls)
+        self.assertEqual([path for method, path, _ in calls if method == "POST"], ["/team/member_add"])
 
     def test_key_with_other_routes_is_replaced(self):
         admin, calls = self.admin({
-            ("GET", "/team/info"): {"team_id": "foundry-agent-demo"},
-            ("GET", "/user/info"): {"user_info": {"user_id": "analyst@example.com", "teams": ["foundry-agent-demo"]}},
-            ("GET", "/key/info"): self.valid_key_info(metadata={}),
+            ("GET", "/team/list"): [{"team_id": "foundry-agent-demo"}],
+            ("GET", "/user/list"): {"users": [{"user_id": "analyst@example.com", "teams": ["foundry-agent-demo"]}]},
+            ("GET", "/key/list"): {"keys": [self.key("sk-test-old", metadata={})]},
             ("POST", "/key/generate"): {"key": "sk-test-new"},
         })
         key, created = self.provision.ensure_identity(
@@ -692,6 +701,26 @@ class IdentityProvisioningTests(unittest.TestCase):
         )
         self.assertEqual((key, created), ("sk-test-new", True))
         self.assertEqual([path for method, path, _ in calls if method == "POST"], ["/key/delete", "/key/generate"])
+
+    def test_lookups_retry_transient_failures_and_writes_fail_fast(self):
+        responses = [
+            urllib.error.HTTPError("http://gateway/key/list", 500, "Server Error", {}, io.BytesIO(b"{}")),
+            io.BytesIO(b'{"keys": []}'),
+            urllib.error.HTTPError("http://gateway/team/new", 500, "Server Error", {}, io.BytesIO(b'{"error": "db"}')),
+        ]
+
+        def opener(request, timeout):
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        sleeps = []
+        admin = self.provision.LiteLLMAdmin("http://gateway", "sk-test-master", opener=opener, sleep=sleeps.append)
+        self.assertEqual(admin.call("GET", "/key/list?key_alias=zolab-notebook-linux"), {"keys": []})
+        with self.assertRaisesRegex(RuntimeError, "POST /team/new failed with HTTP 500"):
+            admin.call("POST", "/team/new", {"team_id": "foundry-agent-demo"})
+        self.assertEqual((sleeps, responses), ([1], []))
 
 
 class NeonLatencyProbeTests(unittest.TestCase):

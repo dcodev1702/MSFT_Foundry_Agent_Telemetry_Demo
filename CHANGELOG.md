@@ -10,6 +10,17 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Clean identity provisioning and the Linux notebook title
+
+- Look up the LiteLLM team, user and key through LiteLLM's list endpoints, which
+  return empty results, instead of its `/info` endpoints, which answer a missing
+  team, user or key with 404. A first `start.sh` run no longer records failed
+  requests in Application Insights. The old key is deleted only when one exists,
+  and lookups are retried when Neon or LiteLLM briefly fails.
+- Give the Linux notebook's Markdown title the Windows notebook's purple
+  (`#4A2D6F`) and 800 font weight, and the logo its rounded corners. The title
+  stays a native Markdown heading, so it remains in the notebook outline.
+
 ### LiteLLM span content, status and identity
 
 - Record prompts and results on LiteLLM's spans: `turn_off_message_logging:

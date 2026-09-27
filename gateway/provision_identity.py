@@ -6,8 +6,10 @@ and rate limits are not set. Organizations are a LiteLLM Enterprise feature, so 
 """
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
+import time
 from typing import Any, Callable
 import urllib.error
 from urllib.parse import quote
@@ -23,61 +25,79 @@ AGENT_ROUTES = ["/foundry-agent/main", "/foundry-agent/sentinel"]
 
 
 class LiteLLMAdmin:
-    def __init__(self, base_url: str, master_key: str, opener: Callable[..., Any] = urllib.request.urlopen):
+    def __init__(
+        self, base_url: str, master_key: str, opener: Callable[..., Any] = urllib.request.urlopen,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
         self.base_url = base_url.rstrip("/")
         self._master_key = master_key
         self._opener = opener
+        self._sleep = sleep
 
-    def call(self, method: str, path: str, body: dict | None = None, *, missing_ok: bool = False) -> dict | None:
-        request = urllib.request.Request(
-            f"{self.base_url}{path}",
-            data=None if body is None else json.dumps(body).encode(),
-            method=method,
-            headers={"Authorization": f"Bearer {self._master_key}", "Content-Type": "application/json"},
-        )
-        try:
-            with self._opener(request, timeout=30) as response:
-                return json.load(response)
-        except urllib.error.HTTPError as error:
-            if missing_ok and error.code in {400, 404}:
-                return None
-            detail = error.read().decode(errors="replace")[:300]
-            raise RuntimeError(f"LiteLLM {method} {path.split('?')[0]} failed with HTTP {error.code}: {detail}") from error
-
-
-def _team_ids(user: dict) -> set[str]:
-    info = user.get("user_info") or {}
-    teams = set(info.get("teams") or [])
-    teams.update(team.get("team_id") for team in user.get("teams") or [] if isinstance(team, dict))
-    return teams
+    def call(self, method: str, path: str, body: dict | None = None, *, attempts: int = 3) -> Any:
+        """Send one admin request. Lookups (GET) are retried when Neon or LiteLLM briefly fails."""
+        route = path.split("?")[0]
+        for attempt in range(1, attempts + 1):
+            request = urllib.request.Request(
+                f"{self.base_url}{path}",
+                data=None if body is None else json.dumps(body).encode(),
+                method=method,
+                headers={"Authorization": f"Bearer {self._master_key}", "Content-Type": "application/json"},
+            )
+            retry = method == "GET" and attempt < attempts
+            try:
+                with self._opener(request, timeout=30) as response:
+                    return json.load(response)
+            except urllib.error.HTTPError as error:
+                if retry and error.code >= 500:
+                    self._sleep(attempt)
+                    continue
+                detail = error.read().decode(errors="replace")[:300]
+                raise RuntimeError(f"LiteLLM {method} {route} failed with HTTP {error.code}: {detail}") from error
+            except urllib.error.URLError as error:
+                if retry:
+                    self._sleep(attempt)
+                    continue
+                raise RuntimeError(f"LiteLLM {method} {route} is unreachable: {error.reason}") from error
+        raise AssertionError("unreachable")
 
 
 def ensure_identity(
     admin: LiteLLMAdmin, *, user_id: str, user_email: str | None, current_key: str | None,
 ) -> tuple[str, bool]:
-    """Return the notebook's virtual key and whether it was newly generated."""
-    if not admin.call("GET", f"/team/info?team_id={quote(TEAM_ID)}", missing_ok=True):
+    """Return the notebook's virtual key and whether it was newly generated.
+
+    Lookups use LiteLLM's list endpoints, which return empty results rather than 404, so a first
+    run records no failed requests in Application Insights.
+    """
+    if not any(team.get("team_id") == TEAM_ID for team in admin.call("GET", "/team/list") or []):
         admin.call("POST", "/team/new", {
             "team_id": TEAM_ID, "team_alias": TEAM_ALIAS,
             "metadata": {"purpose": "Microsoft Foundry agent telemetry demo"},
         })
-    user = admin.call("GET", f"/user/info?user_id={quote(user_id)}", missing_ok=True) or {}
-    if not user.get("user_info"):
+    users = (admin.call("GET", f"/user/list?user_ids={quote(user_id)}") or {}).get("users") or []
+    user = next((candidate for candidate in users if candidate.get("user_id") == user_id), None)
+    if user is None:
         body = {"user_id": user_id, "user_role": "internal_user", "auto_create_key": False, "teams": [TEAM_ID]}
         if user_email:
             body["user_email"] = user_email
         admin.call("POST", "/user/new", body)
-    elif TEAM_ID not in _team_ids(user):
+    elif TEAM_ID not in (user.get("teams") or []):
         admin.call("POST", "/team/member_add", {"team_id": TEAM_ID, "member": {"role": "user", "user_id": user_id}})
 
+    listed = admin.call("GET", f"/key/list?key_alias={quote(KEY_ALIAS)}&return_full_object=true&size=100") or {}
+    keys = [key for key in listed.get("keys") or [] if key.get("key_alias") == KEY_ALIAS]
     if current_key:
-        info = (admin.call("GET", f"/key/info?key={quote(current_key)}", missing_ok=True) or {}).get("info") or {}
-        allowed = (info.get("metadata") or {}).get("allowed_passthrough_routes")
-        if (info.get("key_alias"), info.get("user_id"), info.get("team_id"), allowed) == (
-            KEY_ALIAS, user_id, TEAM_ID, AGENT_ROUTES,
-        ):
-            return current_key, False
-    admin.call("POST", "/key/delete", {"key_aliases": [KEY_ALIAS]}, missing_ok=True)
+        # LiteLLM stores keys as SHA-256 hashes.
+        current_hash = hashlib.sha256(current_key.encode()).hexdigest()
+        for key in keys:
+            allowed = (key.get("metadata") or {}).get("allowed_passthrough_routes")
+            if (key.get("token"), key.get("user_id"), key.get("team_id"), allowed) == (
+                current_hash, user_id, TEAM_ID, AGENT_ROUTES,
+            ):
+                return current_key, False
+    if keys:
+        admin.call("POST", "/key/delete", {"key_aliases": [KEY_ALIAS]})
     created = admin.call("POST", "/key/generate", {
         "key_alias": KEY_ALIAS, "user_id": user_id, "team_id": TEAM_ID,
         "metadata": {"allowed_passthrough_routes": AGENT_ROUTES, "notebook": "zolab-ai-agent-demo-linux.ipynb"},
