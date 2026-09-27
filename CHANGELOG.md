@@ -10,6 +10,36 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### LiteLLM span content, status and identity
+
+- Record prompts and results on LiteLLM's spans: `turn_off_message_logging:
+  false`, with `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=span_only`.
+- Add `gateway/litellm_callbacks.py`, a LiteLLM `async_logging_hook` that fills
+  the fields that generic pass-through routes leave empty. It sets
+  `gen_ai.system=azure_ai`, the agents' model deployment as
+  `gen_ai.request.model`, Foundry's response model and ID,
+  `litellm.provider.model`, token usage, and input and output messages. It also
+  fills `hidden_params`: `model_id`, `api_base`, `litellm_model_name`,
+  `usage_object`, an estimated `response_cost` and `litellm_overhead_time_ms`.
+  `raw_gen_ai_request` now carries the full request and response.
+- Keep LiteLLM's OK span status (`otel.status_code=STATUS_CODE_OK`) without
+  `ResultCode` 1. The Collector types agent-route server spans as HTTP, so they
+  are named `POST <path>` with `ResultCode` 200, and in-process spans as RPC
+  (`ResultCode` 0). LiteLLM's database-typed Neon spans are unset instead.
+- Provision a LiteLLM team, an internal user for the signed-in account, and the
+  virtual key `zolab-notebook-linux`, scoped to the agent routes, from `start.sh`
+  (`gateway/provision_identity.py`). The notebook uses the key and sends
+  `x-litellm-end-user-id`, so spans report the key alias, user, email, team and
+  end user; Section 3 prints `Gateway identity`. Organizations and projects are
+  LiteLLM Enterprise features and stay empty.
+- Set the telemetry variables explicitly in `compose.yaml` and document them:
+  `OTEL_ENVIRONMENT_NAME=demo`, content capture, context propagation, events and
+  metrics off, and `FOUNDRY_MODEL_DEPLOYMENT` for LiteLLM; `GOMEMLIMIT` for the
+  Collector. `OTEL_SEMCONV_STABILITY_OPT_IN` stays unset because it would rename
+  `litellm_request` and drop `gen_ai.system`.
+- Restart LiteLLM from `start.sh` when `litellm_callbacks.py` changes. The
+  telemetry pre-flight checks both LiteLLM mounts and the new status rules.
+
 ### Agent Framework demo tests on Linux
 
 - Document a separate Linux environment for the standalone Agent Framework

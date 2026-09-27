@@ -15,9 +15,11 @@ docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env"
 docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" up -d
 
 # `up -d` does not recreate containers when only a bind-mounted config file changed.
-for service_config in litellm:config.yaml otel-collector:otel-collector.yaml; do
+restarted=" "
+for service_config in litellm:config.yaml litellm:litellm_callbacks.py otel-collector:otel-collector.yaml; do
     service="${service_config%%:*}"
     config_file="$gateway_dir/${service_config#*:}"
+    [[ "$restarted" == *" $service "* ]] && continue
     service_id="$(
         docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" \
             ps --quiet "$service"
@@ -28,6 +30,7 @@ for service_config in litellm:config.yaml otel-collector:otel-collector.yaml; do
         printf 'Restarting %s to apply %s\n' "$service" "${config_file##*/}"
         docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" \
             restart "$service"
+        restarted+="$service "
     fi
 done
 
@@ -100,5 +103,8 @@ if ! docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/
     exit 1
 fi
 printf 'Trace export: OpenTelemetry Collector running\n'
+
+# Team, internal user and virtual key reported as metadata.user_api_key_* on LiteLLM's spans.
+"$python_bin" "$gateway_dir/provision_identity.py" --env-file "$gateway_dir/.env"
 
 docker compose --project-directory "$gateway_dir" --env-file "$gateway_dir/.env" ps

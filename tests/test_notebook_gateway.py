@@ -1,9 +1,11 @@
 """Opt-in LiteLLM gateway routing for the Linux notebook."""
 
+import base64
 import importlib.util
 import io
 import json
 import os
+import sys
 import time
 import unittest
 import urllib.error
@@ -33,7 +35,7 @@ from notebook_support.agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, responses_url,
 )
 from notebook_support.gateway import (
-    COLLECTOR_STATUS_RULE, SERVICE_CONFIG_FILES, GatewayConfig, check_gateway_ready, check_gateway_telemetry,
+    COLLECTOR_STATUS_RULES, SERVICE_CONFIG_FILES, GatewayConfig, check_gateway_ready, check_gateway_telemetry,
     collector_normalizes_litellm_status, configure_agent_gateway, gateway_infrastructure_status, gateway_mode,
     load_gateway_config,
 )
@@ -140,6 +142,21 @@ class GatewayConfigurationTests(unittest.TestCase):
         self.assertNotIn("sk-test-master", repr(runtime))
         self.assertEqual(runtime.label, "responses.create + agent endpoint via LiteLLM gateway")
         self.assertEqual((runtime.main, runtime.sentinel), (ENDPOINT_RUNTIME.main, ENDPOINT_RUNTIME.sentinel))
+        self.assertEqual((gateway.virtual_key, gateway.default_headers()), (False, {}))
+
+    def test_provisioned_virtual_key_and_end_user_are_used_without_exposing_the_key(self):
+        with TemporaryDirectory() as directory:
+            path = write_env(
+                directory, LITELLM_NOTEBOOK_KEY="sk-test-virtual", LITELLM_END_USER_ID="analyst@example.com",
+            )
+            gateway = load_gateway_config({"FOUNDRY_AGENT_GATEWAY_ENV_FILE": str(path)})
+        self.assertEqual((gateway.api_key, gateway.virtual_key), ("sk-test-virtual", True))
+        self.assertEqual(gateway.default_headers(), {"x-litellm-end-user-id": "analyst@example.com"})
+        self.assertNotIn("sk-test-virtual", repr(gateway))
+        with TemporaryDirectory() as directory:
+            path = write_env(directory, LITELLM_NOTEBOOK_KEY="sk-REPLACE_WITH_THE_PROVISIONED_VIRTUAL_KEY")
+            placeholder = load_gateway_config({"FOUNDRY_AGENT_GATEWAY_ENV_FILE": str(path)})
+        self.assertEqual((placeholder.api_key, placeholder.virtual_key), ("sk-test-master", False))
 
     def test_missing_or_placeholder_settings_fail_with_start_guidance(self):
         with TemporaryDirectory() as directory:
@@ -173,10 +190,18 @@ class GatewayRoutingTests(unittest.TestCase):
                 get_agent_openai_client(self.client, self.runtime, name)
                 self.client.get_openai_client.assert_called_once_with(
                     agent_name=name, base_url=f"http://127.0.0.1:4000/foundry-agent/{role}",
-                    api_key="sk-test-master",
+                    api_key="sk-test-master", default_headers={},
                 )
         with self.assertRaises(ValueError):
             get_agent_openai_client(self.client, self.runtime, "unconfigured-agent")
+
+    def test_virtual_key_requests_name_the_end_user_for_litellm(self):
+        gateway = replace(GATEWAY, api_key="sk-test-virtual", virtual_key=True, end_user_id="analyst@example.com")
+        get_agent_openai_client(self.client, replace(ENDPOINT_RUNTIME, gateway=gateway), "main-backend")
+        self.client.get_openai_client.assert_called_once_with(
+            agent_name="main-backend", base_url="http://127.0.0.1:4000/foundry-agent/main",
+            api_key="sk-test-virtual", default_headers={"x-litellm-end-user-id": "analyst@example.com"},
+        )
 
     def test_gateway_is_rejected_without_agent_endpoints(self):
         with self.assertRaisesRegex(ValueError, "agent endpoint"):
@@ -381,22 +406,34 @@ class GatewayConfigFileTests(unittest.TestCase):
         self.assertEqual(services["litellm"]["mem_limit"], "5g")
         self.assertEqual(services["otel-collector"]["mem_limit"], "2560m")
 
-    def test_litellm_exports_metadata_only_spans_through_the_collector(self):
+    def test_litellm_exports_content_and_enriched_spans_through_the_collector(self):
         config = yaml.safe_load((ROOT / "gateway" / "config.yaml").read_text(encoding="utf-8"))
-        self.assertEqual(config["litellm_settings"]["callbacks"], ["otel"])
-        self.assertTrue(config["litellm_settings"]["turn_off_message_logging"])
+        # The Foundry hook fills the logging payload before LiteLLM's otel callback reads it.
+        self.assertEqual(
+            config["litellm_settings"]["callbacks"], ["litellm_callbacks.foundry_agent_telemetry", "otel"],
+        )
+        self.assertFalse(config["litellm_settings"]["turn_off_message_logging"])
         services = yaml.safe_load((ROOT / "gateway" / "compose.yaml").read_text(encoding="utf-8"))["services"]
         litellm, collector = services["litellm"], services["otel-collector"]
+        environment = litellm["environment"]
         self.assertNotIn("env_file", litellm)
-        self.assertEqual(litellm["environment"]["OTEL_EXPORTER"], "otlp_http")
-        self.assertEqual(litellm["environment"]["OTEL_ENDPOINT"], "http://otel-collector:4318/v1/traces")
-        self.assertEqual(litellm["environment"]["OTEL_SERVICE_NAME"], "litellm-gateway")
-        self.assertEqual(litellm["environment"]["OTEL_RESOURCE_ATTRIBUTES"], "service.namespace=foundry-agent-demo")
-        self.assertNotIn("APPLICATIONINSIGHTS_CONNECTION_STRING", litellm["environment"])
+        self.assertIn("./litellm_callbacks.py:/app/litellm_callbacks.py:ro", litellm["volumes"])
+        self.assertEqual(environment["OTEL_EXPORTER"], "otlp_http")
+        self.assertEqual(environment["OTEL_ENDPOINT"], "http://otel-collector:4318/v1/traces")
+        self.assertEqual(environment["OTEL_SERVICE_NAME"], "litellm-gateway")
+        self.assertEqual(environment["OTEL_RESOURCE_ATTRIBUTES"], "service.namespace=foundry-agent-demo")
+        self.assertEqual(environment["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"], "span_only")
+        self.assertEqual(environment["OTEL_ENVIRONMENT_NAME"], "${OTEL_ENVIRONMENT_NAME:-demo}")
+        self.assertEqual(environment["OTEL_IGNORE_CONTEXT_PROPAGATION"], "false")
+        self.assertTrue(environment["FOUNDRY_MODEL_DEPLOYMENT"].startswith("${FOUNDRY_MODEL_DEPLOYMENT:?"))
+        # Latest-experimental semconv would rename litellm_request and drop gen_ai.system.
+        self.assertNotIn("OTEL_SEMCONV_STABILITY_OPT_IN", environment)
+        self.assertNotIn("APPLICATIONINSIGHTS_CONNECTION_STRING", environment)
         self.assertIn("otel-collector", litellm["depends_on"])
         self.assertRegex(collector["image"], r"^otel/opentelemetry-collector-contrib:[0-9.]+@sha256:[0-9a-f]{64}$")
         self.assertNotIn("ports", collector)
-        self.assertEqual(list(collector["environment"]), ["APPLICATIONINSIGHTS_CONNECTION_STRING"])
+        self.assertEqual(list(collector["environment"]), ["APPLICATIONINSIGHTS_CONNECTION_STRING", "GOMEMLIMIT"])
+        self.assertEqual(collector["environment"]["GOMEMLIMIT"], "2048MiB")
         pipeline = yaml.safe_load((ROOT / "gateway" / "otel-collector.yaml").read_text(encoding="utf-8"))
         traces = pipeline["service"]["pipelines"]["traces"]
         self.assertEqual((traces["receivers"], traces["exporters"]), (["otlp"], ["azure_monitor"]))
@@ -405,11 +442,15 @@ class GatewayConfigFileTests(unittest.TestCase):
             "${env:APPLICATIONINSIGHTS_CONNECTION_STRING}",
         )
 
-    def test_collector_resets_litellm_ok_status_before_azure_monitor_export(self):
+    def test_collector_keeps_litellm_ok_status_without_error_result_codes(self):
         config_file = ROOT / "gateway" / "otel-collector.yaml"
         pipeline = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         statements = pipeline["processors"]["transform/litellm_status"]["trace_statements"]
-        self.assertEqual(statements, [COLLECTOR_STATUS_RULE])
+        for rule in COLLECTOR_STATUS_RULES:
+            self.assertTrue(any(statement.startswith(rule) for statement in statements), rule)
+        # Only the POST-only agent routes are typed HTTP; nothing sets an error status to OK.
+        self.assertIn('"^/foundry-agent/(main|sentinel)/(conversations|responses)$"', statements[0])
+        self.assertFalse(any("STATUS_CODE_ERROR" in statement for statement in statements))
         self.assertEqual(
             pipeline["service"]["pipelines"]["traces"]["processors"], ["transform/litellm_status", "batch"],
         )
@@ -417,9 +458,11 @@ class GatewayConfigFileTests(unittest.TestCase):
 
     def test_start_script_restarts_services_whose_mounted_config_changed(self):
         script = (ROOT / "gateway" / "start.sh").read_text(encoding="utf-8")
-        for service, config_name in SERVICE_CONFIG_FILES.items():
-            self.assertIn(f"{service}:{config_name}", script)
+        for service, config_names in SERVICE_CONFIG_FILES.items():
+            for config_name in config_names:
+                self.assertIn(f"{service}:{config_name}", script)
         self.assertLess(script.index(" up -d"), script.index('restart "$service"'))
+        self.assertLess(script.index("Trace export: OpenTelemetry Collector running"), script.index("provision_identity.py"))
 
 
 class GatewayObservabilityTests(unittest.TestCase):
@@ -568,6 +611,88 @@ class RuntimeEnvRefreshTests(unittest.TestCase):
             self.assertEqual(self.refresh.parse_env(env_file), merged)
             self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
 
+    def test_signed_in_user_is_read_from_the_token_claims(self):
+        def token(claims):
+            return "header." + base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=") + ".signature"
+
+        self.assertEqual(
+            self.refresh.signed_in_user(token({"upn": "analyst@example.com", "oid": "oid-1"})),
+            ("analyst@example.com", "analyst@example.com"),
+        )
+        self.assertEqual(self.refresh.signed_in_user(token({"oid": "oid-1"})), ("oid-1", None))
+        self.assertEqual(self.refresh.signed_in_user("not-a-jwt"), (None, None))
+
+
+class IdentityProvisioningTests(unittest.TestCase):
+    def setUp(self):
+        with patch.object(sys, "path", [str(ROOT / "gateway"), *sys.path]):
+            spec = importlib.util.spec_from_file_location("provision_identity", ROOT / "gateway" / "provision_identity.py")
+            assert spec is not None and spec.loader is not None
+            self.provision = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(self.provision)
+
+    def admin(self, responses):
+        calls = []
+
+        class FakeAdmin:
+            def call(self, method, path, body=None, *, missing_ok=False):
+                calls.append((method, path.split("?")[0], body))
+                return responses.get((method, path.split("?")[0]))
+
+        return FakeAdmin(), calls
+
+    def valid_key_info(self, **overrides):
+        info = {
+            "key_alias": self.provision.KEY_ALIAS, "user_id": "analyst@example.com", "team_id": self.provision.TEAM_ID,
+            "metadata": {"allowed_passthrough_routes": ["/foundry-agent/main", "/foundry-agent/sentinel"]},
+        }
+        return {"info": {**info, **overrides}}
+
+    def test_first_run_creates_team_user_and_a_route_scoped_key(self):
+        admin, calls = self.admin({("POST", "/key/generate"): {"key": "sk-test-virtual"}})
+        key, created = self.provision.ensure_identity(
+            admin, user_id="analyst@example.com", user_email="analyst@example.com", current_key=None,
+        )
+        self.assertEqual((key, created), ("sk-test-virtual", True))
+        bodies = {path: body for method, path, body in calls if method == "POST"}
+        self.assertEqual(bodies["/team/new"]["team_id"], "foundry-agent-demo")
+        self.assertEqual(
+            bodies["/user/new"],
+            {"user_id": "analyst@example.com", "user_role": "internal_user", "auto_create_key": False,
+             "teams": ["foundry-agent-demo"], "user_email": "analyst@example.com"},
+        )
+        self.assertEqual(bodies["/key/delete"], {"key_aliases": ["zolab-notebook-linux"]})
+        self.assertEqual(bodies["/key/generate"]["metadata"]["allowed_passthrough_routes"],
+                         ["/foundry-agent/main", "/foundry-agent/sentinel"])
+        self.assertNotIn("max_budget", bodies["/key/generate"])
+
+    def test_valid_key_is_reused_and_a_user_outside_the_team_is_added(self):
+        admin, calls = self.admin({
+            ("GET", "/team/info"): {"team_id": "foundry-agent-demo"},
+            ("GET", "/user/info"): {"user_info": {"user_id": "analyst@example.com", "teams": []}},
+            ("GET", "/key/info"): self.valid_key_info(),
+        })
+        key, created = self.provision.ensure_identity(
+            admin, user_id="analyst@example.com", user_email=None, current_key="sk-test-virtual",
+        )
+        self.assertEqual((key, created), ("sk-test-virtual", False))
+        self.assertEqual(
+            [path for method, path, _ in calls if method == "POST"], ["/team/member_add"],
+        )
+
+    def test_key_with_other_routes_is_replaced(self):
+        admin, calls = self.admin({
+            ("GET", "/team/info"): {"team_id": "foundry-agent-demo"},
+            ("GET", "/user/info"): {"user_info": {"user_id": "analyst@example.com", "teams": ["foundry-agent-demo"]}},
+            ("GET", "/key/info"): self.valid_key_info(metadata={}),
+            ("POST", "/key/generate"): {"key": "sk-test-new"},
+        })
+        key, created = self.provision.ensure_identity(
+            admin, user_id="analyst@example.com", user_email=None, current_key="sk-test-old",
+        )
+        self.assertEqual((key, created), ("sk-test-new", True))
+        self.assertEqual([path for method, path, _ in calls if method == "POST"], ["/key/delete", "/key/generate"])
+
 
 class NeonLatencyProbeTests(unittest.TestCase):
     def setUp(self):
@@ -618,6 +743,7 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
             "configure_agent_gateway(AgentRuntimeConfig.from_build_info(build_info), build_info)", source,
         )
         self.assertIn("check_gateway_ready(agent_runtime.gateway)", source)
+        self.assertIn("if agent_runtime.gateway.virtual_key", source)
         self.assertLess(
             source.index("check_gateway_ready(agent_runtime.gateway)"),
             source.index("check_gateway_telemetry(agent_runtime.gateway)"),

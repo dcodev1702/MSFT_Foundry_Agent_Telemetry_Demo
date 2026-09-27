@@ -212,7 +212,9 @@ notebook_support/
 gateway/
   compose.yaml
   config.yaml
+  litellm_callbacks.py
   refresh_runtime_env.py
+  provision_identity.py
   start.sh
   smoke-test.sh
   neon-latency.py
@@ -491,14 +493,17 @@ The Linux notebook can send both backend agents' Responses traffic through a
 host-local [LiteLLM](https://docs.litellm.ai/) proxy in [gateway](gateway), backed
 by a [Neon](https://neon.com/) Postgres database
 ([details](#neon-postgres-for-the-gateway)). Direct calls to Foundry remain the
-default. The gateway uses one LiteLLM master key and disables spend logging; it
-configures no virtual keys, users, budgets or limits.
+default. The notebook calls the gateway with a LiteLLM virtual key that
+`start.sh` provisions for the signed-in account and a demo team
+([Identity](#litellm-identity)); the master key is kept for administration. Spend
+logs are disabled, and no budgets or rate limits are set.
 
 ```text
-Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
+Linux notebook --(virtual key, end-user header, traceparent)--> LiteLLM 127.0.0.1:4000
     /foundry-agent/main/*     --> main agent endpoint     (Entra token)
     /foundry-agent/sentinel/* --> Sentinel agent endpoint (Entra token)
     LiteLLM --(TLS)--> Neon Postgres (AWS eu-central-1, Frankfurt)
+    LiteLLM --(OTLP)--> OpenTelemetry Collector --> Application Insights
 ```
 
 - **Routes:** [gateway/config.yaml](gateway/config.yaml) defines one authenticated
@@ -509,33 +514,65 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
 - **Trace context:** Foundry's server-side `responsesapi` service emits the GenAI
   `chat` spans that Section 6 requires. Both routes set `forward_headers: true`
   so `traceparent`, `baggage` and `Foundry-Features` reach Foundry unchanged; the
-  configured Entra token still replaces the client's master key.
+  configured Entra token still replaces the client's LiteLLM key.
 - **LiteLLM traces:** LiteLLM's OpenTelemetry callback exports its own spans over
   OTLP to a pinned OpenTelemetry Collector ([gateway/otel-collector.yaml](gateway/otel-collector.yaml)),
   which forwards them to the Foundry project's Application Insights, the same
   resource as the notebook. `start.sh` resolves that connection string from the
-  project and passes it only to the Collector. Message logging is off, so LiteLLM
-  spans carry route, status, timing and auth metadata but no prompts. The
-  Collector's `transform/litellm_status` processor resets LiteLLM's explicit OK
-  span status to unset before export. Without it, the Azure Monitor exporter
-  stores OK as `ResultCode` 1 and the Foundry trace view flags every LiteLLM span
-  as an error, although `Success` stays true; error statuses are kept. Each request
-  produces `Received Proxy Server Request` (a SERVER span in `AppRequests`, parented
-  to the notebook's request through `traceparent`) with `litellm_request`, `auth`
-  and `batch_write_to_db` children in `AppDependencies`, under the role
+  project and passes it only to the Collector. Each request produces a SERVER span
+  in `AppRequests` named `POST /foundry-agent/<agent>/<operation>` (LiteLLM's
+  `Received Proxy Server Request`, parented to the notebook's request through
+  `traceparent`) with `auth`, `litellm_request`, `raw_gen_ai_request`,
+  `batch_write_to_db` and `postgres` children in `AppDependencies`, under the role
   `foundry-agent-demo.litellm-gateway`. Foundry's spans remain children of the
   notebook's request, beside LiteLLM's. Section 6 therefore reads `AppRequests`
   as well as `AppDependencies`, so gateway spans correlate to their interaction
   and appear in the span inventory with the category `llm-gateway`,
   and it adds a **LiteLLM gateway hops** table with client, gateway, upstream,
   overhead and Foundry `invoke_agent` timings for every gateway request.
+- **LiteLLM span content:** message logging is on
+  (`turn_off_message_logging: false`, with
+  `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=span_only`), like the
+  notebook's demo content policy, so prompts and results may be sensitive. Generic
+  pass-through routes give LiteLLM no provider, model, usage or result.
+  [gateway/litellm_callbacks.py](gateway/litellm_callbacks.py) therefore runs as a
+  LiteLLM `async_logging_hook`, which LiteLLM calls before the `otel` callback, and
+  fills them from the Foundry request and response. On `litellm_request`:
+
+  | Field | Value |
+  |---|---|
+  | `gen_ai.system` | `azure_ai`, LiteLLM's provider ID for Microsoft Foundry |
+  | `gen_ai.request.model` | The agents' model deployment from the build file, such as `gpt-5.6-terra` |
+  | `gen_ai.response.model`, `gen_ai.response.id` | The model and the response or conversation ID that Foundry returns |
+  | `litellm.provider.model` | `azure_ai/<model>` |
+  | `gen_ai.input.messages`, `gen_ai.system_instructions` | The request's input and instructions |
+  | `gen_ai.output.messages`, `gen_ai.response.finish_reasons` | The response's messages and status |
+  | `gen_ai.usage.*`, `metadata.usage_object` | Responses API token usage, including cached and reasoning tokens |
+  | `hidden_params` | `model_id` (the Foundry agent), `api_base` (its endpoint), `litellm_model_name`, `usage_object`, `response_cost` and `litellm_overhead_time_ms` (LiteLLM's time before forwarding). The cost is estimated from LiteLLM's `azure/<model>` prices, including cached-token pricing. `cache_key`, `additional_headers` and the `batch_*` fields stay empty: there is no cache, pass-through hooks do not see response headers, and there are no batches |
+  | `metadata.user_agent` | The client's `User-Agent` |
+  | `metadata.user_api_key_*` | The virtual key's alias, user, email, team, end user and spend; see [Identity](#litellm-identity) |
+
+  `raw_gen_ai_request` carries the full request and response as `llm.azure_ai.*`
+  attributes. Application Insights truncates each property value at 8,192
+  characters.
+- **Span status:** LiteLLM marks its successful spans OK. For spans that it does
+  not recognize as HTTP or RPC, the Azure Monitor exporter stores that status as
+  `ResultCode` 1, which the Foundry trace view flags as an error even though
+  `Success` is true. The Collector's `transform/litellm_status` processor keeps
+  OK and adds protocol context instead. LiteLLM's server span on the POST-only
+  agent routes gets `http.request.method=POST`, so `ResultCode` is the HTTP status
+  and the request is named `POST <path>`. Its in-process spans get
+  `rpc.system=litellm`, so `ResultCode` is 0 and their names are kept. LiteLLM's
+  Neon spans are database-typed, which an RPC hint would replace, so they and any
+  other OK span are reset to unset. Error statuses are never changed.
 - **Start and refresh:** run `gateway/start.sh` from the repository root. It
   resolves both agent endpoints from `build_info-*.json`, obtains an Entra token
   from the Azure CLI session, writes the Git-ignored `gateway/.env` (mode `0600`),
   starts the container and fails unless LiteLLM is healthy and Neon is connected.
   Because `docker compose up -d` ignores edits to bind-mounted files, it also
-  restarts LiteLLM or the Collector when `config.yaml` or `otel-collector.yaml`
-  changed after that container started.
+  restarts LiteLLM when `config.yaml` or `litellm_callbacks.py` changed after it
+  started, and the Collector when `otel-collector.yaml` did. It then provisions
+  the notebook's LiteLLM identity ([Identity](#litellm-identity)).
   Rerun it before the token expires, typically after 60–90 minutes; the CLI can
   reuse its cached token until about five minutes before expiry. Refreshing
   recreates the container, so avoid it during a notebook run. Keys that `start.sh`
@@ -555,10 +592,12 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   prints the route and stops before any agent call unless LiteLLM is ready, Neon
   is connected and at least 10 minutes of token lifetime remain. It then checks
   the trace path with `check_gateway_telemetry` and stops unless both containers
-  are running, neither config file changed after its container started, and the
-  Collector config keeps the status rule. It prints `Gateway telemetry` and warns,
-  without stopping, about export failures logged in the last 30 minutes. The
-  notebook keeps the Foundry SDK client and changes only its base URL and API key
+  are running, neither container's mounted files changed after it started, and the
+  Collector config keeps the status rules. It prints `Gateway telemetry` and warns,
+  without stopping, about export failures logged in the last 30 minutes, then
+  prints `Gateway identity`: the virtual key and end user, or a master-key
+  fallback. The notebook keeps the Foundry SDK client and changes only its base
+  URL, API key and the `x-litellm-end-user-id` header
   ([notebook_support/gateway.py](notebook_support/gateway.py)). Responses spans
   carry `app.gateway.name=litellm` and `app.upstream.server.address`. Agent
   preparation and deployment lookups still call Foundry directly. Set
@@ -575,9 +614,58 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   enforcing check.
 - **Section 3.1:** in gateway mode the tracing summary adds LiteLLM gateway
   tracing (the `foundry-agent-demo.litellm-gateway` role and the `llm-gateway`
-  category), the OTEL Collector's status and export target, and Neon's status.
-  Neon is not traced directly; its checks appear inside LiteLLM spans. Direct mode
-  shows `Not used`.
+  category, with prompts, results, token usage and cost), the OTEL Collector's
+  status and export target, and Neon's status. LiteLLM's `postgres` and
+  `batch_write_to_db` spans time its Neon queries. Direct mode shows `Not used`.
+
+#### LiteLLM identity
+
+After LiteLLM is healthy, `start.sh` runs
+[gateway/provision_identity.py](gateway/provision_identity.py), which uses the
+master key to create or reuse:
+
+- the team `foundry-agent-demo` ("Foundry Agent Demo");
+- an internal user for the signed-in Azure CLI account, read from the Entra
+  token's `upn` claim and stored in `gateway/.env` as `LITELLM_USER_ID` and
+  `LITELLM_USER_EMAIL`;
+- the virtual key `zolab-notebook-linux` for that user and team. The key may call
+  only `/foundry-agent/main` and `/foundry-agent/sentinel`: LiteLLM requires
+  `allowed_passthrough_routes` before a virtual key can use an `auth: true`
+  pass-through route. It is written to `gateway/.env` as `LITELLM_NOTEBOOK_KEY`
+  and never printed. A valid key is reused on later runs.
+
+No budgets or rate limits are set. The notebook sends the key and the
+`x-litellm-end-user-id` header (`LITELLM_END_USER_ID`, the same account by
+default), so LiteLLM's spans report `metadata.user_api_key_alias`,
+`metadata.user_api_key_user_id`, `metadata.user_api_key_user_email`,
+`metadata.user_api_key_team_id`, `metadata.user_api_key_team_alias`,
+`metadata.user_api_key_end_user_id`, and the key's hash and spend. Organizations
+and projects are LiteLLM Enterprise features, so the `metadata.user_api_key_org_*`
+and `metadata.user_api_key_project_*` fields stay empty. Without
+`LITELLM_NOTEBOOK_KEY` the notebook falls back to the master key. Looking up the
+virtual key's user, team and key adds `postgres` spans against Neon to each request.
+
+#### Container settings
+
+[gateway/compose.yaml](gateway/compose.yaml) sets these telemetry-related
+environment variables:
+
+| Container | Variable | Value | Effect |
+|---|---|---|---|
+| litellm | `OTEL_EXPORTER`, `OTEL_ENDPOINT` | `otlp_http`, `http://otel-collector:4318/v1/traces` | Export spans to the Collector |
+| litellm | `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES` | `litellm-gateway`, `service.namespace=foundry-agent-demo` | Role `foundry-agent-demo.litellm-gateway` in App Insights |
+| litellm | `OTEL_ENVIRONMENT_NAME` | `demo`, overridable in `gateway/.env` | `deployment.environment`; LiteLLM's default is `production` |
+| litellm | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | `span_only` | Prompts and results as span attributes |
+| litellm | `OTEL_IGNORE_CONTEXT_PROPAGATION` | `false` | Join the notebook's traces through `traceparent` |
+| litellm | `LITELLM_OTEL_INTEGRATION_ENABLE_EVENTS`, `LITELLM_OTEL_INTEGRATION_ENABLE_METRICS` | `false` | GenAI log events and metrics would need Collector logs and metrics pipelines; usage and content are on the spans |
+| litellm | `FOUNDRY_MODEL_DEPLOYMENT` | `genai_model` from the build file | `gen_ai.request.model` |
+| otel-collector | `APPLICATIONINSIGHTS_CONNECTION_STRING` | From the Foundry project | Azure Monitor export target |
+| otel-collector | `GOMEMLIMIT` | `2048MiB` | Go garbage-collection target, about 80% of the 2.5 GiB cap |
+
+`OTEL_SEMCONV_STABILITY_OPT_IN` stays unset: its `gen_ai_latest_experimental` mode
+renames `litellm_request` to `chat <model>`, makes it a CLIENT span, and replaces
+`gen_ai.system` with `gen_ai.provider.name`. `OTEL_MODEL_ID` keeps its default,
+the service name.
 
 #### Neon Postgres for the gateway
 
@@ -656,8 +744,9 @@ LiteLLM otel callback --OTLP/HTTP--> OpenTelemetry Collector (gateway/otel-colle
 
 | Signal | Where to look | What it shows about Neon |
 |---|---|---|
-| `batch_write_to_db` span | `AppDependencies`, role `foundry-agent-demo.litellm-gateway`, category `llm-gateway` | LiteLLM queuing the request's spend update for its periodic batched write to Neon. The span times the queuing, typically under 1 ms, not the later background flush |
-| Time outside `litellm_request` within `Received Proxy Server Request` | Section 6 **LiteLLM gateway hops**, `GatewayOverheadMs` | Includes the Neon lookup on a cache miss |
+| `postgres` spans | `AppDependencies`, dependency type `postgresql`, role `foundry-agent-demo.litellm-gateway` | LiteLLM's virtual-key lookups, such as `get_user_object` and `get_end_user_object` (in `Data`), with their duration |
+| `batch_write_to_db` span | `AppDependencies`, dependency type `postgresql`, category `llm-gateway` | LiteLLM queuing the request's spend update for its periodic batched write to Neon. The span times the queuing, typically under 1 ms, not the later background flush |
+| Time outside `litellm_request` within the gateway request | Section 6 **LiteLLM gateway hops**, `GatewayOverheadMs` | Includes the Neon lookups on a cache miss |
 | Gateway readiness `db` | `gateway/start.sh` output and Section 3 `Gateway health` | Whether LiteLLM can reach Neon |
 | LiteLLM logs | `docker compose --project-directory gateway --env-file gateway/.env logs litellm` | Neon connection errors, such as `Budget lookup failed for user` |
 | Neon **Monitoring** | Neon Console → project → **Monitoring** | Database-side connections, compute and CPU; not exported to Application Insights |
@@ -701,9 +790,17 @@ requests and 11 children), each with `ResultCode` 1 and `otel.status_code`
 `STATUS_CODE_OK`, while `Success` was true, every gateway request returned HTTP 200
 and Section 6 passed, so neither the token nor routing was at fault. LiteLLM's rows
 were the only ones in the workspace with that code; Foundry's own `responsesapi`
-spans record 0. After the fix, gateway probe spans (`Received Proxy Server
-Request`, `auth`, `litellm_request` and `batch_write_to_db`) record `ResultCode` 0
-and `STATUS_CODE_UNSET`.
+spans record 0. The first fix reset OK to unset. The Collector now keeps OK and
+adds protocol context instead ([Span status](#optional-litellm-gateway-with-neon-linux)).
+
+**Validated span content:** probe trace `854b89ba9078c63307dcc4af76b64f37` sent a
+conversation and a Responses call through the virtual key. `litellm_request`
+recorded `STATUS_CODE_OK` with `ResultCode` 0, `gen_ai.system=azure_ai`,
+`gen_ai.request.model=gpt-5.6-terra`, `litellm.provider.model=azure_ai/gpt-5.6-terra`,
+the key alias, team and end user, the input and output messages, and an
+estimated cost of $0.001882 for 896 tokens. Both gateway requests were
+`POST /foundry-agent/main/...` with `ResultCode` 200 and `STATUS_CODE_OK`, and
+every span had `Success` true.
 
 ---
 
@@ -886,7 +983,9 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Section 3 reports that the LiteLLM gateway is not ready or its token expires too soon | Run `gateway/start.sh` on the host and rerun Section 3. If the token expiry does not change, the Azure CLI is reusing its cached token; wait until about five minutes before expiry and rerun it |
 | A gateway-routed run reports no GenAI chat spans | Keep `forward_headers: true` on both routes in `gateway/config.yaml` so `traceparent` reaches Foundry, then restart the gateway with `gateway/start.sh` |
 | Section 6 shows no LiteLLM gateway hops | Confirm the run used gateway mode and that `otel-collector` is running (`docker compose --project-directory gateway --env-file gateway/.env ps`). Rerun Section 6 after a minute if gateway spans are still being ingested |
-| The Foundry trace view marks LiteLLM spans as errors although Section 6 passes | LiteLLM records success as span status OK, which the Azure Monitor exporter stored as `ResultCode` 1. Keep the `transform/litellm_status` processor in `gateway/otel-collector.yaml` and run `gateway/start.sh`; new LiteLLM spans record `ResultCode` 0. Spans ingested earlier keep the flag |
+| The Foundry trace view marks LiteLLM spans as errors although Section 6 passes | For spans it does not recognize as HTTP or RPC, the Azure Monitor exporter stores LiteLLM's OK status as `ResultCode` 1. Keep the `transform/litellm_status` processor in `gateway/otel-collector.yaml` and run `gateway/start.sh`; new LiteLLM spans record `ResultCode` 0 or 200 and keep `STATUS_CODE_OK`, except the database-typed Neon spans, which are unset. Spans ingested earlier keep the flag |
+| Gateway calls fail with `Key/team not allowed to access passthrough route` | The virtual key lacks `allowed_passthrough_routes`. Run `gateway/start.sh`; `provision_identity.py` replaces a key whose alias, user, team or routes differ |
+| LiteLLM spans still show `gen_ai.system=Unknown` or empty `hidden_params` | The Foundry hook is not loaded. Check that `config.yaml` lists `litellm_callbacks.foundry_agent_telemetry` before `otel` and that `compose.yaml` mounts `litellm_callbacks.py`, then run `gateway/start.sh` |
 | Section 3 reports that a gateway config file changed after its container started | Run `gateway/start.sh`; it restarts the container whose config changed, because `docker compose up -d` alone does not |
 | `gateway/start.sh` or Section 3 reports that Neon is not connected | Open the [Neon Console](https://console.neon.tech) and check that the project exists. If its password was reset or the project was replaced, copy the direct connection string (**Connect**, pooling off) and run `gateway/start.sh --prompt-database-url`. See [Neon Postgres for the gateway](#neon-postgres-for-the-gateway) |
 
@@ -895,7 +994,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 ## ✅ Validation Checklist
 
 - [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
-- [ ] **Section 3** prints the `Responses route`; in gateway mode it also reports `Gateway health` with Neon connected and the remaining token lifetime, and `Gateway telemetry` with the Collector running, config current and LiteLLM span status normalized
+- [ ] **Section 3** prints the `Responses route`; in gateway mode it also reports `Gateway health` with Neon connected and the remaining token lifetime, `Gateway telemetry` with the Collector running, config current and LiteLLM span status normalized, and `Gateway identity` with the LiteLLM virtual key and end user
 - [ ] **Confirm Existing Deployment** shows ✅ for 🚦 LiteLLM Gateway, 🔭 OTEL Collector and 🐘 Neon DB in gateway mode, or `➖ Not used` in direct mode
 - [ ] **Section 3.1** reports MAF workflow tracing and HTTPX2 enabled, 100% sampling, the intended content policy, and disabled log/metric/Live Metrics/performance-counter export; in gateway mode it also lists LiteLLM gateway tracing, the OTEL Collector and Neon DB
 - [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)

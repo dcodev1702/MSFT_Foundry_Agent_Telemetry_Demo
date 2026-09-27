@@ -5,13 +5,22 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
-  # LiteLLM marks successful spans with status OK. The Azure Monitor exporter writes that
-  # status (1) into ResultCode, and the Foundry trace view flags non-zero codes as errors.
-  # Reset OK to UNSET (ResultCode 0, like Foundry's own spans); real ERROR spans stay errors.
+  # Azure Monitor derives ResultCode from the span status unless a span is HTTP- or RPC-typed, so
+  # LiteLLM's explicit OK status would be stored as ResultCode 1, which the Foundry trace view flags
+  # as an error. Keep LiteLLM's OK status and give the exporter protocol context instead:
+  # - the server span of the POST-only agent routes becomes the HTTP request "POST <path>", with
+  #   the HTTP status as ResultCode;
+  # - LiteLLM's in-process spans carry rpc.system=litellm, so ResultCode is 0 and names are kept.
+  # Other LiteLLM spans with OK status are reset to unset: its Neon spans (postgres,
+  # batch_write_to_db) are database-typed, and an RPC hint would replace that typing. Error
+  # statuses are never changed.
   transform/litellm_status:
     error_mode: ignore
     trace_statements:
-      - set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK
+      - set(span.attributes["http.request.method"], "POST") where span.kind == SPAN_KIND_SERVER and span.attributes["http.request.method"] == nil and IsMatch(span.attributes["url.path"], "^/foundry-agent/(main|sentinel)/(conversations|responses)$")
+      - set(span.attributes["http.route"], span.attributes["url.path"]) where span.kind == SPAN_KIND_SERVER and span.attributes["http.request.method"] == "POST" and IsMatch(span.attributes["url.path"], "^/foundry-agent/(main|sentinel)/(conversations|responses)$")
+      - set(span.attributes["rpc.system"], "litellm") where span.kind == SPAN_KIND_INTERNAL and span.attributes["rpc.system"] == nil
+      - set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK and span.attributes["http.request.method"] == nil and span.attributes["rpc.system"] == nil
   batch:
     timeout: 5s
 

@@ -289,6 +289,7 @@ def get_agent_openai_client(
                 agent_name=agent_name,
                 base_url=runtime.gateway.agent_base_url(roles[agent_name]),
                 api_key=runtime.gateway.api_key,
+                default_headers=runtime.gateway.default_headers(),
             )
         return client.get_openai_client(agent_name=agent_name)
     if runtime.gateway is not None:

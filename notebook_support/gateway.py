@@ -25,10 +25,19 @@ DEFAULT_ENV_FILE = GATEWAY_DIR / ".env"
 # Azure CLI can reuse a cached token until about five minutes before expiry.
 MINIMUM_TOKEN_LIFETIME = timedelta(minutes=10)
 COMPOSE_PROJECT = "foundry-agent-gateway"
-SERVICE_CONFIG_FILES = {"litellm": "config.yaml", "otel-collector": "otel-collector.yaml"}
-# Without this Collector rule, App Insights stores LiteLLM's OK status as ResultCode 1 and the
-# Foundry trace view flags every LiteLLM span as an error.
-COLLECTOR_STATUS_RULE = "set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK"
+SERVICE_CONFIG_FILES = {
+    "litellm": ("config.yaml", "litellm_callbacks.py"),
+    "otel-collector": ("otel-collector.yaml",),
+}
+# Collector rules that keep LiteLLM's OK status without App Insights storing it as ResultCode 1, which
+# the Foundry trace view flags as an error: agent-route server spans are typed HTTP, in-process spans
+# RPC, and any other OK span is reset to unset.
+COLLECTOR_STATUS_RULES = (
+    'set(span.attributes["http.request.method"], "POST") where span.kind == SPAN_KIND_SERVER',
+    'set(span.attributes["rpc.system"], "litellm") where span.kind == SPAN_KIND_INTERNAL',
+    'set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK'
+    ' and span.attributes["http.request.method"] == nil and span.attributes["rpc.system"] == nil',
+)
 _COLLECTOR_STATUS_PROCESSOR = re.compile(r"processors:\s*\[[^\]]*\btransform/litellm_status\b")
 _EXPORT_FAILURE = re.compile(r"(?i)\terror\t|failed to export|exporting failed|encountered while exporting")
 NEON_REGION_NAMES = {
@@ -46,11 +55,18 @@ class GatewayConfig:
     api_key: str = field(repr=False)
     token_expires_at: datetime | None = None
     env_file: Path | None = None
+    # A LiteLLM virtual key carries its user, email and team into LiteLLM's spans; the master key does not.
+    virtual_key: bool = False
+    end_user_id: str | None = None
 
     def agent_base_url(self, role: str) -> str:
         if role not in GATEWAY_ROLES:
             raise ValueError(f"Unknown gateway route: {role!r}")
         return f"{self.base_url}{ROUTE_PREFIX}/{role}"
+
+    def default_headers(self) -> dict[str, str]:
+        """Headers for gateway requests; LiteLLM reads the end user from x-litellm-end-user-id."""
+        return {"x-litellm-end-user-id": self.end_user_id} if self.end_user_id else {}
 
     def span_attributes(self, upstream_endpoint: str) -> dict[str, str]:
         return {
@@ -96,9 +112,12 @@ def load_gateway_config(environment: Mapping[str, str] | None = None) -> Gateway
             f"LiteLLM gateway settings were not found at {env_file}. Run gateway/start.sh first."
         )
     values = _parse_env_file(env_file)
-    api_key = values.get("LITELLM_MASTER_KEY", "")
-    if not api_key.startswith("sk-") or "REPLACE_WITH" in api_key:
+    master_key = values.get("LITELLM_MASTER_KEY", "")
+    if not master_key.startswith("sk-") or "REPLACE_WITH" in master_key:
         raise ValueError(f"{env_file} has no generated LITELLM_MASTER_KEY. Run gateway/start.sh.")
+    notebook_key = values.get("LITELLM_NOTEBOOK_KEY", "")
+    virtual_key = notebook_key.startswith("sk-") and "REPLACE_WITH" not in notebook_key
+    api_key = notebook_key if virtual_key else master_key
     host = values.get("LITELLM_BIND_ADDRESS") or "127.0.0.1"
     if host in {"0.0.0.0", "::"}:
         host = "127.0.0.1"
@@ -117,7 +136,8 @@ def load_gateway_config(environment: Mapping[str, str] | None = None) -> Gateway
             token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
     return GatewayConfig(
         name="litellm", base_url=f"http://{host}:{port}", api_key=api_key,
-        token_expires_at=token_expires_at, env_file=env_file,
+        token_expires_at=token_expires_at, env_file=env_file, virtual_key=virtual_key,
+        end_user_id=values.get("LITELLM_END_USER_ID") or None,
     )
 
 
@@ -222,12 +242,12 @@ def _config_changed_since_start(container: _Container, config_file: Path) -> boo
 
 
 def collector_normalizes_litellm_status(config_file: Path) -> bool:
-    """Return whether the Collector config resets LiteLLM's OK span status before export."""
+    """Return whether the Collector config maps LiteLLM's OK span status for Azure Monitor before export."""
     try:
         text = config_file.read_text(encoding="utf-8")
     except OSError:
         return False
-    return COLLECTOR_STATUS_RULE in text and _COLLECTOR_STATUS_PROCESSOR.search(text) is not None
+    return all(rule in text for rule in COLLECTOR_STATUS_RULES) and _COLLECTOR_STATUS_PROCESSOR.search(text) is not None
 
 
 def check_gateway_telemetry(
@@ -235,15 +255,15 @@ def check_gateway_telemetry(
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
 ) -> dict[str, object]:
     """Fail before agent calls when LiteLLM spans would be lost, use stale settings, or show as errors."""
-    collector_config = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"]
+    collector_config = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"][0]
     if not collector_normalizes_litellm_status(collector_config):
         raise RuntimeError(
-            f"{collector_config} does not reset LiteLLM's OK span status, so the Foundry trace view "
-            "would flag every LiteLLM span as an error. Restore the transform/litellm_status processor "
-            "from the repository, then run gateway/start.sh."
+            f"{collector_config} does not map LiteLLM's OK span status for Azure Monitor, so the Foundry "
+            "trace view would flag every LiteLLM span as an error. Restore the transform/litellm_status "
+            "processor from the repository, then run gateway/start.sh."
         )
     containers = {}
-    for service, config_name in SERVICE_CONFIG_FILES.items():
+    for service, config_names in SERVICE_CONFIG_FILES.items():
         try:
             container = _compose_container(service, run)
         except (OSError, subprocess.SubprocessError) as error:
@@ -256,11 +276,12 @@ def check_gateway_telemetry(
                 f"The gateway's {service} container is not running, so {gateway.name} spans cannot "
                 "reach Application Insights. Run gateway/start.sh."
             )
-        if _config_changed_since_start(container, gateway_dir / config_name):
-            raise RuntimeError(
-                f"gateway/{config_name} changed after the {service} container started, so it still "
-                "runs the old settings. Run gateway/start.sh to apply them."
-            )
+        for config_name in config_names:
+            if _config_changed_since_start(container, gateway_dir / config_name):
+                raise RuntimeError(
+                    f"gateway/{config_name} changed after the {service} container started, so it still "
+                    "runs the old settings. Run gateway/start.sh to apply them."
+                )
         containers[service] = container
 
     export_failures = 0
@@ -287,7 +308,7 @@ def _collector_status(run: Callable[..., subprocess.CompletedProcess], gateway_d
     name = container.image.split("@", 1)[0]
     version = name.rsplit(":", 1)[1] if ":" in name.rsplit("/", 1)[-1] else "latest"
     summary = f"otelcol-contrib {version}, {container.status}"
-    config_file = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"]
+    config_file = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"][0]
     if _config_changed_since_start(container, config_file):
         return f"⚠️ {summary}; config changed, run gateway/start.sh"
     if not collector_normalizes_litellm_status(config_file):

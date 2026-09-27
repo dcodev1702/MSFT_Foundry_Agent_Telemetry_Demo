@@ -879,7 +879,7 @@ Client and service snapshots can repeat conversation history: do not sum them as
         ])
         body += (
             "<p>Each row is one notebook request handled by the local LiteLLM gateway, joined from its "
-            "<code>Received Proxy Server Request</code> span. ClientMs is the notebook's HTTP call, GatewayMs "
+            "server span (<code>POST /foundry-agent/&lt;agent&gt;/&lt;operation&gt;</code>). ClientMs is the notebook's HTTP call, GatewayMs "
             "LiteLLM's handling, UpstreamMs its Foundry call, GatewayOverheadMs the difference, and FoundryAgentMs "
             "Foundry's server-side <code>invoke_agent</code> span in the same trace. No rows means the run used "
             "direct routing or gateway spans have not been ingested yet.</p>"

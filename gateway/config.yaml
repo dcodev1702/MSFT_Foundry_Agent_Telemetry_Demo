@@ -36,8 +36,12 @@ litellm_settings:
   request_timeout: 600
   set_verbose: false
   json_logs: true
-  # Export LiteLLM's own spans (through the Collector) into the notebook's traces.
-  # Message logging stays off: the notebook's content policy already governs payloads.
+  # Export LiteLLM's own spans (through the Collector) into the notebook's traces. The Foundry
+  # hook (litellm_callbacks.py) fills provider, model, usage, cost and result fields that generic
+  # pass-through routes leave empty; LiteLLM runs it before the otel callback.
   callbacks:
+    - litellm_callbacks.foundry_agent_telemetry
     - otel
-  turn_off_message_logging: true
+  # Record prompts and results on LiteLLM's spans, like the notebook's own content policy.
+  # OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT in compose.yaml selects span attributes.
+  turn_off_message_logging: false

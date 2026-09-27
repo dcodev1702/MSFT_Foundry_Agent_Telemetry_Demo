@@ -18,6 +18,8 @@ services:
       DATABASE_URL: ${DATABASE_URL:?set a direct Neon connection string}
       FOUNDRY_MAIN_AGENT_BASE_URL: ${FOUNDRY_MAIN_AGENT_BASE_URL:?run ./start.sh to resolve the main agent endpoint}
       FOUNDRY_SENTINEL_AGENT_BASE_URL: ${FOUNDRY_SENTINEL_AGENT_BASE_URL:?run ./start.sh to resolve the Sentinel agent endpoint}
+      # Model deployment behind both agents; litellm_callbacks.py reports it as gen_ai.request.model.
+      FOUNDRY_MODEL_DEPLOYMENT: ${FOUNDRY_MODEL_DEPLOYMENT:?run ./start.sh to resolve the model deployment}
       LITELLM_LOG: INFO
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?run ./start.sh to generate the proxy key}
       LITELLM_MODE: PRODUCTION
@@ -26,8 +28,21 @@ services:
       OTEL_ENDPOINT: http://otel-collector:4318/v1/traces
       OTEL_SERVICE_NAME: litellm-gateway
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=foundry-agent-demo
+      # deployment.environment on every LiteLLM span; LiteLLM's default is "production".
+      OTEL_ENVIRONMENT_NAME: ${OTEL_ENVIRONMENT_NAME:-demo}
+      # Prompts and results as span attributes (the modes with events need a Collector logs pipeline).
+      OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: span_only
+      # Keep joining the notebook's traces through the forwarded traceparent header.
+      OTEL_IGNORE_CONTEXT_PROPAGATION: "false"
+      # Usage and content are on the spans; GenAI log events and metrics would need Collector
+      # logs and metrics pipelines.
+      LITELLM_OTEL_INTEGRATION_ENABLE_EVENTS: "false"
+      LITELLM_OTEL_INTEGRATION_ENABLE_METRICS: "false"
+      # OTEL_SEMCONV_STABILITY_OPT_IN stays unset: gen_ai_latest_experimental renames litellm_request
+      # to "chat <model>" and drops gen_ai.system, which Section 6 and this demo rely on.
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+      - ./litellm_callbacks.py:/app/litellm_callbacks.py:ro
     ports:
       - "${LITELLM_BIND_ADDRESS:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"
     depends_on:
@@ -58,6 +73,8 @@ services:
       - --config=/etc/otelcol-contrib/config.yaml
     environment:
       APPLICATIONINSIGHTS_CONNECTION_STRING: ${APPLICATIONINSIGHTS_CONNECTION_STRING:?run ./start.sh to resolve the Application Insights connection string}
+      # Go runtime soft limit, about 80% of mem_limit, so garbage collection starts before the cap.
+      GOMEMLIMIT: 2048MiB
     volumes:
       - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
     stop_grace_period: 15s
