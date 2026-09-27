@@ -10,6 +10,20 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Faster Section 6 report
+
+- Read Section 6's report views concurrently, five at a time, the number of
+  queries Log Analytics runs at once for one user (`read_report_views` in
+  `notebook_support/observability.py`), in the Linux and Windows notebooks. On
+  failure, the failures, exceptions and response diagnostics are read together the
+  same way. The views stay independent snapshots of the same run.
+- Share one Log Analytics access token across queries until it nears expiry
+  (`CachedAccessToken`); the Azure CLI credential otherwise starts the CLI for each
+  query, about 0.35 s each.
+- In a validated gateway run the 13 views took 6.7 s, and Section 6 spent 16.2 s
+  outside its eight 15-second ingestion waits instead of 71.0 s, so the whole
+  section took 136.2 s instead of 191.0 s.
+
 ### LiteLLM OpenTelemetry v2 with prompt capture
 
 - Switch the LiteLLM gateway to LiteLLM's OpenTelemetry v2 tracing

@@ -1,11 +1,14 @@
 import ast
 import json
+import threading
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from notebook_support.observability import (
-    build_observability_queries, coverage_issues, render_failure_report,
-    render_observability_report,
+    LOG_ANALYTICS_CONCURRENT_QUERIES, CachedAccessToken, build_observability_queries,
+    coverage_issues, read_report_views, render_failure_report, render_observability_report,
 )
 from notebook_support.response_observability import load_model_pricing
 
@@ -216,10 +219,16 @@ class QueryTests(unittest.TestCase):
         self.assertNotIn("[:4000]", source)
         for required in (
             "load_model_pricing(", "NOTEBOOK_MODEL_PRICING_JSON",
-            "model_pricing=model_pricing", "read_response_diagnostics()",
-            '"usage", "mcp", "mcp_events"',
+            "model_pricing=model_pricing", "diagnostics=views",
+            '("failures", "exceptions", "usage", "mcp", "mcp_events")',
+            # Independent views are read concurrently, with one shared access token.
+            "observability_results = read_report_views(read_view, observability_queries, "
+            "report_views)",
+            'CachedAccessToken(log_analytics_credential, "https://api.loganalytics.io/.default")',
+            "token = log_analytics_token()",
         ):
             self.assertIn(required, source)
+        self.assertNotIn("log_analytics_credential.get_token(", source)
 
     def test_usage_counts_only_canonical_response_boundaries_without_a_detail_cap(self):
         query = self.queries["usage"]
@@ -257,6 +266,80 @@ class QueryTests(unittest.TestCase):
             self.assertIn(key, visible)
         self.assertIn("take 200", hidden)
         self.assertIn("0, 1200", visible)
+
+
+class ReportViewReadTests(unittest.TestCase):
+    """Section 6 reads its report views concurrently, with one shared access token."""
+
+    QUERIES = {f"view_{index}": f"query {index}" for index in range(13)}
+
+    def test_views_run_concurrently_up_to_the_log_analytics_limit_and_keep_their_order(self):
+        lock, active, peak, seen = threading.Lock(), [0], [0], []
+
+        def read(query):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+                seen.append(query)
+            time.sleep(0.05)
+            with lock:
+                active[0] -= 1
+            return [{"query": query}]
+
+        names = list(reversed(self.QUERIES))
+        results = read_report_views(read, self.QUERIES, names)
+        self.assertEqual(list(results), names)
+        self.assertEqual(results["view_3"], [{"query": "query 3"}])
+        self.assertEqual(sorted(seen), sorted(self.QUERIES.values()))
+        self.assertEqual(LOG_ANALYTICS_CONCURRENT_QUERIES, 5)
+        self.assertEqual(peak[0], LOG_ANALYTICS_CONCURRENT_QUERIES)
+
+    def test_a_failed_view_is_raised_and_views_not_started_are_cancelled(self):
+        started = []
+
+        def read(query):
+            started.append(query)
+            if query == "query 0":
+                raise RuntimeError("Log Analytics query failed (400)")
+            return []
+
+        with self.assertRaisesRegex(RuntimeError, "failed \\(400\\)"):
+            read_report_views(read, self.QUERIES, list(self.QUERIES), max_workers=1)
+        self.assertLess(len(started), len(self.QUERIES))
+
+    def test_unknown_or_no_views_read_nothing(self):
+        def read(query):
+            raise AssertionError("no query should run")
+
+        with self.assertRaisesRegex(KeyError, "missing_view"):
+            read_report_views(read, self.QUERIES, ["view_0", "missing_view"])
+        self.assertEqual(read_report_views(read, self.QUERIES, []), {})
+
+    def test_one_access_token_is_shared_until_it_nears_expiry(self):
+        now = [1_000.0]
+        issued = []
+
+        class Credential:
+            """Azure credential double that issues numbered tokens valid for one hour."""
+
+            def get_token(self, scope):
+                """Issue the next token for scope."""
+                issued.append(scope)
+                return SimpleNamespace(token=f"token-{len(issued)}", expires_on=now[0] + 3600)
+
+        token = CachedAccessToken(
+            Credential(), "https://api.loganalytics.io/.default", clock=lambda: now[0],
+        )
+        threads = [threading.Thread(target=token) for _ in range(10)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual((token(), issued), ("token-1", ["https://api.loganalytics.io/.default"]))
+        now[0] += 3600 - 301
+        self.assertEqual(token(), "token-1")
+        now[0] += 2
+        self.assertEqual(token(), "token-2")
 
 
 class CoverageTests(unittest.TestCase):

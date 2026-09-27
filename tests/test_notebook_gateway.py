@@ -826,6 +826,15 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
     def test_validation_reads_and_reports_the_gateway_view(self):
         source = self.cells()["6e3dcab6"]
         self.assertIn('"end_to_end", "gateway", "runs_trend"', source)
+        self.assertIn(
+            "observability_results = read_report_views(read_view, observability_queries, report_views)",
+            source,
+        )
+        self.assertIn(
+            '"failures", "exceptions", "usage", "mcp", "mcp_events", "tool_content_coverage", '
+            '"tool_content"',
+            source,
+        )
         self.assertIn("if agent_runtime.gateway is not None:", source)
         self.assertIn("observability_results['gateway']", source)
 

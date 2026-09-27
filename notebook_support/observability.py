@@ -1,7 +1,10 @@
 """Run- and stage-scoped KQL and HTML reporting for the MAF notebooks."""
 
 import json
-from collections.abc import Mapping
+import threading
+import time
+from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from typing import Any
 from uuid import UUID
@@ -12,6 +15,57 @@ from .response_observability import TokenPricing, price_response_usage
 Row = dict[str, Any]
 DETAIL_LIMIT = 200
 PREVIEW_LIMIT = 1200
+# Log Analytics runs at most five queries at once per user and queues the rest:
+# https://learn.microsoft.com/azure/azure-monitor/fundamentals/service-limits#log-queries-and-language
+LOG_ANALYTICS_CONCURRENT_QUERIES = 5
+
+
+class CachedAccessToken:
+    """Share one access token across queries and threads until it is about to expire.
+
+    Azure CLI sign-in has no token cache of its own, so each ``get_token`` call starts the CLI.
+    """
+
+    def __init__(
+        self, credential: Any, scope: str, *, refresh_margin_seconds: float = 300,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        self._credential, self._scope = credential, scope
+        self._margin, self._clock = refresh_margin_seconds, clock
+        self._token: Any = None
+        self._lock = threading.Lock()
+
+    def __call__(self) -> str:
+        with self._lock:
+            if self._token is None or self._token.expires_on - self._clock() <= self._margin:
+                self._token = self._credential.get_token(self._scope)
+            return self._token.token
+
+
+def read_report_views(
+    read: Callable[[str], list[Row]], queries: Mapping[str, str], names: Sequence[str],
+    *, max_workers: int = LOG_ANALYTICS_CONCURRENT_QUERIES,
+) -> dict[str, list[Row]]:
+    """Run the named report queries concurrently and return their rows by name, in the order given.
+
+    The views are independent snapshots of one run. The first failure, in the order given, is
+    raised after the queries already running finish; queries that have not started are cancelled.
+    """
+    missing = [name for name in names if name not in queries]
+    if missing:
+        raise KeyError(f"No report query named {', '.join(missing)}.")
+    if not names:
+        return {}
+    with ThreadPoolExecutor(
+        max_workers=min(max_workers, len(names)), thread_name_prefix="log-analytics",
+    ) as pool:
+        futures = {name: pool.submit(read, queries[name]) for name in names}
+        try:
+            return {name: futures[name].result() for name in names}
+        except BaseException:
+            for future in futures.values():
+                future.cancel()
+            raise
 
 
 def build_observability_queries(
