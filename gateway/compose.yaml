@@ -5,6 +5,7 @@ services:
     image: ghcr.io/berriai/litellm:main-stable@sha256:87f34979b9f8cb274fac90ca8a4fdda07d8480de22755562a26adeb95ce20d02
     restart: unless-stopped
     init: true
+    mem_limit: 5g
     command:
       - --config
       - /app/config.yaml
@@ -51,6 +52,8 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.161.0@sha256:fd328de2552466ad78385e1b1289c3f2402b1c45f265b252aab1955b42845ac1
     restart: unless-stopped
+    # 2.5 GiB.
+    mem_limit: 2560m
     command:
       - --config=/etc/otelcol-contrib/config.yaml
     environment:

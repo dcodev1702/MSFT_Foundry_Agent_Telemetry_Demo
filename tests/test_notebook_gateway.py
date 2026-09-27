@@ -298,6 +298,11 @@ class GatewayConfigFileTests(unittest.TestCase):
             self.assertIn(key, service["environment"])
         self.assertEqual(service["ports"], ["${LITELLM_BIND_ADDRESS:-127.0.0.1}:${LITELLM_PORT:-4000}:4000"])
 
+    def test_gateway_containers_have_memory_caps(self):
+        services = yaml.safe_load((ROOT / "gateway" / "compose.yaml").read_text(encoding="utf-8"))["services"]
+        self.assertEqual(services["litellm"]["mem_limit"], "5g")
+        self.assertEqual(services["otel-collector"]["mem_limit"], "2560m")
+
     def test_litellm_exports_metadata_only_spans_through_the_collector(self):
         config = yaml.safe_load((ROOT / "gateway" / "config.yaml").read_text(encoding="utf-8"))
         self.assertEqual(config["litellm_settings"]["callbacks"], ["otel"])

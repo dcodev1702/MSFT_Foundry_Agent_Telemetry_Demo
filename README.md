@@ -520,6 +520,12 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
 - **Neon:** LiteLLM keeps its state in Neon Postgres. The project, its location,
   credentials and observability are described in
   [Neon Postgres for the gateway](#neon-postgres-for-the-gateway).
+- **Memory caps:** [gateway/compose.yaml](gateway/compose.yaml) caps LiteLLM at
+  5 GiB of RAM (`mem_limit: 5g`), above LiteLLM's 4 GiB per-worker guidance for its
+  single worker, and the Collector at 2.5 GiB (`mem_limit: 2560m`). After a
+  restart they used about 0.5 GiB and 30 MiB. `docker stats` shows current usage
+  against each cap. A container that exceeds its cap is killed and restarted by
+  its `unless-stopped` policy.
 - **Notebook opt-in:** add `"agent_gateway": "litellm"` to the local build file or
   set `FOUNDRY_AGENT_GATEWAY=litellm`; the environment variable wins. Section 3
   prints the route and stops before any agent call unless LiteLLM is ready, Neon

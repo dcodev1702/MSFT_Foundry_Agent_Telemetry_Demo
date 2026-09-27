@@ -10,6 +10,12 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Gateway container memory caps
+
+- Cap the LiteLLM container at 5 GiB of RAM and the OpenTelemetry Collector at
+  2.5 GiB in `gateway/compose.yaml`, and restart both. After the restart,
+  LiteLLM used about 0.5 GiB and the Collector about 30 MiB.
+
 ### Gateway status in the deployment table
 
 - Add 🚦 LiteLLM Gateway, 🔭 OTEL Collector, and 🐘 Neon DB rows to the Linux
