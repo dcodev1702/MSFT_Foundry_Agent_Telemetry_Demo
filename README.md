@@ -165,6 +165,23 @@ callbacks, and cover Linux bootstrap, kernel isolation, authentication errors,
 dependency versions, and unchanged workflow/telemetry behavior. They do not
 execute paid model calls or verify live Azure permissions and telemetry ingestion.
 
+The standalone Agent Framework demo's tests (`tests/test_agent_framework*.py`)
+check that demo's own pins in
+[agent-framework-demo/requirements.txt](agent-framework-demo/requirements.txt).
+They differ from the Linux notebook's (`openai` 3.16.0 instead of 3.19.2, `httpx2`
+2.13.0 instead of 2.13.1), so run them from a separate Linux environment rather
+than `.venv-linux` or the demo's Windows `.venv`:
+
+```bash
+"$(uv python find 3.14.7)" -m venv agent-framework-demo/.venv-linux
+agent-framework-demo/.venv-linux/bin/python -m pip install -r agent-framework-demo/requirements.txt
+agent-framework-demo/.venv-linux/bin/python -m pip check
+agent-framework-demo/.venv-linux/bin/python -m unittest discover -s tests -p "test_agent_framework*.py" -v
+```
+
+The environment is Git-ignored through the `.gitignore` that `venv` writes into
+it. Two Windows-only MCP transport tests skip on Linux.
+
 ### Linux Tool-Content Tracing
 
 Section 3.1 enables `OTEL_LOG_TOOL_CONTENT=1` by default for this demo. This

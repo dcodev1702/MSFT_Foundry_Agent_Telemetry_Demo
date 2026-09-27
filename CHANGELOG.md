@@ -10,6 +10,15 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Agent Framework demo tests on Linux
+
+- Document a separate Linux environment for the standalone Agent Framework
+  demo's tests, `agent-framework-demo/.venv-linux`, installed from the demo's
+  pinned `requirements.txt`. The demo pins `openai` 3.16.0 and `httpx2` 2.13.0,
+  and the Linux notebook pins 3.19.2 and 2.13.1, so the two cannot share
+  `.venv-linux`. All 78 tests run there; two Windows-only MCP transport tests
+  skip.
+
 ### LiteLLM spans flagged as errors in Foundry traces
 
 - Diagnose the 16 errors that the Foundry trace view showed for trace
