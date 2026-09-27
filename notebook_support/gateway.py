@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 from typing import TYPE_CHECKING
 import urllib.error
 import urllib.request
@@ -22,7 +23,14 @@ ROUTE_PREFIX = "/foundry-agent"
 DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / "gateway" / ".env"
 # Azure CLI can reuse a cached token until about five minutes before expiry.
 MINIMUM_TOKEN_LIFETIME = timedelta(minutes=10)
+COMPOSE_PROJECT = "foundry-agent-gateway"
+INFRASTRUCTURE_LABELS = ("🚦 LiteLLM Gateway", "🔭 OTEL Collector", "🐘 Neon DB")
+NEON_REGION_NAMES = {
+    "us-east-1": "N. Virginia", "us-east-2": "Ohio", "us-west-2": "Oregon", "eu-central-1": "Frankfurt",
+    "eu-west-2": "London", "ap-southeast-1": "Singapore", "ap-southeast-2": "Sydney", "sa-east-1": "São Paulo",
+}
 _ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_NEON_HOST = re.compile(r"^ep-[a-z0-9-]+(?:\.c-\d+)?\.(?P<region>[a-z]{2}-[a-z]+-\d)\.aws\.neon\.tech$")
 
 
 @dataclass(frozen=True)
@@ -151,3 +159,96 @@ def check_gateway_ready(
             "The LiteLLM gateway reports that its Neon database is not connected. Run gateway/start.sh."
         )
     return {"db": readiness["db"], "token_minutes_remaining": int(remaining.total_seconds() // 60)}
+
+
+def _neon_location(database_url: str) -> str:
+    parsed = urlsplit(database_url)
+    database = parsed.path.lstrip("/") or "database"
+    match = _NEON_HOST.fullmatch(parsed.hostname or "")
+    if not match:
+        return f"{database} on a non-Neon host"
+    region = match["region"]
+    return f"{database} in aws-{region} ({NEON_REGION_NAMES.get(region, region)})"
+
+
+def _collector_status(run: Callable[..., subprocess.CompletedProcess]) -> str:
+    try:
+        result = run(
+            ["docker", "ps", "--filter", f"label=com.docker.compose.project={COMPOSE_PROJECT}",
+             "--filter", "label=com.docker.compose.service=otel-collector", "--format", "{{.Image}}\t{{.Status}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return "⚠️ Docker status unavailable"
+    if result.returncode != 0:
+        return "⚠️ Docker status unavailable"
+    lines = result.stdout.strip().splitlines()
+    if not lines:
+        return "❌ Not running; run gateway/start.sh"
+    image, _, status = lines[0].partition("\t")
+    name = image.split("@", 1)[0]
+    version = name.rsplit(":", 1)[1] if ":" in name.rsplit("/", 1)[-1] else "latest"
+    state = "✅" if status.startswith("Up") else "⚠️"
+    return f"{state} otelcol-contrib {version}, {status} → App Insights"
+
+
+def gateway_infrastructure_rows(
+    build_info: Mapping[str, object], environment: Mapping[str, str] | None = None, *,
+    now: datetime | None = None, opener: Callable[..., object] = urllib.request.urlopen,
+    run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> list[tuple[str, str]]:
+    """Describe the LiteLLM gateway, its Collector, and its Neon database for the deployment table.
+
+    Never raises for an unhealthy gateway and never includes keys, hostnames, or credentials.
+    """
+    gateway_label, collector_label, neon_label = INFRASTRUCTURE_LABELS
+    try:
+        mode = gateway_mode(build_info, environment)
+    except ValueError as error:
+        return [(gateway_label, f"⚠️ {error}"), (collector_label, "➖ Not checked"), (neon_label, "➖ Not checked")]
+    if mode == "direct":
+        return [(label, "➖ Not used (agent_gateway=direct)") for label in INFRASTRUCTURE_LABELS]
+    try:
+        gateway = load_gateway_config(environment)
+    except (OSError, ValueError):
+        return [
+            (gateway_label, "❌ Not configured; run gateway/start.sh"),
+            (collector_label, "➖ Not checked"), (neon_label, "➖ Not checked"),
+        ]
+
+    readiness: dict[str, object] = {}
+    http_status: int | None = None
+    try:
+        with opener(f"{gateway.base_url}/health/readiness", timeout=5) as response:
+            readiness = json.load(response)
+    except urllib.error.HTTPError as error:
+        http_status = error.code
+        try:
+            readiness = json.loads(error.read() or b"{}")
+        except (OSError, ValueError):
+            readiness = {}
+    except OSError:
+        http_status = -1
+
+    now = datetime.now(timezone.utc) if now is None else now
+    minutes = None if gateway.token_expires_at is None else int((gateway.token_expires_at - now).total_seconds() // 60)
+    if http_status == -1:
+        gateway_value = f"❌ Unreachable at {gateway.base_url}; run gateway/start.sh"
+    elif http_status is not None:
+        gateway_value = f"⚠️ Not ready at {gateway.base_url} (HTTP {http_status})"
+    elif minutes is None or minutes < MINIMUM_TOKEN_LIFETIME.total_seconds() // 60:
+        remaining = "unknown" if minutes is None else "expired" if minutes < 0 else f"{minutes} min left"
+        gateway_value = f"⚠️ Ready at {gateway.base_url}, Foundry token {remaining}; run gateway/start.sh"
+    else:
+        gateway_value = f"✅ Ready at {gateway.base_url}, Foundry token valid {minutes} min"
+
+    database_url = _parse_env_file(gateway.env_file).get("DATABASE_URL", "") if gateway.env_file else ""
+    location = _neon_location(database_url) if database_url else "not configured"
+    database_status = readiness.get("db") if http_status != -1 else None
+    if database_status == "connected":
+        neon_value = f"✅ Connected, {location}"
+    elif database_status:
+        neon_value = f"❌ {str(database_status).capitalize()}, {location}; check the Neon Console"
+    else:
+        neon_value = f"⚠️ Status unknown, {location}"
+    return [(gateway_label, gateway_value), (collector_label, _collector_status(run)), (neon_label, neon_value)]

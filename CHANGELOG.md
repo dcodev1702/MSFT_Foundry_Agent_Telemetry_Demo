@@ -10,6 +10,16 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Gateway status in the deployment table
+
+- Add 🚦 LiteLLM Gateway, 🔭 OTEL Collector, and 🐘 Neon DB rows to the Linux
+  notebook's **Confirm Existing Deployment** table. They show readiness, address,
+  and Foundry token minutes; the Collector's image version, uptime, and App
+  Insights export; and the Neon connection state, database, and AWS region,
+  without hostnames or credentials. Direct mode shows `➖ Not used`.
+- Replace the "all green" headline when a row is marked ❌ or ⚠️. The cell
+  reports problems without raising; Section 3 remains the enforcing check.
+
 ### Linux LiteLLM gateway traces
 
 - Export LiteLLM's own OpenTelemetry spans through a pinned OpenTelemetry

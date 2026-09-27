@@ -56,7 +56,7 @@ class LinuxNotebookTests(unittest.TestCase):
         linux = notebook_cells()
         platform_cells = {
             "fcc00444", "04fb2ced", "a2c70b8c", "8b1659dd", "8330c10b",
-            "3c78effc", "2692d274", "ef551c01", "6e3dcab6",
+            "3c78effc", "2692d274", "ef551c01", "6e3dcab6", "e1b420fd",
         }
         self.assertEqual(set(linux), {cell["id"] for cell in original["cells"]})
         for cell in original["cells"]:

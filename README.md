@@ -529,6 +529,14 @@ Linux notebook --(master key, traceparent)--> LiteLLM 127.0.0.1:4000
   carry `app.gateway.name=litellm` and `app.upstream.server.address`. Agent
   preparation and deployment lookups still call Foundry directly. Set
   `agent_gateway` to `direct`, or remove it, to switch back.
+- **Deployment table:** **Confirm Existing Deployment** ends with three gateway
+  rows. 🚦 **LiteLLM Gateway** shows readiness, address and the Foundry token's
+  remaining minutes. 🔭 **OTEL Collector** shows the Collector container's image
+  version and uptime, and that it exports to App Insights. 🐘 **Neon DB** shows the
+  connection state, database and AWS region, without hostnames or credentials.
+  Direct mode shows `➖ Not used`. A row marked ❌ or ⚠️ replaces the "all green"
+  headline; the cell reports problems without raising, and Section 3 remains the
+  enforcing check.
 
 #### Neon Postgres for the gateway
 
@@ -835,6 +843,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 
 - [ ] **Section 3** prints `🔐 Credential used: ...` and `👤 Signed-in account: ...`
 - [ ] **Section 3** prints the `Responses route`; in gateway mode it also reports `Gateway health` with Neon connected and the remaining token lifetime
+- [ ] **Confirm Existing Deployment** shows ✅ for 🚦 LiteLLM Gateway, 🔭 OTEL Collector and 🐘 Neon DB in gateway mode, or `➖ Not used` in direct mode
 - [ ] **Section 3.1** reports MAF workflow tracing and HTTPX2 enabled, 100% sampling, the intended content policy, and disabled log/metric/Live Metrics/performance-counter export
 - [ ] **Section 3.2** prints the [MSFT Learn MCP URL](https://learn.microsoft.com/api/mcp)
 - [ ] **Section 3.3** resolves or prints the Sentinel MCP project connection details
