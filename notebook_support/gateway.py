@@ -24,7 +24,6 @@ DEFAULT_ENV_FILE = Path(__file__).resolve().parents[1] / "gateway" / ".env"
 # Azure CLI can reuse a cached token until about five minutes before expiry.
 MINIMUM_TOKEN_LIFETIME = timedelta(minutes=10)
 COMPOSE_PROJECT = "foundry-agent-gateway"
-INFRASTRUCTURE_LABELS = ("🚦 LiteLLM Gateway", "🔭 OTEL Collector", "🐘 Neon DB")
 NEON_REGION_NAMES = {
     "us-east-1": "N. Virginia", "us-east-2": "Ohio", "us-west-2": "Oregon", "eu-central-1": "Frankfurt",
     "eu-west-2": "London", "ap-southeast-1": "Singapore", "ap-southeast-2": "Sydney", "sa-east-1": "São Paulo",
@@ -192,29 +191,28 @@ def _collector_status(run: Callable[..., subprocess.CompletedProcess]) -> str:
     return f"{state} otelcol-contrib {version}, {status} → App Insights"
 
 
-def gateway_infrastructure_rows(
+def gateway_infrastructure_status(
     build_info: Mapping[str, object], environment: Mapping[str, str] | None = None, *,
     now: datetime | None = None, opener: Callable[..., object] = urllib.request.urlopen,
     run: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-) -> list[tuple[str, str]]:
-    """Describe the LiteLLM gateway, its Collector, and its Neon database for the deployment table.
+) -> dict[str, str]:
+    """Return deployment-table values for the "litellm", "otel_collector", and "neon" rows.
 
     Never raises for an unhealthy gateway and never includes keys, hostnames, or credentials.
     """
-    gateway_label, collector_label, neon_label = INFRASTRUCTURE_LABELS
     try:
         mode = gateway_mode(build_info, environment)
     except ValueError as error:
-        return [(gateway_label, f"⚠️ {error}"), (collector_label, "➖ Not checked"), (neon_label, "➖ Not checked")]
+        return {"litellm": f"⚠️ {error}", "otel_collector": "➖ Not checked", "neon": "➖ Not checked"}
     if mode == "direct":
-        return [(label, "➖ Not used (agent_gateway=direct)") for label in INFRASTRUCTURE_LABELS]
+        return dict.fromkeys(("litellm", "otel_collector", "neon"), "➖ Not used (agent_gateway=direct)")
     try:
         gateway = load_gateway_config(environment)
     except (OSError, ValueError):
-        return [
-            (gateway_label, "❌ Not configured; run gateway/start.sh"),
-            (collector_label, "➖ Not checked"), (neon_label, "➖ Not checked"),
-        ]
+        return {
+            "litellm": "❌ Not configured; run gateway/start.sh",
+            "otel_collector": "➖ Not checked", "neon": "➖ Not checked",
+        }
 
     readiness: dict[str, object] = {}
     http_status: int | None = None
@@ -251,4 +249,4 @@ def gateway_infrastructure_rows(
         neon_value = f"❌ {str(database_status).capitalize()}, {location}; check the Neon Console"
     else:
         neon_value = f"⚠️ Status unknown, {location}"
-    return [(gateway_label, gateway_value), (collector_label, _collector_status(run)), (neon_label, neon_value)]
+    return {"litellm": gateway_value, "otel_collector": _collector_status(run), "neon": neon_value}

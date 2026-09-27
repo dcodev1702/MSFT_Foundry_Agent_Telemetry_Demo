@@ -33,7 +33,7 @@ from notebook_support.agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, responses_url,
 )
 from notebook_support.gateway import (
-    GatewayConfig, check_gateway_ready, configure_agent_gateway, gateway_infrastructure_rows, gateway_mode,
+    GatewayConfig, check_gateway_ready, configure_agent_gateway, gateway_infrastructure_status, gateway_mode,
     load_gateway_config,
 )
 from notebook_support.observability import build_observability_queries, render_observability_report
@@ -367,13 +367,13 @@ class GatewayObservabilityTests(unittest.TestCase):
             self.assertIn(text, report)
 
 
-class GatewayInfrastructureRowsTests(unittest.TestCase):
+class GatewayInfrastructureStatusTests(unittest.TestCase):
     FRANKFURT_URL = (
         "postgresql://neondb_owner:test-password@ep-test-00000000.c-6.eu-central-1.aws.neon.tech/neondb"
         "?sslmode=require&channel_binding=require"
     )
 
-    def rows(self, directory, *, readiness=None, error=None, docker=None, docker_error=None, expires_in=45):
+    def status(self, directory, *, readiness=None, error=None, docker=None, docker_error=None, expires_in=45):
         env_file = write_env(
             directory, DATABASE_URL=self.FRANKFURT_URL,
             AZURE_AD_TOKEN_EXPIRES_ON=(NOW + timedelta(minutes=expires_in)).isoformat(),
@@ -389,58 +389,58 @@ class GatewayInfrastructureRowsTests(unittest.TestCase):
                 raise docker_error
             return SimpleNamespace(returncode=0, stdout=docker or "")
 
-        return gateway_infrastructure_rows(
+        return gateway_infrastructure_status(
             {"agent_gateway": "litellm"}, {"FOUNDRY_AGENT_GATEWAY_ENV_FILE": str(env_file)},
             now=NOW, opener=opener, run=run,
         )
 
-    def assert_no_secrets(self, rows):
-        text = str(rows)
+    def assert_no_secrets(self, status):
+        text = str(status)
         for secret in ("sk-test-master", "test-password", "ep-test-00000000", "upstream-test-token"):
             self.assertNotIn(secret, text)
 
     def test_direct_mode_marks_the_gateway_stack_as_not_used(self):
-        rows = gateway_infrastructure_rows({}, {})
-        self.assertEqual([label for label, _ in rows], ["🚦 LiteLLM Gateway", "🔭 OTEL Collector", "🐘 Neon DB"])
-        self.assertTrue(all(value == "➖ Not used (agent_gateway=direct)" for _, value in rows))
+        status = gateway_infrastructure_status({}, {})
+        self.assertEqual(set(status), {"litellm", "otel_collector", "neon"})
+        self.assertTrue(all(value == "➖ Not used (agent_gateway=direct)" for value in status.values()))
 
     def test_healthy_stack_reports_address_token_collector_version_and_neon_region(self):
         with TemporaryDirectory() as directory:
-            rows = dict(self.rows(
+            status = self.status(
                 directory, readiness={"status": "healthy", "db": "connected"},
                 docker="otel/opentelemetry-collector-contrib:0.161.0@sha256:abc\tUp 2 hours\n",
-            ))
-        self.assertEqual(rows["🚦 LiteLLM Gateway"], "✅ Ready at http://127.0.0.1:4000, Foundry token valid 45 min")
-        self.assertEqual(rows["🔭 OTEL Collector"], "✅ otelcol-contrib 0.161.0, Up 2 hours → App Insights")
-        self.assertEqual(rows["🐘 Neon DB"], "✅ Connected, neondb in aws-eu-central-1 (Frankfurt)")
-        self.assert_no_secrets(rows)
+            )
+        self.assertEqual(status["litellm"], "✅ Ready at http://127.0.0.1:4000, Foundry token valid 45 min")
+        self.assertEqual(status["otel_collector"], "✅ otelcol-contrib 0.161.0, Up 2 hours → App Insights")
+        self.assertEqual(status["neon"], "✅ Connected, neondb in aws-eu-central-1 (Frankfurt)")
+        self.assert_no_secrets(status)
 
     def test_unreachable_gateway_and_stopped_collector_are_marked(self):
         with TemporaryDirectory() as directory:
-            rows = dict(self.rows(directory, error=urllib.error.URLError("connection refused"), docker=""))
-        self.assertTrue(rows["🚦 LiteLLM Gateway"].startswith("❌ Unreachable at http://127.0.0.1:4000"))
-        self.assertEqual(rows["🔭 OTEL Collector"], "❌ Not running; run gateway/start.sh")
-        self.assertEqual(rows["🐘 Neon DB"], "⚠️ Status unknown, neondb in aws-eu-central-1 (Frankfurt)")
-        self.assert_no_secrets(rows)
+            status = self.status(directory, error=urllib.error.URLError("connection refused"), docker="")
+        self.assertTrue(status["litellm"].startswith("❌ Unreachable at http://127.0.0.1:4000"))
+        self.assertEqual(status["otel_collector"], "❌ Not running; run gateway/start.sh")
+        self.assertEqual(status["neon"], "⚠️ Status unknown, neondb in aws-eu-central-1 (Frankfurt)")
+        self.assert_no_secrets(status)
 
     def test_disconnected_database_short_token_and_missing_docker_are_marked(self):
         body = io.BytesIO(json.dumps({"status": "unhealthy", "db": "disconnected"}).encode())
         error = urllib.error.HTTPError("http://127.0.0.1:4000/health/readiness", 503, "Unavailable", {}, body)
         with TemporaryDirectory() as directory:
-            rows = dict(self.rows(directory, error=error, docker_error=FileNotFoundError("docker")))
-            short = dict(self.rows(directory, readiness={"db": "connected"}, docker="", expires_in=5))
-        self.assertEqual(rows["🚦 LiteLLM Gateway"], "⚠️ Not ready at http://127.0.0.1:4000 (HTTP 503)")
-        self.assertEqual(rows["🔭 OTEL Collector"], "⚠️ Docker status unavailable")
-        self.assertTrue(rows["🐘 Neon DB"].startswith("❌ Disconnected, neondb in aws-eu-central-1"))
-        self.assertIn("Foundry token 5 min left; run gateway/start.sh", short["🚦 LiteLLM Gateway"])
-        self.assert_no_secrets(rows)
+            status = self.status(directory, error=error, docker_error=FileNotFoundError("docker"))
+            short = self.status(directory, readiness={"db": "connected"}, docker="", expires_in=5)
+        self.assertEqual(status["litellm"], "⚠️ Not ready at http://127.0.0.1:4000 (HTTP 503)")
+        self.assertEqual(status["otel_collector"], "⚠️ Docker status unavailable")
+        self.assertTrue(status["neon"].startswith("❌ Disconnected, neondb in aws-eu-central-1"))
+        self.assertIn("Foundry token 5 min left; run gateway/start.sh", short["litellm"])
+        self.assert_no_secrets(status)
 
     def test_missing_gateway_settings_are_reported_without_raising(self):
-        rows = dict(gateway_infrastructure_rows(
+        status = gateway_infrastructure_status(
             {"agent_gateway": "litellm"}, {"FOUNDRY_AGENT_GATEWAY_ENV_FILE": "/nonexistent/gateway.env"},
-        ))
-        self.assertEqual(rows["🚦 LiteLLM Gateway"], "❌ Not configured; run gateway/start.sh")
-        self.assertEqual(rows["🐘 Neon DB"], "➖ Not checked")
+        )
+        self.assertEqual(status["litellm"], "❌ Not configured; run gateway/start.sh")
+        self.assertEqual(status["neon"], "➖ Not checked")
 
 
 class RuntimeEnvRefreshTests(unittest.TestCase):
@@ -520,16 +520,24 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
         self.assertIn("if agent_runtime.gateway is not None:", source)
         self.assertIn("observability_results['gateway']", source)
 
-    def test_deployment_table_adds_gateway_rows_and_flags_attention(self):
+    def test_deployment_table_lists_gateway_rows_and_flags_attention(self):
         source = self.cells()["e1b420fd"]
-        self.assertIn("from notebook_support.gateway import gateway_infrastructure_rows", source)
-        self.assertIn("*gateway_infrastructure_rows(build_info),", source)
+        self.assertIn("from notebook_support.gateway import gateway_infrastructure_status", source)
+        self.assertIn("gateway_status = gateway_infrastructure_status(build_info)", source)
+        for row in (
+            '("🚦 LiteLLM Gateway", gateway_status["litellm"]),',
+            '("🔭 OTEL Collector", gateway_status["otel_collector"]),',
+            '("🐘 Neon DB", gateway_status["neon"]),',
+        ):
+            self.assertIn(row, source)
         for attention, headline in ((True, "needs attention"), (False, "all green")):
             with self.subTest(attention=attention):
-                status = "❌ Not running; run gateway/start.sh" if attention else "✅ Ready"
+                litellm = "❌ Unreachable at http://127.0.0.1:4000; run gateway/start.sh" if attention else "✅ Ready"
                 namespace = {
                     "build_info_path": Path("build_info-test.json"),
-                    "gateway_infrastructure_rows": lambda _build_info: [("🚦 LiteLLM Gateway", status)],
+                    "gateway_infrastructure_status": lambda _build_info: {
+                        "litellm": litellm, "otel_collector": "✅ Running", "neon": "✅ Connected",
+                    },
                 }
                 with patch.object(validation_tests, "NOTEBOOK", NOTEBOOK):
                     scope = validation_tests.load_functions("e1b420fd", ["show_current_build_status"], namespace)
@@ -543,7 +551,8 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
                 with redirect_stdout(output):
                     scope["show_current_build_status"](build)
                 self.assertIn(headline, output.getvalue())
-                self.assertIn("🚦 LiteLLM Gateway", output.getvalue())
+                for label in ("🚦 LiteLLM Gateway", "🔭 OTEL Collector", "🐘 Neon DB"):
+                    self.assertIn(label, output.getvalue())
 
     def test_both_response_paths_tag_gateway_requests_and_leave_direct_requests_unchanged(self):
         provider = TracerProvider()
