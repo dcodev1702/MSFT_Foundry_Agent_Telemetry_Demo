@@ -1,0 +1,38 @@
+# =============================================================================
+# File: .pylintrc
+# Author: dcodev1702 (with GitHub Copilot assistance)
+# Updated: 2026-09-27
+# Purpose: Workspace Pylint settings for the VS Code Pylint extension and for
+#          `pylint` run from the repository root.
+# Environments: The main notebook uses the root environment (.venv-linux on
+#               Linux, .venv on Windows). The Agent Framework demo keeps its own
+#               environment under agent-framework-demo/. Both stay separate;
+#               nothing here installs or changes packages in either one.
+# =============================================================================
+
+[MAIN]
+# VS Code lints every file with the root interpreter. Append the Agent Framework
+# demo environment at the lowest priority, so root files still resolve packages
+# from the root environment first and demo files can also resolve the packages
+# that only the demo installs (a2a, httpx, mcp, starlette and uvicorn).
+# Continuation lines lose their indentation, so each line is one statement.
+init-hook =
+    import glob, os, sys
+    from pylint.config import find_default_config_files
+    _rcfile = next(find_default_config_files(), None)
+    _demo = os.path.join(os.path.dirname(_rcfile) if _rcfile else os.getcwd(), "agent-framework-demo")
+    _venv = os.path.join(_demo, ".venv-linux", "lib", "python3.*", "site-packages")
+    _venv = os.path.join(_demo, ".venv", "Lib", "site-packages") if os.name == "nt" else _venv
+    sys.path.extend([_demo, *sorted(glob.glob(_venv))])
+
+[BASIC]
+# Test methods are named as sentences, so they do not need docstrings.
+# Pylint's default only exempts names that start with an underscore.
+no-docstring-rgx=^(_|test_)
+
+[TYPECHECK]
+# agent_framework and its a2a, openai and orchestrations subpackages export their
+# public names lazily through a module-level __getattr__ (PEP 562). Pylint cannot
+# follow that and reports no-name-in-module in either environment; Pylance reads
+# the package's __init__.pyi stubs instead. The matching also covers submodules.
+ignored-modules=agent_framework

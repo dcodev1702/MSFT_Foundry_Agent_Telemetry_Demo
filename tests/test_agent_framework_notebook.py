@@ -1,3 +1,8 @@
+"""Agent Framework notebook tests: pins, bootstrap, structure, instructions and MCP helper."""
+
+# These tests run notebook cell source on purpose.
+# pylint: disable=exec-used
+
 import ast
 import json
 import os
@@ -43,14 +48,18 @@ EXPECTED_PINS = {
 
 
 def load_notebook():
+    """Return the parsed Windows Agent Framework notebook."""
     return json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
 
 
 def cells_by_id(notebook):
+    """Return a notebook's cell sources keyed by cell ID."""
     return {cell["id"]: "".join(cell.get("source", [])) for cell in notebook["cells"]}
 
 
 class DependencyTests(unittest.TestCase):
+    """Check requirements.txt pins and the installed environment agree."""
+
     def test_requirements_are_exact_current_pins(self):
         pins = {}
         for raw_line in REQUIREMENTS_PATH.read_text(encoding="utf-8").splitlines():
@@ -70,16 +79,20 @@ class DependencyTests(unittest.TestCase):
 
 
 class BootstrapEnvironmentTests(unittest.TestCase):
+    """Run the bootstrap cell against a temporary repository with a fake installer."""
+
     def setUp(self):
         self.cells = cells_by_id(load_notebook())
         self.source = compile(self.cells["40b63ed3"], str(NOTEBOOK_PATH), "exec")
 
     def environment_python(self, demo_dir):
+        """Return the demo environment's interpreter path for this platform."""
         if os.name == "nt":
             return demo_dir / ".venv" / "Scripts" / "python.exe"
         return demo_dir / ".venv" / "bin" / "python"
 
     def run_bootstrap(self, working_dir, check_call):
+        """Run the bootstrap cell from working_dir and return its scope and rendered HTML."""
         scope = {}
         rendered = []
         with (
@@ -105,6 +118,8 @@ class BootstrapEnvironmentTests(unittest.TestCase):
                     commands = []
 
                     def check_call(command):
+                        # Called only within this iteration, so the loop variables are current.
+                        # pylint: disable=cell-var-from-loop
                         commands.append(command)
                         if command[1:3] == ["-m", "venv"]:
                             self.assertEqual(command[-1], str(demo_dir / ".venv"))
@@ -216,6 +231,8 @@ class BootstrapEnvironmentTests(unittest.TestCase):
 
 
 class NotebookStructureTests(unittest.TestCase):
+    """Check the notebook's cells, rendering helpers, kernel and observability wiring."""
+
     def setUp(self):
         self.notebook = load_notebook()
         self.cells = cells_by_id(self.notebook)
@@ -311,7 +328,10 @@ class NotebookStructureTests(unittest.TestCase):
             index
             for index, node in enumerate(tree.body)
             if isinstance(node, ast.Assign)
-            and any(isinstance(target, ast.Name) and target.id == "accent_style" for target in node.targets)
+            and any(
+                isinstance(target, ast.Name) and target.id == "accent_style"
+                for target in node.targets
+            )
         )
         rendered = []
         scope = {
@@ -332,7 +352,8 @@ class NotebookStructureTests(unittest.TestCase):
                 )
             ),
             "demo_status": lambda value, enabled=None: (
-                f'<span style="color: {scope["demo_palette"]["enabled" if enabled else "disabled"]}; '
+                '<span style="color: '
+                f'{scope["demo_palette"]["enabled" if enabled else "disabled"]}; '
                 f'font-weight: 700;">{escape(str(value))}</span>'
             ),
             "escape": escape,
@@ -354,10 +375,8 @@ class NotebookStructureTests(unittest.TestCase):
                 },
             },
         }
-        exec(
-            compile(ast.Module(body=tree.body[start:], type_ignores=[]), str(NOTEBOOK_PATH), "exec"),
-            scope,
-        )
+        module = ast.Module(body=tree.body[start:], type_ignores=[])
+        exec(compile(module, str(NOTEBOOK_PATH), "exec"), scope)
         self.assertEqual(len(rendered), 1)
         html = rendered[0]
         self.assertIn('color: #2EA043; font-weight: 700;">Enabled', html)
@@ -371,7 +390,9 @@ class NotebookStructureTests(unittest.TestCase):
             f'color: #2EA043; font-weight: 700;">{len(EXPECTED_PINS)}</span> pins verified',
             html,
         )
-        self.assertIn('Agent Framework <span style="color: #2EA043; font-weight: 700;">1.19.0', html)
+        self.assertIn(
+            'Agent Framework <span style="color: #2EA043; font-weight: 700;">1.19.0', html
+        )
 
     def test_major_runtime_summaries_use_shared_color_renderer(self):
         for cell_id in (
@@ -423,11 +444,15 @@ class NotebookStructureTests(unittest.TestCase):
         self.assertIn("Select Another Kernel", kernel_check_source)
         self.assertIn("requirements_path = demo_dir / 'requirements.txt'", install_source)
         kernelspec = self.notebook["metadata"]["kernelspec"]
-        # The kernel the setup cell registers, or VS Code's picker entry for the demo's own .venv interpreter.
+        # The kernel the setup cell registers, or VS Code's picker entry for the
+        # demo's own .venv interpreter.
         registered = (kernelspec["name"], kernelspec["display_name"]) == (
             "agent-framework-sdk-demo", "Agent Framework SDK Demo (.venv)",
         )
-        picker = kernelspec["name"] == "python3" and kernelspec["display_name"].startswith(".venv (")
+        picker = (
+            kernelspec["name"] == "python3"
+            and kernelspec["display_name"].startswith(".venv (")
+        )
         self.assertEqual(kernelspec["language"], "python")
         self.assertTrue(registered or picker, kernelspec)
 
@@ -603,11 +628,14 @@ class NotebookStructureTests(unittest.TestCase):
 
 
 class AgentInstructionTests(unittest.TestCase):
+    """Check each agent's instructions, roles and group-chat turn order."""
+
     def setUp(self):
         self.notebook = load_notebook()
         self.cells = cells_by_id(self.notebook)
 
     def literal_assignment(self, cell_id, name):
+        """Return the literal value assigned to name at the top level of a cell."""
         tree = ast.parse(self.cells[cell_id])
         assignment = next(
             node
@@ -714,7 +742,8 @@ class AgentInstructionTests(unittest.TestCase):
         expected_by_role = {
             "ArchitectAgent": (
                 "DRAFT PLAN",
-                "Objective, Assumptions, Ordered Run of Show, Observability Checks, and Success Criteria",
+                "Objective, Assumptions, Ordered Run of Show, Observability Checks, "
+                "and Success Criteria",
                 "do not write the final polished runbook",
             ),
             "ReviewerAgent": (
@@ -761,7 +790,8 @@ class AgentInstructionTests(unittest.TestCase):
             }:
                 selected_nodes.append(node)
         scope = {"GroupChatState": object, "Message": object}
-        exec(compile(ast.Module(body=selected_nodes, type_ignores=[]), str(NOTEBOOK_PATH), "exec"), scope)
+        module = ast.Module(body=selected_nodes, type_ignores=[])
+        exec(compile(module, str(NOTEBOOK_PATH), "exec"), scope)
 
         state = SimpleNamespace(
             participants=OrderedDict(
@@ -822,6 +852,8 @@ class AgentInstructionTests(unittest.TestCase):
 
 
 class McpHelperTests(unittest.TestCase):
+    """Check the checked-in MCP helper keeps the notebook's observability contract."""
+
     def test_checked_in_helper_matches_observability_contract(self):
         source = MCP_HELPER_PATH.read_text(encoding="utf-8")
         tree = ast.parse(source)

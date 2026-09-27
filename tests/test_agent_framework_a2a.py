@@ -1,3 +1,5 @@
+"""A2A reviewer tests: protocol, child-process lifecycle, reviewer spec and notebook wiring."""
+
 import asyncio
 import ast
 import importlib
@@ -10,7 +12,6 @@ from unittest.mock import Mock, patch
 
 import httpx
 from a2a.client import A2ACardResolver
-from a2a.types import TaskState
 from agent_framework import (
     Agent,
     ChatResponse,
@@ -20,7 +21,7 @@ from agent_framework import (
     ResponseStream,
 )
 from agent_framework.orchestrations import GroupChatBuilder
-from opentelemetry import propagate, trace
+from opentelemetry import propagate
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -40,6 +41,8 @@ SPEC = server.ReviewerSpec(
 
 
 class FixedChatClient:
+    """Chat client double that returns a fixed review, optionally after a delay or an error."""
+
     additional_properties = {}
 
     def __init__(self, text="REVIEW\nNo material findings.\nVERDICT: ACCEPT"):
@@ -48,7 +51,8 @@ class FixedChatClient:
         self.error = None
         self.delay = 0
 
-    def get_response(self, messages, *, stream=False, **kwargs):
+    def get_response(self, messages, *, stream=False, **_kwargs):
+        """Record the messages and return the fixed text as a stream or a single response."""
         self.received.append(list(messages))
 
         async def updates():
@@ -62,7 +66,7 @@ class FixedChatClient:
                     role="assistant", contents=[Content.from_text(chunk)]
                 )
 
-        def finalizer(items):
+        def finalizer(_items):
             return ChatResponse(messages=[Message("assistant", [self.text])])
 
         if stream:
@@ -75,6 +79,8 @@ class FixedChatClient:
 
 
 class ReviewerProtocolTests(unittest.IsolatedAsyncioTestCase):
+    """Exercise the reviewer's A2A app in-process through an ASGI transport."""
+
     async def asyncSetUp(self):
         self.model = FixedChatClient()
         self.stop = Mock()
@@ -233,9 +239,13 @@ class ReviewerProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReviewerSubprocessTests(unittest.IsolatedAsyncioTestCase):
+    """Start the reviewer as a real child process without calling the model."""
+
     async def test_ephemeral_service_start_discovery_auth_and_cleanup_without_inference(
         self,
     ):
+        # The token and diagnostics file are private; check they never leak or stay open.
+        # pylint: disable=protected-access
         with patch.dict(
             os.environ,
             {
@@ -262,6 +272,8 @@ class ReviewerSubprocessTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReviewerSpecTests(unittest.TestCase):
+    """Validate reviewer specs and the review prompt built from conversation messages."""
+
     def test_spec_revision_changes_with_instructions_but_not_auth(self):
         edited = server.ReviewerSpec(
             name=SPEC.name,
@@ -311,6 +323,8 @@ class ReviewerSpecTests(unittest.TestCase):
 
 
 class A2ANotebookTests(unittest.TestCase):
+    """Check the notebook cells that wire the remote reviewer into the group chat."""
+
     def setUp(self):
         notebook_path = DEMO_DIR / "zolab-agent-framework-sdk-win11.ipynb"
         self.notebook = json.loads(notebook_path.read_text(encoding="utf-8"))

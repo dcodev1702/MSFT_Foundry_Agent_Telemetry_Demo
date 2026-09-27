@@ -10,6 +10,8 @@
 #           arguments, notebook output, task metadata, or committed files.
 # =============================================================================
 
+"""Client that starts, authenticates, invokes and closes the separate A2A reviewer."""
+
 import asyncio
 import json
 import logging
@@ -119,7 +121,10 @@ class RemoteReviewer(A2AAgent):
         Awaitable[AgentResponse[Any]]
         | ResponseStream[AgentResponseUpdate, AgentResponse[Any]]
     ):
-        """Stream the remote review; the final response requires a completed task with an artifact."""
+        """Stream the remote review.
+
+        The final response requires a completed task with an artifact.
+        """
         self.last_task = None
         active_session = session or self.create_session()
         # A2AAgent sends only the last message; carry the complete review context.

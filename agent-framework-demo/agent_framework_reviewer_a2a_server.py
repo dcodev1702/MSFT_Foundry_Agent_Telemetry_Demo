@@ -14,6 +14,8 @@
 #           demo only. Tasks are in memory and disappear when the process stops.
 # =============================================================================
 
+"""Authenticated A2A server that hosts the notebook's ReviewerAgent."""
+
 import asyncio
 import hashlib
 import hmac
@@ -180,6 +182,7 @@ class BoundedReviewerExecutor(A2AExecutor):
     """Run the reviewer with a hard deadline so a stalled model call ends the task."""
 
     async def execute(self, context, event_queue) -> None:
+        """Run the review, ending the task if it exceeds REVIEW_TIMEOUT_SECONDS."""
         # Cancellation is translated to a terminal canceled task by A2AExecutor.
         async with asyncio.timeout(REVIEW_TIMEOUT_SECONDS):
             await super().execute(context, event_queue)
@@ -239,7 +242,7 @@ def create_app(
         agent_card=card,
     )
 
-    async def shutdown(request: Request) -> JSONResponse:
+    async def shutdown(_request: Request) -> JSONResponse:
         return JSONResponse(
             {"status": "stopping"}, background=BackgroundTask(stop_server)
         )

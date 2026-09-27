@@ -1,14 +1,20 @@
 """Linux edition of the Agent Framework SDK notebook, and checks shared by both editions."""
 
+# These tests run notebook cell source on purpose.
+# pylint: disable=exec-used
+
 import ast
+import configparser
+import glob
 import json
 import os
 import re
 import sys
+import sysconfig
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,8 +25,11 @@ NOTEBOOKS = (WINDOWS_NOTEBOOK, LINUX_NOTEBOOK)
 KERNEL_NAME = "agent-framework-sdk-demo-linux"
 KERNEL_DISPLAY = "Agent Framework SDK Demo (Linux, .venv-linux)"
 ASPIRE_CONTAINER = "zolab-agent-framework-aspire"
-PINNED_ASPIRE_IMAGE = re.compile(r"^mcr\.microsoft\.com/dotnet/aspire-dashboard:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$")
-# The only cells that differ from the Windows notebook; the Windows notebook's tests cover the rest.
+PINNED_ASPIRE_IMAGE = re.compile(
+    r"^mcr\.microsoft\.com/dotnet/aspire-dashboard:\d+\.\d+\.\d+@sha256:[0-9a-f]{64}$"
+)
+# The only cells that differ from the Windows notebook; the Windows notebook's tests
+# cover the rest.
 LINUX_CELLS = {
     "2ea36b16", "1bc8dbb9", "40b63ed3", "eba4152c", "e6f2c7e3", "beca7704",
     "dc65fb6a", "cc566261", "8ec9f476", "91a844a6", "0f3f5f40", "4dd2f39c",
@@ -37,10 +46,12 @@ MODULES = (
 
 
 def load(path):
+    """Return a parsed notebook."""
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def sources(notebook):
+    """Return a notebook's cell sources keyed by cell ID."""
     return {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
 
 
@@ -54,7 +65,7 @@ def run_aspire_cell(notebook_path, *, engine_ready=True, existing=None):
     def ok(stdout=""):
         return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
-    def fake_run(command, **kwargs):
+    def fake_run(command, **_kwargs):
         commands.append(command)
         action = command[1]
         if action == "info":
@@ -87,6 +98,8 @@ def run_aspire_cell(notebook_path, *, engine_ready=True, existing=None):
 
 
 class LinuxNotebookParityTests(unittest.TestCase):
+    """Check the Linux notebook mirrors the Windows notebook except for platform cells."""
+
     def setUp(self):
         self.linux, self.windows = load(LINUX_NOTEBOOK), load(WINDOWS_NOTEBOOK)
 
@@ -96,7 +109,8 @@ class LinuxNotebookParityTests(unittest.TestCase):
             [(cell["id"], cell["cell_type"]) for cell in self.windows["cells"]],
         )
         linux, windows = sources(self.linux), sources(self.windows)
-        self.assertEqual({cell_id for cell_id in linux if linux[cell_id] != windows[cell_id]}, LINUX_CELLS)
+        changed = {cell_id for cell_id in linux if linux[cell_id] != windows[cell_id]}
+        self.assertEqual(changed, LINUX_CELLS)
 
     def test_outputs_are_clean_and_the_linux_kernel_is_declared(self):
         for cell in self.linux["cells"]:
@@ -125,10 +139,16 @@ class LinuxNotebookParityTests(unittest.TestCase):
 
 
 class LinuxEnvironmentCellTests(unittest.TestCase):
+    """Run the Linux bootstrap and kernel-check cells with fake installers and interpreters."""
+
     def setUp(self):
         self.cells = sources(load(LINUX_NOTEBOOK))
 
-    def run_cell(self, cell_id, working_dir, *, check_call=None, executable=sys.executable, platform="linux"):
+    def run_cell(
+        self, cell_id, working_dir, *, check_call=None, executable=sys.executable,
+        platform="linux",
+    ):
+        """Run one Linux notebook cell from working_dir and return its rendered HTML."""
         rendered = []
         with (
             patch("pathlib.Path.cwd", return_value=working_dir),
@@ -155,17 +175,24 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
                     python.touch()
 
             html = self.run_cell("40b63ed3", repository, check_call=check_call)
-        self.assertEqual(commands[0], [sys.executable, "-m", "venv", str(demo_dir / ".venv-linux")])
+        self.assertEqual(
+            commands[0], [sys.executable, "-m", "venv", str(demo_dir / ".venv-linux")]
+        )
         self.assertEqual(commands[1][0], str(python))
-        self.assertEqual(commands[2][-4:], ["--name", KERNEL_NAME, "--display-name", KERNEL_DISPLAY])
+        self.assertEqual(
+            commands[2][-4:], ["--name", KERNEL_NAME, "--display-name", KERNEL_DISPLAY]
+        )
         self.assertIn("Created", html)
         self.assertIn(KERNEL_DISPLAY, html)
 
     def test_bootstrap_refuses_to_run_outside_linux(self):
         with TemporaryDirectory() as directory:
             (Path(directory) / "agent-framework-demo").mkdir()
-            with self.assertRaisesRegex(RuntimeError, "zolab-agent-framework-sdk-win11.ipynb on Windows"):
-                self.run_cell("40b63ed3", Path(directory), check_call=AssertionError, platform="win32")
+            windows_notebook = "zolab-agent-framework-sdk-win11.ipynb on Windows"
+            with self.assertRaisesRegex(RuntimeError, windows_notebook):
+                self.run_cell(
+                    "40b63ed3", Path(directory), check_call=AssertionError, platform="win32"
+                )
 
     def test_kernel_check_accepts_only_the_linux_demo_interpreter(self):
         with TemporaryDirectory() as directory:
@@ -173,32 +200,45 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
             python = demo_dir / ".venv-linux" / "bin" / "python"
             python.parent.mkdir(parents=True)
             python.touch()
-            self.assertIn("Notebook kernel verified", self.run_cell("e6f2c7e3", demo_dir, executable=str(python)))
+            html = self.run_cell("e6f2c7e3", demo_dir, executable=str(python))
+            self.assertIn("Notebook kernel verified", html)
+            other_python = str(Path(directory) / "other-python")
             with self.assertRaisesRegex(RuntimeError, re.escape(KERNEL_DISPLAY)):
-                self.run_cell("e6f2c7e3", demo_dir, executable=str(Path(directory) / "other-python"))
+                self.run_cell("e6f2c7e3", demo_dir, executable=other_python)
 
 
 class AspireDashboardCellTests(unittest.TestCase):
+    """Run both notebooks' Aspire Dashboard cells against a fake Docker CLI."""
+
     def test_both_notebooks_publish_a_pinned_dashboard_on_loopback_only(self):
         for notebook in NOTEBOOKS:
             with self.subTest(notebook=notebook.name):
                 commands, _, scope = run_aspire_cell(notebook)
                 run = next(command for command in commands if command[1] == "run")
-                published = [run[index + 1] for index, argument in enumerate(run) if argument == "-p"]
+                published = [
+                    run[index + 1] for index, argument in enumerate(run) if argument == "-p"
+                ]
                 self.assertEqual(len(published), 2)
-                self.assertTrue(all(mapping.startswith("127.0.0.1:") for mapping in published), published)
-                self.assertEqual({mapping.rsplit(":", 1)[1] for mapping in published}, {"18888", "18889"})
+                self.assertTrue(
+                    all(mapping.startswith("127.0.0.1:") for mapping in published), published
+                )
+                self.assertEqual(
+                    {mapping.rsplit(":", 1)[1] for mapping in published}, {"18888", "18889"}
+                )
                 self.assertRegex(run[-1], PINNED_ASPIRE_IMAGE)
                 self.assertTrue(scope["ASPIRE_DASHBOARD_RUNNING"])
                 self.assertEqual(scope["OTEL_EXPORTER_ENDPOINT"], "http://localhost:4317")
                 cleanup = sources(load(notebook))["81348edc"]
-                self.assertIn(f"globals().get('ASPIRE_IMAGE_REF', '{scope['ASPIRE_IMAGE_REF']}')", cleanup)
+                self.assertIn(
+                    f"globals().get('ASPIRE_IMAGE_REF', '{scope['ASPIRE_IMAGE_REF']}')", cleanup
+                )
 
     def test_a_container_from_another_image_is_recreated_and_a_pinned_one_is_reused(self):
         for notebook in NOTEBOOKS:
             with self.subTest(notebook=notebook.name):
                 commands, _, scope = run_aspire_cell(
-                    notebook, existing=("Up 5 minutes", "mcr.microsoft.com/dotnet/aspire-dashboard:latest"),
+                    notebook,
+                    existing=("Up 5 minutes", "mcr.microsoft.com/dotnet/aspire-dashboard:latest"),
                 )
                 actions = [command[1] for command in commands]
                 self.assertLess(actions.index("rm"), actions.index("run"))
@@ -219,18 +259,25 @@ class AspireDashboardCellTests(unittest.TestCase):
 
 
 class DocumentationTests(unittest.TestCase):
+    """Check notebooks and modules state their author, date, purpose and docstrings."""
+
     def test_notebooks_state_author_and_update_date(self):
         for notebook in NOTEBOOKS:
             with self.subTest(notebook=notebook.name):
                 intro = sources(load(notebook))["2ea36b16"]
-                self.assertRegex(intro, r"Author: dcodev1702 \(with GitHub Copilot assistance\) · Updated: \d{4}-\d{2}-\d{2}")
+                self.assertRegex(
+                    intro,
+                    r"Author: dcodev1702 \(with GitHub Copilot assistance\)"
+                    r" · Updated: \d{4}-\d{2}-\d{2}",
+                )
 
     def test_every_code_cell_starts_with_its_section_and_purpose(self):
         for notebook in NOTEBOOKS:
             for cell in load(notebook)["cells"]:
                 if cell["cell_type"] == "code":
                     with self.subTest(notebook=notebook.name, cell=cell["id"]):
-                        self.assertRegex("".join(cell["source"]).splitlines()[0], r"^# \d+(\.\d+)?\.? [A-Z].+\.$")
+                        first_line = "".join(cell["source"]).splitlines()[0]
+                        self.assertRegex(first_line, r"^# \d+(\.\d+)?\.? [A-Z].+\.$")
 
     def test_modules_have_headers_and_documented_top_level_definitions(self):
         for module in MODULES:
@@ -239,7 +286,9 @@ class DocumentationTests(unittest.TestCase):
                 self.assertIn(f"# File: {module}", source)
                 self.assertIn("# Author: dcodev1702 (with GitHub Copilot assistance)", source)
                 self.assertRegex(source, r"# Updated: \d{4}-\d{2}-\d{2}")
-                for node in ast.parse(source).body:
+                tree = ast.parse(source)
+                self.assertIsNotNone(ast.get_docstring(tree), f"{module}: module docstring")
+                for node in tree.body:
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                         self.assertIsNotNone(ast.get_docstring(node), f"{module}: {node.name}")
 
@@ -248,6 +297,50 @@ class DocumentationTests(unittest.TestCase):
         self.assertIn("if ($env:OS -eq 'Windows_NT')", script)
         self.assertIn("'.venv\\Scripts\\python.exe'", script)
         self.assertIn("'.venv-linux/bin/python'", script)
+
+
+class WorkspaceLintConfigTests(unittest.TestCase):
+    """Check .pylintrc lets VS Code's Pylint resolve this demo's separate environment."""
+
+    def setUp(self):
+        # Pylint reads INI files with these inline comment prefixes.
+        self.config = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
+        self.config.read(ROOT / ".pylintrc", encoding="utf-8")
+
+    def run_init_hook(self, search_path):
+        """Run the init-hook against a copy of search_path and return what it appended."""
+        pylint_config = ModuleType("pylint.config")
+        pylint_config.find_default_config_files = lambda: iter([ROOT / ".pylintrc"])
+        pylint = ModuleType("pylint")
+        pylint.config = pylint_config
+        path = list(search_path)
+        with (
+            patch.dict(sys.modules, {"pylint": pylint, "pylint.config": pylint_config}),
+            patch.object(sys, "path", path),
+        ):
+            exec(self.config["MAIN"]["init-hook"], {})
+        self.assertEqual(path[: len(search_path)], search_path)
+        return path[len(search_path):]
+
+    def test_demo_environment_is_appended_after_the_linting_interpreter(self):
+        if os.name == "nt":
+            site_packages = DEMO_DIR / ".venv" / "Lib" / "site-packages"
+        else:
+            site_packages = DEMO_DIR / ".venv-linux" / "lib" / "python3.*" / "site-packages"
+        appended = self.run_init_hook(["root-environment-site-packages"])
+        self.assertEqual(appended, [str(DEMO_DIR), *sorted(glob.glob(str(site_packages)))])
+        # Run from the demo environment, the hook must find that environment's packages.
+        if Path(sys.prefix).resolve().parent == DEMO_DIR:
+            appended_paths = {Path(entry).resolve() for entry in appended}
+            purelib = Path(sysconfig.get_paths()["purelib"]).resolve()
+            self.assertIn(purelib, appended_paths)
+
+    def test_lazy_agent_framework_exports_and_test_docstrings_are_configured(self):
+        self.assertEqual(self.config["TYPECHECK"]["ignored-modules"], "agent_framework")
+        no_docstring = re.compile(self.config["BASIC"]["no-docstring-rgx"])
+        self.assertTrue(no_docstring.match("test_helper_is_regenerated"))
+        self.assertTrue(no_docstring.match("_private_helper"))
+        self.assertIsNone(no_docstring.match("run_cell"))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,24 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Pylint and the separate environments
+
+- Add a workspace `.pylintrc`. VS Code's Pylint checks every file with the root
+  interpreter, so it reported import errors for the packages that only the Agent
+  Framework demo's environment installs. The file appends that environment
+  (`agent-framework-demo/.venv-linux`, or `.venv` on Windows) at the lowest search
+  priority, so root files still resolve their own packages first; neither
+  environment is changed.
+- Tell Pylint that `agent_framework` exports its names lazily through a module
+  `__getattr__`. Pylint reported `no-name-in-module` for them in both environments,
+  including in `notebook_support/workflow.py`.
+- Exempt `test_` methods from docstring checks, and fix the remaining findings in
+  the Agent Framework files: add module, class and helper docstrings, remove two
+  unused imports, mark the tests' intentional `exec`/`eval`, unused arguments and
+  protected access, and wrap long lines. The MCP helper's notebook template carries
+  the same docstring and comments. These files and `workflow.py` now report no
+  Pylint problems, and a test checks the `.pylintrc` search path.
+
 ### Notebook kernel selections
 
 - Record the VS Code kernel selections in the Linux notebook (`.venv-linux`) and

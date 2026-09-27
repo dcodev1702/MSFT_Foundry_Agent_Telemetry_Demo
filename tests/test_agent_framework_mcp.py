@@ -1,3 +1,8 @@
+"""MCP menu-server tests: generated helper, notebook cells, stdio transport and telemetry."""
+
+# These tests run notebook cell source and cell expressions on purpose.
+# pylint: disable=exec-used,eval-used
+
 import ast
 import asyncio
 import importlib.util
@@ -38,11 +43,14 @@ helper_spec.loader.exec_module(helper)
 
 
 def notebook_cells():
+    """Return the Windows notebook's cell sources keyed by cell ID."""
     notebook = json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
     return {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
 
 
 class McpTelemetryTests(unittest.IsolatedAsyncioTestCase):
+    """Check the MCP server span joins the caller's trace and flushes telemetry."""
+
     def setUp(self):
         self.exporter = InMemorySpanExporter()
         self.provider = TracerProvider()
@@ -51,6 +59,7 @@ class McpTelemetryTests(unittest.IsolatedAsyncioTestCase):
         self.tracer = self.provider.get_tracer("mcp-test")
 
     async def invoke_handler(self, handler):
+        """Instrument a server around handler and return its result for one tools/call."""
         server = Server("menu-test")
         server.request_handlers[types.CallToolRequest] = handler
         request = types.CallToolRequest.model_validate(
@@ -78,7 +87,7 @@ class McpTelemetryTests(unittest.IsolatedAsyncioTestCase):
         response = types.ServerResult(types.CallToolResult(content=[]))
         active_spans = []
 
-        async def handler(request):
+        async def handler(_request):
             active_spans.append(trace.get_current_span())
             return response
 
@@ -101,7 +110,7 @@ class McpTelemetryTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        async def handler(request):
+        async def handler(_request):
             return response
 
         self.assertIs(await self.invoke_handler(handler), response)
@@ -121,7 +130,7 @@ class McpTelemetryTests(unittest.IsolatedAsyncioTestCase):
         server = Server("offline-test")
         response = types.ServerResult(types.CallToolResult(content=[]))
 
-        async def handler(request):
+        async def handler(_request):
             return response
 
         server.request_handlers[types.CallToolRequest] = handler
@@ -170,6 +179,8 @@ class McpTelemetryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class McpVerificationCellTests(unittest.IsolatedAsyncioTestCase):
+    """Run the notebook's MCP verification cell against a fake client and test spans."""
+
     def setUp(self):
         self.source = notebook_cells()[VERIFICATION_CELL_ID]
         self.code = compile(
@@ -203,6 +214,7 @@ class McpVerificationCellTests(unittest.IsolatedAsyncioTestCase):
         }
 
     async def run_cell(self):
+        """Run the verification cell with the test tracer provider installed."""
         with patch("opentelemetry.trace.get_tracer_provider", return_value=self.provider):
             await eval(self.code, self.scope)
 
@@ -255,7 +267,7 @@ class McpVerificationCellTests(unittest.IsolatedAsyncioTestCase):
     async def test_slow_tool_is_bounded_by_the_call_timeout(self):
         real_timeout = asyncio.timeout
 
-        async def slow_tool(*args, **kwargs):
+        async def slow_tool(*_args, **_kwargs):
             await asyncio.sleep(1)
             return [Content.from_text(self.answer)]
 
@@ -279,6 +291,8 @@ class McpVerificationCellTests(unittest.IsolatedAsyncioTestCase):
 
 
 class McpClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    """Check the notebook starts, reuses and closes one MCP client."""
+
     def setUp(self):
         cells = notebook_cells()
         self.start_code = compile(
@@ -304,6 +318,8 @@ class McpClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
         factory = self.factory
 
         class FakeStdioTool:
+            """Stand-in for MCPStdioTool that returns the test's mock client."""
+
             def __new__(cls, *args, **kwargs):
                 return factory(*args, **kwargs)
 
@@ -330,7 +346,9 @@ class McpClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.client.connect.assert_awaited_once()
         self.assertIs(self.scope["mcp_client"], self.client)
         self.assertEqual(self.scope["mcp_start_status"], "Reused")
-        self.assertEqual(self.factory.call_args.kwargs["env"]["OTEL_SERVICE_INSTANCE_ID"], "test-session")
+        self.assertEqual(
+            self.factory.call_args.kwargs["env"]["OTEL_SERVICE_INSTANCE_ID"], "test-session"
+        )
         self.assertFalse(self.factory.call_args.kwargs["load_prompts"])
 
     async def test_legacy_process_requires_cleanup_before_starting_another(self):
@@ -394,7 +412,10 @@ class McpClientLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 
 class McpNotebookTransportTests(unittest.IsolatedAsyncioTestCase):
+    """Check the notebook's stdio transport keeps and replays the server's diagnostics."""
+
     def client_class(self, transport_factory):
+        """Build the notebook's NotebookMCPStdioTool class around a fake transport."""
         tree = ast.parse(notebook_cells()["91a844a6"])
         definition = next(
             node for node in tree.body
@@ -409,7 +430,8 @@ class McpNotebookTransportTests(unittest.IsolatedAsyncioTestCase):
             "TemporaryFile": TemporaryFile,
             "sys": sys,
         }
-        exec(compile(ast.Module(body=[definition], type_ignores=[]), str(NOTEBOOK_PATH), "exec"), scope)
+        module = ast.Module(body=[definition], type_ignores=[])
+        exec(compile(module, str(NOTEBOOK_PATH), "exec"), scope)
         return scope["NotebookMCPStdioTool"]
 
     async def test_transport_uses_real_stderr_handle_and_replays_diagnostics(self):
@@ -434,11 +456,12 @@ class McpNotebookTransportTests(unittest.IsolatedAsyncioTestCase):
         files = []
 
         @asynccontextmanager
-        async def transport(parameters, *, errlog):
+        async def transport(_parameters, *, errlog):
             files.append(errlog)
             errlog.write("startup failed")
             raise OSError("spawn failed")
-            yield
+            # The yield keeps this an async generator for asynccontextmanager.
+            yield  # pylint: disable=unreachable
 
         client = self.client_class(transport)(name="test", command=sys.executable)
         with redirect_stderr(io.StringIO()) as output:
@@ -450,7 +473,10 @@ class McpNotebookTransportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class McpGeneratedHelperTests(unittest.TestCase):
+    """Check the notebook regenerates the checked-in MCP helper exactly."""
+
     def generated_scope(self):
+        """Run the template cell up to the file write and return its namespace."""
         source = notebook_cells()["0a79b228"]
         tree = ast.parse(source)
         prefix = []

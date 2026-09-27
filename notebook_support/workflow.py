@@ -13,6 +13,8 @@ from opentelemetry.trace import Status, StatusCode
 
 @dataclass(frozen=True)
 class NotebookStep:
+    """One named workflow step and the sync or async notebook action it runs."""
+
     name: str
     action: Callable[[], None | Awaitable[None]]
 

@@ -263,6 +263,19 @@ diagnostics for notebooks, while keeping autocomplete/navigation and normal
 checks for `.py` files. This does not disable notebook execution errors or the
 regression suite. Machine-specific Python search paths remain local.
 
+The workspace [.pylintrc](.pylintrc) keeps the two environments separate when
+linting, too. VS Code's Pylint checks every file with the root interpreter, which
+does not have the Agent Framework demo's packages, so `.pylintrc` appends the
+demo's environment (`agent-framework-demo/.venv-linux` on Linux,
+`agent-framework-demo/.venv` on Windows) at the lowest search priority. Root files
+still resolve packages from the root environment first; the demo's modules and
+tests also resolve `a2a`, `httpx`, `mcp`, `starlette` and `uvicorn`. Nothing is
+installed in either environment. The file also tells Pylint that `agent_framework`
+exports its names lazily (Pylance reads the package's stubs instead) and exempts
+`test_` methods from docstring checks. After pulling, run **Pylint: Restart
+Server** from the Command Palette, or reopen a file, to refresh the **Problems**
+panel.
+
 ### Windows Dependency Matrix
 
 Reviewed on **2026-09-18** using the approved package feed and verified official

@@ -36,6 +36,8 @@
 #     Telemetry providers shut down before the Azure credential is closed.
 # =============================================================================
 
+"""RestaurantAgent MCP stdio server for the Agent Framework notebook demo."""
+
 import os
 import sys
 from typing import Annotated
@@ -71,10 +73,13 @@ def finish_telemetry(*, shutdown: bool = False) -> None:
             action = getattr(provider, action_name, None)
             if not callable(action):
                 raise RuntimeError(f"Provider does not support {action_name}")
+            # Pylint infers getattr's None default; callable() is checked above.
+            # pylint: disable-next=not-callable
             result = action() if shutdown else action(timeout_millis=10000)
             if result is False:
                 raise RuntimeError(f"{action_name} returned False")
-        except Exception as exc:
+        # Check every provider; the failures are raised together below.
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             errors.append(f"{signal_name}: {type(exc).__name__}: {exc}")
     if errors:
         raise RuntimeError(f"MCP telemetry {action_name} failed: " + "; ".join(errors))
