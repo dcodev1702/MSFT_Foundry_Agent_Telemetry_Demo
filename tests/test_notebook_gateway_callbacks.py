@@ -1,4 +1,4 @@
-"""LiteLLM logging hook that fills telemetry fields for the gateway's Foundry agent pass-through calls."""
+"""LiteLLM logging hook that fills the OpenTelemetry v2 span fields for the gateway's Foundry agent calls."""
 
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -70,14 +70,17 @@ class FoundryPassThroughEnrichmentTests(unittest.TestCase):
             kwargs, result, model_deployment="gpt-5.6-terra", cost_per_token=cost or FakeCost(),
         )
 
-    def test_responses_call_reports_provider_models_usage_cost_content_and_result(self):
+    def test_responses_call_fills_the_fields_litellm_otel_v2_reads(self):
         cost = FakeCost()
         request = {"input": "Tell me a story.", "conversation": "conv_1", "instructions": "Be brief."}
-        kwargs, result = self.enrich(passthrough_kwargs("responses", request, RESPONSE), {"response": "…"}, cost)
+        kwargs = passthrough_kwargs("responses", request, RESPONSE)
+        raw_messages = deepcopy(kwargs["messages"])
+        kwargs, result = self.enrich(kwargs, {"response": "…"}, cost)
         payload, hidden = kwargs["standard_logging_object"], kwargs["standard_logging_object"]["hidden_params"]
         self.assertEqual((kwargs["model"], kwargs["litellm_params"]["custom_llm_provider"]), ("gpt-5.6-terra", "azure_ai"))
+        # gen_ai.provider.name matches Foundry's own spans; LiteLLM model names keep its azure_ai provider ID.
         self.assertEqual((payload["model"], payload["model_id"], payload["custom_llm_provider"]),
-                         ("gpt-5.6-terra", "ZoDEfendersAgent-1702-backend", "azure_ai"))
+                         ("gpt-5.6-terra", "ZoDEfendersAgent-1702-backend", "microsoft.foundry"))
         usage = {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150,
                  "prompt_tokens_details": {"cached_tokens": 20}, "completion_tokens_details": {"reasoning_tokens": 10}}
         self.assertEqual(hidden, {
@@ -92,28 +95,35 @@ class FoundryPassThroughEnrichmentTests(unittest.TestCase):
         self.assertEqual((payload["prompt_tokens"], payload["completion_tokens"], payload["total_tokens"]), (120, 30, 150))
         self.assertEqual((payload["response_cost"], kwargs["response_cost"]), (0.75, 0.75))
         self.assertEqual(payload["metadata"]["usage_object"], usage)
-        self.assertEqual(payload["metadata"]["user_agent"], "OpenAI/Python 3.19.2")
-        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "Tell me a story."}])
-        self.assertEqual(kwargs["instructions"], "Be brief.")
-        self.assertEqual(kwargs["additional_args"]["complete_input_dict"], request)
-        self.assertEqual(json.loads(kwargs["original_response"]), RESPONSE)
-        self.assertEqual(
-            {key: result[key] for key in ("id", "model", "status", "output", "usage")},
-            {"id": "resp_test_001", "model": "gpt-5.6-terra-2026-07-09", "status": "completed",
-             "output": RESPONSE["output"], "usage": usage},
-        )
+        # gen_ai.input.messages: the instructions as a system message, then the input.
+        self.assertEqual(payload["messages"], [
+            {"role": "system", "parts": [{"type": "text", "content": "Be brief."}]},
+            {"role": "user", "parts": [{"type": "text", "content": "Tell me a story."}]},
+        ])
+        # gen_ai.output.messages, finish reasons, response ID and model.
+        self.assertEqual(payload["response"]["choices"], [{
+            "index": 0, "finish_reason": "stop",
+            "message": {"role": "assistant", "parts": [{"type": "text", "content": "Hi."}], "finish_reason": "stop"},
+        }])
+        self.assertEqual((payload["response"]["id"], payload["response"]["model"]),
+                         ("resp_test_001", "gpt-5.6-terra-2026-07-09"))
+        # The client's result and LiteLLM's own request fields are left alone.
+        self.assertEqual(result, {"response": "…"})
+        self.assertEqual(kwargs["messages"], raw_messages)
+        self.assertNotIn("original_response", kwargs)
+        self.assertEqual(kwargs["additional_args"], {})
 
-    def test_conversation_call_reports_the_agent_and_model_without_usage(self):
+    def test_conversation_call_records_the_agent_and_model_without_a_prompt(self):
         response = {"id": "conv_test_001", "object": "conversation", "created_at": 1, "metadata": {}}
-        kwargs, result = self.enrich(passthrough_kwargs("conversations", {}, response), {"response": "…"})
-        hidden = kwargs["standard_logging_object"]["hidden_params"]
+        kwargs, _ = self.enrich(passthrough_kwargs("conversations", {}, response), {"response": "…"})
+        payload = kwargs["standard_logging_object"]
+        hidden = payload["hidden_params"]
         self.assertEqual(kwargs["model"], "gpt-5.6-terra")
         self.assertEqual(hidden["litellm_model_name"], "azure_ai/gpt-5.6-terra")
         self.assertEqual((hidden["model_id"], hidden["usage_object"], hidden["response_cost"]),
                          ("ZoDEfendersAgent-1702-backend", None, 0.0))
-        self.assertEqual(kwargs["messages"], [{"role": "user", "content": "{}"}])
-        self.assertEqual((result["id"], result["object"]), ("conv_test_001", "conversation"))
-        self.assertNotIn("usage", result)
+        self.assertEqual(payload["messages"], [])
+        self.assertEqual((payload["response"]["id"], payload["response"]["choices"]), ("conv_test_001", []))
 
     def test_unpriced_model_keeps_usage_and_leaves_the_cost_unknown(self):
         kwargs, _ = self.enrich(
@@ -135,19 +145,44 @@ class FoundryPassThroughEnrichmentTests(unittest.TestCase):
 
     def test_response_text_is_parsed_when_litellm_kept_no_response_body(self):
         kwargs = passthrough_kwargs("responses", {"input": "Hi"}, None)
-        _, result = self.enrich(kwargs, {"response": json.dumps(RESPONSE)})
-        self.assertEqual((result["id"], result["usage"]["total_tokens"]), ("resp_test_001", 150))
+        kwargs, _ = self.enrich(kwargs, {"response": json.dumps(RESPONSE)})
+        payload = kwargs["standard_logging_object"]
+        self.assertEqual((payload["response"]["id"], payload["total_tokens"]), ("resp_test_001", 150))
 
-    def test_input_items_become_messages_and_approvals_keep_their_json(self):
+    def test_input_items_become_genai_messages_and_approvals_mcp_parts(self):
         approval = {"type": "mcp_approval_response", "approve": True, "approval_request_id": "mcpr_1"}
         messages = callbacks.input_messages({"input": [
             {"role": "user", "content": [{"type": "input_text", "text": "Query Sentinel."}]}, approval,
         ]})
         self.assertEqual(messages, [
-            {"role": "user", "content": [{"type": "text", "content": "Query Sentinel."}]},
-            {"role": "user", "content": json.dumps(approval)},
+            {"role": "user", "parts": [{"type": "text", "content": "Query Sentinel."}]},
+            {"role": "user", "parts": [{"type": "mcp", "content": approval}]},
         ])
-        self.assertIsNone(callbacks.input_messages({}))
+        self.assertEqual(callbacks.input_messages({}), [])
+
+    def test_tool_calls_and_approvals_become_tool_call_parts_with_finish_reasons(self):
+        call = {"id": "mcp_1", "type": "mcp_call", "server_label": "msft-learn", "name": "microsoft_docs_search",
+                "arguments": "{}", "output": "long tool result", "status": "completed"}
+        request = {"id": "mcpr_2", "type": "mcp_approval_request", "server_label": "msft-learn",
+                   "name": "microsoft_docs_search", "arguments": "{}"}
+        choice, = callbacks.output_choices({"status": "completed", "output": [call, request]})
+        self.assertEqual(choice["finish_reason"], "tool_call")
+        parts = choice["message"]["parts"]
+        # Tool output is left out, as the Azure AI Projects instrumentor leaves it out.
+        self.assertEqual(parts[0], {"type": "tool_call", "content": {
+            "type": "mcp_call", "id": "mcp_1", "name": "microsoft_docs_search", "server_label": "msft-learn",
+            "arguments": "{}", "status": "completed",
+        }})
+        self.assertEqual(parts[1]["content"]["type"], "mcp_approval_request")
+        text = [{"type": "message", "content": [{"type": "output_text", "text": "Partial."}]}]
+        for response, reason in (
+            ({"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}, "length"),
+            ({"status": "incomplete", "incomplete_details": {"reason": "content_filter"}}, "content_filter"),
+            ({"status": "failed"}, "error"),
+        ):
+            with self.subTest(reason=reason):
+                self.assertEqual(callbacks.output_choices({**response, "output": text})[0]["finish_reason"], reason)
+        self.assertEqual(callbacks.output_choices({"status": "completed", "output": []}), [])
 
     def test_hook_never_breaks_logging_and_is_the_configured_instance(self):
         hook = callbacks.foundry_agent_telemetry

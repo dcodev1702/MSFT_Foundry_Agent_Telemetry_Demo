@@ -29,15 +29,27 @@ SERVICE_CONFIG_FILES = {
     "litellm": ("config.yaml", "litellm_callbacks.py"),
     "otel-collector": ("otel-collector.yaml",),
 }
-# Collector rules that keep LiteLLM's OK status without App Insights storing it as ResultCode 1, which
-# the Foundry trace view flags as an error: agent-route server spans are typed HTTP, in-process spans
-# RPC, and any other OK span is reset to unset.
+# Collector rules that report LiteLLM's successful OpenTelemetry v2 spans as OK without App
+# Insights storing OK as ResultCode 1, which the Foundry trace view flags as an error: agent-route
+# requests are named after their operation and keep their HTTP status, other non-database spans are
+# typed RPC, and database spans stay unset.
 COLLECTOR_STATUS_RULES = (
-    'set(span.attributes["http.request.method"], "POST") where span.kind == SPAN_KIND_SERVER',
-    'set(span.attributes["rpc.system"], "litellm") where span.kind == SPAN_KIND_INTERNAL',
-    'set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK'
-    ' and span.attributes["http.request.method"] == nil and span.attributes["rpc.system"] == nil',
+    'set(span.attributes["http.route"], span.attributes["url.path"])'
+    ' where span.kind == SPAN_KIND_SERVER',
+    'set(span.attributes["rpc.system"], "litellm") where span.kind != SPAN_KIND_SERVER',
+    'set(span.status.code, STATUS_CODE_OK) where span.status.code == STATUS_CODE_UNSET'
+    ' and span.kind == SPAN_KIND_SERVER',
+    'set(span.status.code, STATUS_CODE_OK) where span.status.code == STATUS_CODE_UNSET'
+    ' and span.attributes["rpc.system"] == "litellm"',
 )
+# compose.yaml settings the running LiteLLM container needs for the demo's traces: OpenTelemetry
+# v2, prompts and results on its spans, and the stable HTTP attributes that Azure Monitor needs to
+# type its requests.
+LITELLM_TRACE_SETTINGS = {
+    "LITELLM_OTEL_V2": "true",
+    "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "span_only",
+    "OTEL_SEMCONV_STABILITY_OPT_IN": "http",
+}
 _COLLECTOR_STATUS_PROCESSOR = re.compile(r"processors:\s*\[[^\]]*\btransform/litellm_status\b")
 _EXPORT_FAILURE = re.compile(r"(?i)\terror\t|failed to export|exporting failed|encountered while exporting")
 NEON_REGION_NAMES = {
@@ -203,6 +215,11 @@ class _Container:
     image: str
     status: str
     started_at: datetime | None
+    env: tuple[str, ...] = ()
+
+    def environment(self) -> dict[str, str]:
+        """Return the container's environment variables, as Docker reports them."""
+        return dict(entry.split("=", 1) for entry in self.env if "=" in entry)
 
 
 def _docker_time(value: str) -> datetime | None:
@@ -228,11 +245,20 @@ def _compose_container(service: str, run: Callable[..., subprocess.CompletedProc
         return None
     container_id, image, status = (lines[0].split("\t") + ["", ""])[:3]
     inspected = run(
-        ["docker", "inspect", "--format", "{{.State.StartedAt}}", container_id],
+        ["docker", "inspect", "--format", "{{.State.StartedAt}} {{json .Config.Env}}",
+         container_id],
         capture_output=True, text=True, timeout=10,
     )
-    started_at = _docker_time(inspected.stdout) if inspected.returncode == 0 else None
-    return _Container(container_id, image, status, started_at)
+    inspect_output = inspected.stdout.strip() if inspected.returncode == 0 else ""
+    started, _, env_json = inspect_output.partition(" ")
+    try:
+        env = json.loads(env_json) if env_json else []
+    except ValueError:
+        env = []
+    return _Container(
+        container_id, image, status, _docker_time(started) if started else None,
+        tuple(entry for entry in env if isinstance(entry, str)) if isinstance(env, list) else (),
+    )
 
 
 def _config_changed_since_start(container: _Container, config_file: Path) -> bool:
@@ -242,12 +268,21 @@ def _config_changed_since_start(container: _Container, config_file: Path) -> boo
 
 
 def collector_normalizes_litellm_status(config_file: Path) -> bool:
-    """Return whether the Collector config maps LiteLLM's OK span status for Azure Monitor before export."""
+    """Return whether the Collector config names LiteLLM's requests and maps its OK status."""
     try:
         text = config_file.read_text(encoding="utf-8")
     except OSError:
         return False
     return all(rule in text for rule in COLLECTOR_STATUS_RULES) and _COLLECTOR_STATUS_PROCESSOR.search(text) is not None
+
+
+def litellm_trace_settings_missing(container: _Container) -> list[str]:
+    """Return the LITELLM_TRACE_SETTINGS that the running LiteLLM container lacks, as KEY=value."""
+    environment = container.environment()
+    return [
+        f"{key}={value}" for key, value in LITELLM_TRACE_SETTINGS.items()
+        if environment.get(key, "").strip().lower() != value
+    ]
 
 
 def check_gateway_telemetry(
@@ -258,9 +293,10 @@ def check_gateway_telemetry(
     collector_config = gateway_dir / SERVICE_CONFIG_FILES["otel-collector"][0]
     if not collector_normalizes_litellm_status(collector_config):
         raise RuntimeError(
-            f"{collector_config} does not map LiteLLM's OK span status for Azure Monitor, so the Foundry "
-            "trace view would flag every LiteLLM span as an error. Restore the transform/litellm_status "
-            "processor from the repository, then run gateway/start.sh."
+            f"{collector_config} lacks the transform/litellm_status rules that name LiteLLM's "
+            "agent requests and keep its OK span status from showing as an error in the Foundry "
+            "trace view. "
+            "Restore the processor from the repository, then run gateway/start.sh."
         )
     containers = {}
     for service, config_names in SERVICE_CONFIG_FILES.items():
@@ -283,6 +319,13 @@ def check_gateway_telemetry(
                     "runs the old settings. Run gateway/start.sh to apply them."
                 )
         containers[service] = container
+    missing = litellm_trace_settings_missing(containers["litellm"])
+    if missing:
+        raise RuntimeError(
+            f"The running litellm container lacks {', '.join(missing)} from gateway/compose.yaml, "
+            "so its spans would not use OpenTelemetry v2 with prompt capture. "
+            "Run gateway/start.sh to recreate it."
+        )
 
     export_failures = 0
     for container in containers.values():
@@ -312,7 +355,9 @@ def _collector_status(run: Callable[..., subprocess.CompletedProcess], gateway_d
     if _config_changed_since_start(container, config_file):
         return f"⚠️ {summary}; config changed, run gateway/start.sh"
     if not collector_normalizes_litellm_status(config_file):
-        return f"⚠️ {summary}; LiteLLM spans show as errors in Foundry traces"
+        return (
+            f"⚠️ {summary}; LiteLLM status rules missing, run gateway/start.sh after restoring them"
+        )
     state = "✅" if container.status.startswith("Up") else "⚠️"
     return f"{state} {summary} → App Insights"
 

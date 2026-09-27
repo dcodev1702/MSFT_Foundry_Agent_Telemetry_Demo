@@ -1,9 +1,22 @@
-"""LiteLLM logging hook that describes the gateway's Foundry agent calls in LiteLLM's own spans.
+"""LiteLLM logging hook that describes the gateway's Foundry agent calls in LiteLLM's OTel v2 spans.
 
-Generic pass-through routes give LiteLLM no provider, model, usage or result, so its spans report
-``gen_ai.system=Unknown``, ``gen_ai.request.model=unknown`` and empty ``hidden_params``. LiteLLM runs
+Generic pass-through routes give LiteLLM no provider, model, usage or result, so its ``chat`` span
+would carry no model, the raw request body as the prompt and no output. LiteLLM runs
 ``async_logging_hook`` after building its standard logging payload and before any success callback,
-including ``otel``, so this hook fills those fields from the Foundry request and response instead.
+including ``otel``. This hook fills the payload fields that LiteLLM's OpenTelemetry v2 mappers read,
+from the Foundry request and response:
+
+- ``model`` and ``custom_llm_provider``: the span name ``chat <model>``, ``gen_ai.request.model``
+  and ``gen_ai.provider.name``;
+- ``messages``: ``gen_ai.input.messages``, with the request's instructions as a system message;
+- ``response["choices"]``: ``gen_ai.output.messages`` and ``gen_ai.response.finish_reasons``;
+- token counts and ``metadata.usage_object``: ``gen_ai.usage.*``, including cached input tokens;
+- ``response_cost``: ``litellm.cost.total``;
+- ``hidden_params``: ``server.address``, ``server.port`` and ``litellm.provider.model``.
+
+Messages use the OpenTelemetry GenAI format, ``[{"role": ..., "parts": [...]}]``, with the part
+types that the Azure AI Projects instrumentor uses for Responses items, so Application Insights
+stores them in AppGenAIContent like the notebook's and Foundry's content.
 """
 
 from collections.abc import Callable, Mapping
@@ -19,9 +32,18 @@ except ImportError:  # Unit tests import this module without LiteLLM installed.
     CustomLogger = object
 
 ROUTE_PREFIX = "/foundry-agent/"
-# LiteLLM's provider ID for Microsoft Foundry. LiteLLM prices Foundry's Azure OpenAI models as azure/<model>.
-PROVIDER = "azure_ai"
+# gen_ai.provider.name on LiteLLM's span: the value that Foundry's own spans in the trace report.
+PROVIDER = "microsoft.foundry"
+# LiteLLM's provider ID for Microsoft Foundry, used in LiteLLM model names such as azure_ai/<model>.
+LITELLM_PROVIDER = "azure_ai"
+# LiteLLM prices Foundry's Azure OpenAI models as azure/<model>.
 PRICING_PROVIDER = "azure"
+_TEXT_PARTS = {"input_text", "output_text", "text"}
+# Tool and MCP item fields kept on output parts, as the Azure AI Projects instrumentor keeps them.
+_TOOL_FIELDS = (
+    "id", "call_id", "name", "server_label", "arguments", "approval_request_id", "approve",
+    "status", "error",
+)
 _AGENT_ENDPOINT = re.compile(
     r"^(?P<base>[^?#]*/agents/(?P<agent>[^/?#]+)/endpoint/protocols/openai)(?:/(?P<operation>[^/?#]+))?"
 )
@@ -51,33 +73,81 @@ def responses_usage_to_chat(usage: object) -> dict[str, Any] | None:
     return converted
 
 
-def _content_parts(content: object) -> object:
-    if not isinstance(content, list):
-        return content
+def _parts(content: object) -> list[dict[str, Any]]:
+    """Return Responses message content as OpenTelemetry GenAI message parts."""
+    if isinstance(content, str):
+        return [{"type": "text", "content": content}] if content else []
     parts = []
-    for part in content:
-        if isinstance(part, Mapping) and part.get("type") in {"input_text", "output_text", "text"}:
+    for part in content if isinstance(content, list) else []:
+        if not isinstance(part, Mapping):
+            continue
+        if part.get("type") in _TEXT_PARTS:
             parts.append({"type": "text", "content": part.get("text", "")})
+        elif part.get("type") == "refusal":
+            parts.append({"type": "text", "content": part.get("refusal", "")})
         else:
-            parts.append(part)
+            parts.append({"type": str(part.get("type") or "unknown"), "content": dict(part)})
     return parts
 
 
-def input_messages(request: Mapping[str, Any]) -> list[dict[str, Any]] | None:
-    """Return a Responses or Conversations request's input as chat-style messages."""
+def input_messages(request: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return a Responses or Conversations request's instructions and input as GenAI messages."""
+    messages = []
+    instructions = request.get("instructions")
+    if isinstance(instructions, str) and instructions.strip():
+        messages.append({"role": "system", "parts": [{"type": "text", "content": instructions}]})
     items = request.get("input", request.get("items"))
     if isinstance(items, str):
-        return [{"role": "user", "content": items}]
-    if not isinstance(items, list) or not items:
-        return None
-    messages = []
-    for item in items:
-        if isinstance(item, Mapping) and isinstance(item.get("role"), str) and "content" in item:
-            messages.append({"role": item["role"], "content": _content_parts(item["content"])})
+        items = [{"role": "user", "content": items}]
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        if isinstance(item.get("role"), str) and "content" in item:
+            messages.append({"role": item["role"], "parts": _parts(item["content"])})
         else:
-            # MCP approvals and other non-message items keep their full JSON.
-            messages.append({"role": "user", "content": json.dumps(item, default=str)})
+            # MCP approvals and other non-message items, whole, like the Projects instrumentor.
+            item_type = str(item.get("type") or "unknown")
+            part_type = "mcp" if item_type.startswith("mcp_") else item_type
+            messages.append({"role": "user", "parts": [{"type": part_type, "content": dict(item)}]})
     return messages
+
+
+def _finish_reason(response: Mapping[str, Any]) -> str | None:
+    status = response.get("status")
+    if status == "completed":
+        output = response.get("output") or []
+        waiting = any(
+            isinstance(item, Mapping) and item.get("type") == "mcp_approval_request"
+            for item in output
+        )
+        return "tool_call" if waiting else "stop"
+    if status == "incomplete":
+        reason = (response.get("incomplete_details") or {}).get("reason")
+        return "content_filter" if reason == "content_filter" else "length"
+    if status == "failed":
+        return "error"
+    return status if isinstance(status, str) else None
+
+
+def output_choices(response: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Return a Responses API response's output as one chat choice, the shape LiteLLM v2 reads."""
+    parts = []
+    for item in response.get("output") or []:
+        if not isinstance(item, Mapping):
+            continue
+        item_type = str(item.get("type") or "")
+        if item_type == "message":
+            parts.extend(_parts(item.get("content")))
+        elif item_type.startswith("mcp_") or item_type.endswith("_call"):
+            fields = {field: item[field] for field in _TOOL_FIELDS if item.get(field) is not None}
+            parts.append({"type": "tool_call", "content": {"type": item_type, **fields}})
+    if not parts:
+        return []
+    reason = _finish_reason(response)
+    message: dict[str, Any] = {"role": "assistant", "parts": parts}
+    if reason:
+        message["finish_reason"] = reason
+    return [{"index": 0, "finish_reason": reason, "message": message}]
 
 
 def _response_body(payload: Mapping[str, Any], result: object) -> dict[str, Any] | None:
@@ -145,24 +215,16 @@ def enrich_foundry_passthrough(
     if cost is None and usage is None:
         cost = payload.get("response_cost")
 
-    params = kwargs.setdefault("litellm_params", {})
-    params["custom_llm_provider"] = PROVIDER
+    kwargs.setdefault("litellm_params", {})["custom_llm_provider"] = LITELLM_PROVIDER
     if request_model:
         kwargs["model"] = request_model
         payload["model"] = request_model
     payload["custom_llm_provider"] = PROVIDER
     payload["model_id"] = endpoint["agent"]
-    if messages := input_messages(request):
-        kwargs["messages"] = messages
-    if isinstance(request.get("instructions"), str):
-        kwargs["instructions"] = request["instructions"]
-    # Feeds LiteLLM's raw_gen_ai_request span (llm.azure_ai.* request and response attributes).
-    additional_args = kwargs.get("additional_args")
-    if not isinstance(additional_args, dict):
-        additional_args = kwargs["additional_args"] = {}
-    additional_args.setdefault("complete_input_dict", dict(request))
+    # A request without input, such as creating a conversation, records no prompt.
+    payload["messages"] = input_messages(request)
     if response is not None:
-        kwargs["original_response"] = json.dumps(response, default=str)
+        payload["response"] = {**response, "choices": output_choices(response)}
 
     if usage is not None:
         payload.update(
@@ -173,10 +235,6 @@ def enrich_foundry_passthrough(
     if cost is not None:
         payload["response_cost"] = cost
         kwargs["response_cost"] = cost
-    headers = (params.get("proxy_server_request") or {}).get("headers") or {}
-    user_agent = next((value for key, value in headers.items() if str(key).lower() == "user-agent"), None)
-    if user_agent and not metadata.get("user_agent"):
-        metadata["user_agent"] = user_agent
 
     hidden = payload.get("hidden_params")
     if not isinstance(hidden, dict):
@@ -184,16 +242,12 @@ def enrich_foundry_passthrough(
     hidden.update(
         model_id=endpoint["agent"],
         api_base=endpoint["base"],
-        litellm_model_name=f"{PROVIDER}/{model}" if model else None,
+        litellm_model_name=f"{LITELLM_PROVIDER}/{model}" if model else None,
         usage_object=usage,
         response_cost=cost,
         litellm_overhead_time_ms=_overhead_ms(kwargs),
     )
 
-    if response is not None and isinstance(result, dict):
-        result.update({key: response[key] for key in ("id", "object", "model", "status", "output") if key in response})
-        if usage is not None:
-            result["usage"] = usage
     return kwargs, result
 
 

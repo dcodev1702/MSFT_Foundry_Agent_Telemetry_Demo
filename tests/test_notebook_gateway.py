@@ -36,9 +36,9 @@ from notebook_support.agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, responses_url,
 )
 from notebook_support.gateway import (
-    COLLECTOR_STATUS_RULES, SERVICE_CONFIG_FILES, GatewayConfig, check_gateway_ready, check_gateway_telemetry,
-    collector_normalizes_litellm_status, configure_agent_gateway, gateway_infrastructure_status, gateway_mode,
-    load_gateway_config,
+    COLLECTOR_STATUS_RULES, LITELLM_TRACE_SETTINGS, SERVICE_CONFIG_FILES, GatewayConfig, check_gateway_ready,
+    check_gateway_telemetry, collector_normalizes_litellm_status, configure_agent_gateway,
+    gateway_infrastructure_status, gateway_mode, load_gateway_config,
 )
 from notebook_support.observability import build_observability_queries, render_observability_report
 from test_notebook_observability import RUN_ID, passing_coverage, report_results
@@ -84,9 +84,13 @@ def write_gateway_dir(directory, *, normalize_status=True):
     return gateway_dir
 
 
-def fake_docker(containers, *, started_at=None, logs=None, error=None):
+LITELLM_ENV = [f"{key}={value}" for key, value in LITELLM_TRACE_SETTINGS.items()] + ["LITELLM_LOG=INFO"]
+
+
+def fake_docker(containers, *, started_at=None, logs=None, error=None, litellm_env=None):
     """Answer the gateway's docker ps/inspect/logs calls; containers maps service -> "image\\tstatus"."""
     started_at = started_at or f"{datetime.now(timezone.utc) + timedelta(minutes=1):%Y-%m-%dT%H:%M:%S}.123456789Z"
+    environments = {"id-litellm": LITELLM_ENV if litellm_env is None else litellm_env}
     calls = []
 
     def run(command, **kwargs):
@@ -98,7 +102,8 @@ def fake_docker(containers, *, started_at=None, logs=None, error=None):
             listed = containers.get(service)
             return SimpleNamespace(returncode=0, stdout=f"id-{service}\t{listed}\n" if listed else "", stderr="")
         if command[:2] == ["docker", "inspect"]:
-            return SimpleNamespace(returncode=0, stdout=f"{started_at}\n", stderr="")
+            environment = json.dumps(environments.get(command[-1], []))
+            return SimpleNamespace(returncode=0, stdout=f"{started_at} {environment}\n", stderr="")
         if command[:2] == ["docker", "logs"]:
             return SimpleNamespace(returncode=0, stdout="", stderr=(logs or {}).get(command[-1], ""))
         raise AssertionError(f"unexpected command: {command}")
@@ -357,11 +362,30 @@ class GatewayTelemetryCheckTests(unittest.TestCase):
     def test_missing_status_rule_fails_before_docker_is_queried(self):
         with TemporaryDirectory() as directory:
             run = fake_docker(self.RUNNING)
-            with self.assertRaisesRegex(RuntimeError, "flag every LiteLLM span as an error"):
+            with self.assertRaisesRegex(RuntimeError, "lacks the transform/litellm_status rules"):
                 check_gateway_telemetry(
                     GATEWAY, gateway_dir=write_gateway_dir(directory, normalize_status=False), run=run,
                 )
         self.assertEqual(run.calls, [])
+
+    def test_litellm_container_without_otel_v2_settings_must_be_recreated(self):
+        stale = [entry for entry in LITELLM_ENV if not entry.startswith("LITELLM_OTEL_V2=")]
+        with TemporaryDirectory() as directory:
+            gateway_dir = write_gateway_dir(directory)
+            for environment, missing in (
+                (stale, "LITELLM_OTEL_V2=true"),
+                (LITELLM_ENV[1:] + ["LITELLM_OTEL_V2=false"], "LITELLM_OTEL_V2=true"),
+                ([], "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=span_only"),
+            ):
+                with self.subTest(missing=missing):
+                    run = fake_docker(self.RUNNING, litellm_env=environment)
+                    with self.assertRaisesRegex(RuntimeError, missing) as raised:
+                        check_gateway_telemetry(GATEWAY, gateway_dir=gateway_dir, run=run)
+                    self.assertIn("Run gateway/start.sh to recreate it", str(raised.exception))
+        # The stack in compose.yaml sets exactly these values.
+        environment = yaml.safe_load((ROOT / "gateway" / "compose.yaml").read_text(encoding="utf-8"))[
+            "services"]["litellm"]["environment"]
+        self.assertEqual({key: environment[key] for key in LITELLM_TRACE_SETTINGS}, LITELLM_TRACE_SETTINGS)
 
     def test_stopped_stale_or_unavailable_containers_fail_with_start_guidance(self):
         cases = {
@@ -425,10 +449,12 @@ class GatewayConfigFileTests(unittest.TestCase):
         self.assertEqual(environment["OTEL_RESOURCE_ATTRIBUTES"], "service.namespace=foundry-agent-demo")
         self.assertEqual(environment["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"], "span_only")
         self.assertEqual(environment["OTEL_ENVIRONMENT_NAME"], "${OTEL_ENVIRONMENT_NAME:-demo}")
-        self.assertEqual(environment["OTEL_IGNORE_CONTEXT_PROPAGATION"], "false")
+        # OpenTelemetry v2 tracing, and stable HTTP attributes on its FastAPI server span.
+        self.assertEqual(environment["LITELLM_OTEL_V2"], "true")
+        self.assertEqual(environment["OTEL_SEMCONV_STABILITY_OPT_IN"], "http")
+        # v1-only setting; v2 always joins the inbound traceparent.
+        self.assertNotIn("OTEL_IGNORE_CONTEXT_PROPAGATION", environment)
         self.assertTrue(environment["FOUNDRY_MODEL_DEPLOYMENT"].startswith("${FOUNDRY_MODEL_DEPLOYMENT:?"))
-        # Latest-experimental semconv would rename litellm_request and drop gen_ai.system.
-        self.assertNotIn("OTEL_SEMCONV_STABILITY_OPT_IN", environment)
         self.assertNotIn("APPLICATIONINSIGHTS_CONNECTION_STRING", environment)
         self.assertIn("otel-collector", litellm["depends_on"])
         self.assertRegex(collector["image"], r"^otel/opentelemetry-collector-contrib:[0-9.]+@sha256:[0-9a-f]{64}$")
@@ -443,15 +469,22 @@ class GatewayConfigFileTests(unittest.TestCase):
             "${env:APPLICATIONINSIGHTS_CONNECTION_STRING}",
         )
 
-    def test_collector_keeps_litellm_ok_status_without_error_result_codes(self):
+    def test_collector_reports_litellm_ok_status_without_error_result_codes(self):
         config_file = ROOT / "gateway" / "otel-collector.yaml"
         pipeline = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         statements = pipeline["processors"]["transform/litellm_status"]["trace_statements"]
         for rule in COLLECTOR_STATUS_RULES:
             self.assertTrue(any(statement.startswith(rule) for statement in statements), rule)
-        # Only the POST-only agent routes are typed HTTP; nothing sets an error status to OK.
+        # Only the POST-only agent routes are renamed; database spans get no RPC hint and so no OK status.
         self.assertIn('"^/foundry-agent/(main|sentinel)/(conversations|responses)$"', statements[0])
+        self.assertIn('span.attributes["db.system.name"] == nil', statements[2])
+        self.assertIn('span.attributes["http.response.status_code"] < 400', statements[3])
+        # Nothing sets an error status to OK or resets an error.
         self.assertFalse(any("STATUS_CODE_ERROR" in statement for statement in statements))
+        self.assertTrue(all(
+            "span.status.code == STATUS_CODE_UNSET" in statement
+            for statement in statements if "span.status.code," in statement
+        ))
         self.assertEqual(
             pipeline["service"]["pipelines"]["traces"]["processors"], ["transform/litellm_status", "batch"],
         )
@@ -482,7 +515,8 @@ class GatewayObservabilityTests(unittest.TestCase):
     def test_gateway_view_joins_client_gateway_upstream_and_foundry_timings(self):
         query = self.queries["gateway"]
         self.assertIn('where IsGatewaySpan and Type == "AppRequests"', query)
-        self.assertIn('where IsGatewaySpan and Name == "litellm_request"', query)
+        # LiteLLM's OpenTelemetry v2 upstream-call span is chat <model>, found by its GenAI operation.
+        self.assertIn('where IsGatewaySpan and GenAiOperation == "chat"', query)
         self.assertIn('where AppRoleName == "responsesapi" and Name startswith "invoke_agent"', query)
         self.assertIn("GatewayOverheadMs=round(DurationMs - UpstreamMs, 1)", query)
 
@@ -563,7 +597,8 @@ class GatewayInfrastructureStatusTests(unittest.TestCase):
         )
         self.assertEqual(
             unnormalized["otel_collector"],
-            "⚠️ otelcol-contrib 0.161.0, Up 2 hours; LiteLLM spans show as errors in Foundry traces",
+            "⚠️ otelcol-contrib 0.161.0, Up 2 hours; LiteLLM status rules missing, "
+            "run gateway/start.sh after restoring them",
         )
 
     def test_unreachable_gateway_and_stopped_collector_are_marked(self):

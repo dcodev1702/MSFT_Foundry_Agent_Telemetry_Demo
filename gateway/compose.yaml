@@ -28,18 +28,21 @@ services:
       OTEL_ENDPOINT: http://otel-collector:4318/v1/traces
       OTEL_SERVICE_NAME: litellm-gateway
       OTEL_RESOURCE_ATTRIBUTES: service.namespace=foundry-agent-demo
+      # LiteLLM's OpenTelemetry v2 tracing: one trace per request with a server span, auth, the
+      # LLM call (chat <model>) and Neon spans, joined to the notebook's trace through traceparent.
+      LITELLM_OTEL_V2: "true"
+      # Stable HTTP attributes (http.request.method, url.path, http.response.status_code) on the
+      # server span, which Azure Monitor needs to store it as an HTTP request with its status code.
+      OTEL_SEMCONV_STABILITY_OPT_IN: http
       # deployment.environment on every LiteLLM span; LiteLLM's default is "production".
       OTEL_ENVIRONMENT_NAME: ${OTEL_ENVIRONMENT_NAME:-demo}
-      # Prompts and results as span attributes (the modes with events need a Collector logs pipeline).
+      # v2 records no prompts or results unless opted in: span_only writes them as span attributes
+      # (the modes with events would need a Collector logs pipeline).
       OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: span_only
-      # Keep joining the notebook's traces through the forwarded traceparent header.
-      OTEL_IGNORE_CONTEXT_PROPAGATION: "false"
       # Usage and content are on the spans; GenAI log events and metrics would need Collector
       # logs and metrics pipelines.
       LITELLM_OTEL_INTEGRATION_ENABLE_EVENTS: "false"
       LITELLM_OTEL_INTEGRATION_ENABLE_METRICS: "false"
-      # OTEL_SEMCONV_STABILITY_OPT_IN stays unset: gen_ai_latest_experimental renames litellm_request
-      # to "chat <model>" and drops gen_ai.system, which Section 6 and this demo rely on.
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./litellm_callbacks.py:/app/litellm_callbacks.py:ro

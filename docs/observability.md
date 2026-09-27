@@ -46,7 +46,7 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](../zolab-ai-agent-demo
 
 The telemetry path for this repo is:
 
-1. The notebook creates spans through MAF's native workflow instrumentation, OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and the existing explicit custom spans. `story-facts` has `story`, `facts` and `persistence` executors. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
+1. The notebook creates spans through MAF's native workflow instrumentation, OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and the existing explicit custom spans. `story-facts` runs its `story` and `facts` executors in parallel (a MAF fan-out from a `fan-out` dispatch executor tagged `app.workflow.dispatch`), then its `persistence` executor. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
 2. `configure_azure_monitor(...)` registers Azure Monitor exporters for the signals that remain enabled.
 3. The notebook retrieves the Application Insights connection string from the Foundry project at runtime by calling `project_client.telemetry.get_application_insights_connection_string()`.
 4. Azure Monitor sends the exported trace data to Application Insights.
@@ -76,7 +76,8 @@ In other words, Foundry gives the agent/operator view, while Azure Monitor gives
 
 With the optional [LiteLLM gateway](../README.md#optional-litellm-gateway-with-neon-linux),
 the Linux notebook's Responses calls pass through a LiteLLM proxy container on the
-Ubuntu 26.04 host. LiteLLM exports its own spans over OTLP/HTTP to an OpenTelemetry
+Ubuntu 26.04 host. LiteLLM exports its own OpenTelemetry v2 spans, including the
+prompts and results of its `chat <model>` span, over OTLP/HTTP to an OpenTelemetry
 Collector container, which forwards them with the `azure_monitor` exporter to the
 same Application Insights resource that the notebook and Foundry use. LiteLLM keeps
 its keys, users, teams and spend counters in a Neon Postgres database in AWS
@@ -92,11 +93,13 @@ illustrative:
 ![Gateway runtime sequence: the notebook calls LiteLLM, which checks Neon and forwards to the Foundry agent; LiteLLM, the Collector, Foundry and the notebook export spans to Azure Monitor, and Section 6 reads them back](../images/linux-gateway-runtime-dark.svg)
 
 The trace view shows one of those calls as `AppRequests` and `AppDependencies`
-store it, from a validated run on 2026-09-27: the facts step's Responses call that
-used the Microsoft Learn MCP tool. LiteLLM's server span is the only request row;
-Foundry's `invoke_agent` is its sibling under the notebook's `responses` span.
+store it, from a validated OpenTelemetry v2 run on 2026-09-27: the facts step's
+Responses call that used the Microsoft Learn MCP tool. LiteLLM's server span is the
+only request row; its Neon lookups nest under `auth`, and Foundry's `invoke_agent`
+is its sibling under the notebook's `responses` span. In that run the story and
+facts steps overlapped, so their gateway calls interleave in the run's trace.
 
-![Trace view of one gateway Responses call: the notebook's HTTP and responses spans, LiteLLM's server span with auth, postgres, litellm_request, raw_gen_ai_request and batch_write_to_db children, and Foundry's invoke_agent, chat and execute_tool spans, with roles, tables, types and a timing waterfall](../images/linux-gateway-trace-dark.svg)
+![Trace view of one gateway Responses call: the notebook's HTTP and responses spans, LiteLLM's server span with auth (and its postgres lookups), chat and batch_write_to_db children, and Foundry's invoke_agent, chat and execute_tool spans, with roles, tables, types and a timing waterfall](../images/linux-gateway-trace-dark.svg)
 
 ## Why This Brings Observability to Agents
 

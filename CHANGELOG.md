@@ -10,8 +10,54 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### LiteLLM OpenTelemetry v2 with prompt capture
+
+- Switch the LiteLLM gateway to LiteLLM's OpenTelemetry v2 tracing
+  (`LITELLM_OTEL_V2=true`), already in the pinned image. Each request is one server
+  span, `POST /foundry-agent/<agent>/<operation>`, with `auth <path>` (the Neon
+  `postgres get_*` lookups now nest under it), `chat <model>` for the call to the
+  Foundry agent, and `batch_write_to_db`. It replaces v1's `litellm_request` and
+  `raw_gen_ai_request` spans and its `hidden_params` and `metadata.*` attributes.
+- Opt in to prompt capture, which v2 leaves off by default
+  (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=span_only`), and give the
+  server span stable HTTP attributes (`OTEL_SEMCONV_STABILITY_OPT_IN=http`), which
+  Azure Monitor needs to store it as an HTTP request. Drop the v1-only
+  `OTEL_IGNORE_CONTEXT_PROPAGATION`.
+- Rework `gateway/litellm_callbacks.py` for the fields that v2 reads:
+  `gen_ai.provider.name=microsoft.foundry` (the value Foundry's own spans report),
+  the model, the instructions and input as OpenTelemetry GenAI messages, the output
+  text and MCP calls as `tool_call` parts, finish reasons, usage with cached tokens,
+  and cost. Application Insights stores the messages in `AppGenAIContent`.
+- Rework the Collector's `transform/litellm_status` rules: v2 leaves successful
+  spans unset, and the demo keeps reporting them OK without `ResultCode` 1. Agent
+  requests are named after their operation instead of the catch-all route
+  template, `auth` and `chat` get `rpc.system=litellm`, and Neon spans stay unset.
+- Section 3's telemetry check now also stops when the running LiteLLM container
+  lacks the v2 settings, and Section 6's gateway hops table reads the `chat` span.
+  A validated run passed Section 6 with 209 spans, none failed and none with
+  `ResultCode` 1.
+
+### Parallel story and facts steps
+
+- Run the independent story and facts steps in parallel with a MAF fan-out and
+  fan-in (`ParallelSteps` in `notebook_support/workflow.py`), then persistence,
+  in both the Linux and Windows notebooks. Their Foundry calls run in worker
+  threads that carry the OpenTelemetry context, and each step prints its messages
+  as one block. The workflow takes about as long as the slower step: 25.0 s
+  instead of 29.6 s in the validated run.
+- A `fan-out` executor tagged `app.workflow.dispatch` starts the parallel stage;
+  Section 6 treats it as workflow plumbing. If one step fails, the other's call
+  finishes before the workflow reports the failure, and persistence does not run.
+
+### Dependency files
+
+- Keep the requirements and constraints files rather than moving to
+  `pyproject.toml`; the README's **Dependency Profiles** section explains why.
+
 ### Linux gateway diagrams
 
+- Update the three diagrams for OpenTelemetry v2 and the parallel steps; the trace
+  view now shows a validated v2 call.
 - Add three diagrams in the style of the Agent Framework demo's. The architecture
   view shows the notebook and the LiteLLM and OpenTelemetry Collector containers on
   the Ubuntu 26.04 host, Neon Postgres in AWS Frankfurt, and the existing Foundry,

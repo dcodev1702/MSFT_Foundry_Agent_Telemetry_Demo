@@ -5,22 +5,24 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
-  # Azure Monitor derives ResultCode from the span status unless a span is HTTP- or RPC-typed, so
-  # LiteLLM's explicit OK status would be stored as ResultCode 1, which the Foundry trace view flags
-  # as an error. Keep LiteLLM's OK status and give the exporter protocol context instead:
-  # - the server span of the POST-only agent routes becomes the HTTP request "POST <path>", with
-  #   the HTTP status as ResultCode;
-  # - LiteLLM's in-process spans carry rpc.system=litellm, so ResultCode is 0 and names are kept.
-  # Other LiteLLM spans with OK status are reset to unset: its Neon spans (postgres,
-  # batch_write_to_db) are database-typed, and an RPC hint would replace that typing. Error
-  # statuses are never changed.
+  # LiteLLM's OpenTelemetry v2 spans leave a successful span's status unset; this demo reports OK, like
+  # the notebook's own spans. Azure Monitor derives ResultCode from the span status unless a span is
+  # HTTP- or RPC-typed, and would store OK as ResultCode 1, which the Foundry trace view flags as an
+  # error. So:
+  # - each agent-route request is named after its operation, "POST /foundry-agent/<agent>/<operation>",
+  #   instead of the catch-all route template, and reports its HTTP status as ResultCode;
+  # - LiteLLM's other non-database spans (auth, chat <model>) carry rpc.system=litellm, so ResultCode
+  #   is 0;
+  # - database spans (postgres, batch_write_to_db) keep the unset status, since Azure Monitor derives
+  #   their ResultCode from it. Error statuses are never changed.
   transform/litellm_status:
     error_mode: ignore
     trace_statements:
-      - set(span.attributes["http.request.method"], "POST") where span.kind == SPAN_KIND_SERVER and span.attributes["http.request.method"] == nil and IsMatch(span.attributes["url.path"], "^/foundry-agent/(main|sentinel)/(conversations|responses)$")
-      - set(span.attributes["http.route"], span.attributes["url.path"]) where span.kind == SPAN_KIND_SERVER and span.attributes["http.request.method"] == "POST" and IsMatch(span.attributes["url.path"], "^/foundry-agent/(main|sentinel)/(conversations|responses)$")
-      - set(span.attributes["rpc.system"], "litellm") where span.kind == SPAN_KIND_INTERNAL and span.attributes["rpc.system"] == nil
-      - set(span.status.code, STATUS_CODE_UNSET) where span.status.code == STATUS_CODE_OK and span.attributes["http.request.method"] == nil and span.attributes["rpc.system"] == nil
+      - set(span.attributes["http.route"], span.attributes["url.path"]) where span.kind == SPAN_KIND_SERVER and IsMatch(span.attributes["url.path"], "^/foundry-agent/(main|sentinel)/(conversations|responses)$")
+      - set(span.name, Concat([span.attributes["http.request.method"], span.attributes["http.route"]], " ")) where span.kind == SPAN_KIND_SERVER and IsMatch(span.attributes["http.route"], "^/foundry-agent/(main|sentinel)/(conversations|responses)$")
+      - set(span.attributes["rpc.system"], "litellm") where span.kind != SPAN_KIND_SERVER and span.attributes["rpc.system"] == nil and span.attributes["db.system.name"] == nil and span.attributes["http.request.method"] == nil
+      - set(span.status.code, STATUS_CODE_OK) where span.status.code == STATUS_CODE_UNSET and span.kind == SPAN_KIND_SERVER and span.attributes["http.response.status_code"] != nil and span.attributes["http.response.status_code"] < 400
+      - set(span.status.code, STATUS_CODE_OK) where span.status.code == STATUS_CODE_UNSET and span.attributes["rpc.system"] == "litellm"
   batch:
     timeout: 5s
 

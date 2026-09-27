@@ -46,6 +46,8 @@ let span_context = materialize(spans
     IsExecutor=Name == "executor.process" or Name startswith "executor.process "
 | extend IsNotebookRoot=IsRunTagged and coalesce(tobool(Properties["app.interaction.root"]), false),
     IsWorkflowRoot=IsRunTagged and coalesce(tobool(Properties["app.workflow.root"]), false),
+    // The executor that fans a parallel stage out is workflow plumbing, not an interaction.
+    IsWorkflowDispatch=IsRunTagged and coalesce(tobool(Properties["app.workflow.dispatch"]), false),
     TaggedInteraction=iff(IsRunTagged, tostring(Properties["app.interaction"]), ""),
     TaggedWorkflow=iff(IsRunTagged, tostring(Properties["app.workflow.name"]), ""),
     TaggedStep=iff(IsRunTagged, tostring(Properties["app.workflow.step"]), ""),
@@ -56,7 +58,8 @@ let span_context = materialize(spans
     IsGatewaySpan=AppRoleName endswith "litellm-gateway"
 | extend IsWorkflowPlumbing=Name startswith "workflow." or Name startswith "edge." or Name startswith "message."
         or (Name startswith "executor." and not(IsNotebookRoot)),
-    IsCriticalSpan=IsNotebookRoot or IsExecutor or IsResponseDependency or IsGenAiSpan or IsToolSpan or IsToolObservation
+    IsCriticalSpan=IsNotebookRoot or (IsExecutor and not(IsWorkflowDispatch)) or IsResponseDependency
+        or IsGenAiSpan or IsToolSpan or IsToolObservation
         or Name endswith "/responses" or Name == "responses" or Name startswith "responses.create"
         or GenAiOperation in ("responses", "responses.create", "invoke_agent")
         or Name == "invoke_agent" or Name startswith "invoke_agent "
@@ -309,8 +312,9 @@ correlated_spans
 | order by TimeGenerated asc, OperationId asc, SpanId asc
 | take {DETAIL_LIMIT}
 ''',
-        "gateway": scope + f'''let gateway_calls = correlated_spans
-| where IsGatewaySpan and Name == "litellm_request"
+        "gateway": scope + f'''// LiteLLM's OpenTelemetry v2 upstream call span: chat <model>.
+let gateway_calls = correlated_spans
+| where IsGatewaySpan and GenAiOperation == "chat"
 | summarize UpstreamMs=max(DurationMs) by OperationId, GatewayId=ParentId;
 let client_spans = correlated_spans
 | project OperationId, ClientId=Id, ClientSpan=Name, ClientMs=DurationMs;
