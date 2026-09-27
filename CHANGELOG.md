@@ -10,6 +10,27 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Automatic gateway refresh in Section 3
+
+- Section 3 of the Linux notebook now runs `gateway/start.sh` itself when that fixes
+  the gateway (`ensure_gateway_ready` in `notebook_support/gateway.py`): a Foundry
+  token with less than 10 minutes left, or a stopped or stale LiteLLM or Collector
+  container. It shows the script's output in the cell, reloads `gateway/.env`,
+  checks again, and continues with the refreshed gateway. Problems `start.sh`
+  cannot fix, such as missing Collector status rules or an unavailable Docker
+  engine, still stop the notebook with guidance.
+- The Azure CLI keeps returning its cached token until fewer than five minutes
+  remain (MSAL's expiry margin), so a token with 5 to 10 minutes left is waited
+  out first, at most about five minutes. Verified live: with 6 minutes left, the
+  check waited 1 min 41 s, then `start.sh` got a new token and recreated LiteLLM.
+- The script runs in its own process group, is stopped with everything it started
+  after 10 minutes or when the cell is interrupted, and gets the variables that
+  `compose.yaml` reads only from `gateway/.env`. A notebook run with the Collector
+  stopped restarted it from Section 3 and passed Section 6.
+- The README's new **Token refresh** section explains the token lifetime (60–90
+  minutes, set by Microsoft Entra) and why the demo refreshes instead of using a
+  longer token lifetime policy.
+
 ### Linux environment in pyproject.toml and uv.lock
 
 - Define the Linux notebook's `.venv-linux` in a root `pyproject.toml` (exact

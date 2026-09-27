@@ -36,9 +36,10 @@ from notebook_support.agent_endpoints import (
     AgentRuntimeConfig, AgentTarget, get_agent_openai_client, responses_url,
 )
 from notebook_support.gateway import (
-    COLLECTOR_STATUS_RULES, LITELLM_TRACE_SETTINGS, SERVICE_CONFIG_FILES, GatewayConfig, check_gateway_ready,
-    check_gateway_telemetry, collector_normalizes_litellm_status, configure_agent_gateway,
-    gateway_infrastructure_status, gateway_mode, load_gateway_config,
+    CLI_TOKEN_REUSE_MARGIN, COLLECTOR_STATUS_RULES, LITELLM_TRACE_SETTINGS, SERVICE_CONFIG_FILES,
+    GatewayConfig, GatewayStartRequired, check_gateway_ready, check_gateway_telemetry,
+    collector_normalizes_litellm_status, configure_agent_gateway, ensure_gateway_ready,
+    gateway_infrastructure_status, gateway_mode, load_gateway_config, run_gateway_start,
 )
 from notebook_support.observability import build_observability_queries, render_observability_report
 from test_notebook_observability import RUN_ID, passing_coverage, report_results
@@ -323,10 +324,20 @@ class GatewayReadinessTests(unittest.TestCase):
         self.assertEqual(calls, [("http://127.0.0.1:4000/health/readiness", 10)])
 
     def test_short_lived_or_unknown_token_fails_before_contacting_the_gateway(self):
-        for expires in (None, NOW + timedelta(minutes=9), NOW - timedelta(minutes=1)):
+        for expires, message in (
+            (None, "has no recorded expiry"), (NOW + timedelta(minutes=9), "expires in 9 min"),
+            (NOW - timedelta(minutes=1), "has expired"),
+        ):
             opener, calls = self.opener({"db": "connected"})
-            with self.subTest(expires=expires), self.assertRaisesRegex(RuntimeError, "gateway/start.sh"):
-                check_gateway_ready(self.gateway(expires), now=NOW, opener=opener)
+            with self.subTest(expires=expires):
+                with self.assertRaisesRegex(GatewayStartRequired, message) as raised:
+                    check_gateway_ready(self.gateway(expires), now=NOW, opener=opener)
+                # start.sh fixes it, so the notebook runs it; the wait depends on the time left.
+                self.assertTrue(raised.exception.token_problem)
+                self.assertEqual(
+                    raised.exception.token_remaining, None if expires is None else expires - NOW,
+                )
+                self.assertIn("gateway/start.sh", str(raised.exception))
             self.assertEqual(calls, [])
 
     def test_unready_unreachable_or_disconnected_gateway_fails_with_guidance(self):
@@ -335,11 +346,195 @@ class GatewayReadinessTests(unittest.TestCase):
             urllib.error.URLError("connection refused"),
         ):
             opener, _ = self.opener(error=error)
-            with self.subTest(error=type(error).__name__), self.assertRaisesRegex(RuntimeError, "gateway/start.sh"):
-                check_gateway_ready(self.gateway(NOW + timedelta(hours=1)), now=NOW, opener=opener)
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaisesRegex(GatewayStartRequired, "gateway/start.sh") as raised:
+                    check_gateway_ready(
+                        self.gateway(NOW + timedelta(hours=1)), now=NOW, opener=opener,
+                    )
+                self.assertFalse(raised.exception.token_problem)
         opener, _ = self.opener({"status": "healthy", "db": "disconnected"})
-        with self.assertRaisesRegex(RuntimeError, "Neon"):
+        with self.assertRaisesRegex(GatewayStartRequired, "Neon"):
             check_gateway_ready(self.gateway(NOW + timedelta(hours=1)), now=NOW, opener=opener)
+
+
+class GatewayAutoStartTests(unittest.TestCase):
+    """Section 3 runs gateway/start.sh itself when that fixes the gateway, then checks it again."""
+
+    def setUp(self):
+        self.directory = TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.gateway_dir = Path(self.directory.name) / "gateway"
+        self.gateway_dir.mkdir()
+        self.gateway = replace(GATEWAY, env_file=self.gateway_dir / ".env")
+        self.refreshed = replace(self.gateway, token_expires_at=NOW + timedelta(minutes=85))
+        self.calls, self.sleeps, self.log = [], [], []
+
+    def ensure(self, problems, **overrides):
+        """Run ensure_gateway_ready; problems holds the errors the checks raise, in call order."""
+        problems = list(problems)
+
+        def check_ready(gateway, **_kwargs):
+            self.calls.append(("ready", gateway))
+            problem = problems.pop(0) if problems else None
+            if problem is not None:
+                raise problem
+            return {"db": "connected", "token_minutes_remaining": 85}
+
+        def check_telemetry(gateway, **_kwargs):
+            self.calls.append(("telemetry", gateway))
+            return {"config": "current", "status_normalized": True, "export_failures": 0}
+
+        options = {
+            "gateway_dir": self.gateway_dir, "check_ready": check_ready,
+            "check_telemetry": check_telemetry, "start": lambda: self.calls.append(("start", None)),
+            "reload": lambda: self.refreshed, "sleep": self.sleeps.append, "log": self.log.append,
+        }
+        return ensure_gateway_ready(self.gateway, **(options | overrides))
+
+    @staticmethod
+    def token_problem(remaining):
+        """The error check_gateway_ready raises for a token with remaining time left."""
+        return GatewayStartRequired(
+            "The LiteLLM gateway's Foundry token has expired; a notebook run needs 10 min. "
+            "Run gateway/start.sh.", token_problem=True, token_remaining=remaining,
+        )
+
+    def test_a_healthy_gateway_is_used_without_running_start_sh(self):
+        result = self.ensure([None])
+        self.assertIs(result.gateway, self.gateway)
+        self.assertIsNone(result.started_because)
+        self.assertEqual([name for name, _ in self.calls], ["ready", "telemetry"])
+        self.assertEqual((self.sleeps, self.log), ([], []))
+
+    def test_an_expired_token_runs_start_sh_once_and_returns_the_refreshed_gateway(self):
+        result = self.ensure([self.token_problem(timedelta(minutes=-20))])
+        self.assertEqual([name for name, _ in self.calls], ["ready", "start", "ready", "telemetry"])
+        self.assertIs(result.gateway, self.refreshed)
+        self.assertIs(self.calls[-1][1], self.refreshed)
+        self.assertEqual(
+            result.started_because,
+            "The LiteLLM gateway's Foundry token has expired; a notebook run needs 10 min",
+        )
+        self.assertEqual(self.sleeps, [])
+        self.assertIn("Running gateway/start.sh:", "\n".join(self.log))
+
+    def test_a_token_in_the_cli_reuse_window_is_waited_out_before_start_sh(self):
+        for remaining, wait in (
+            (timedelta(minutes=9, seconds=59), 4 * 60 + 59 + 15),
+            (timedelta(minutes=7), 2 * 60 + 15), (CLI_TOKEN_REUSE_MARGIN, 15),
+            (timedelta(minutes=4, seconds=59), None), (None, None),
+        ):
+            with self.subTest(remaining=remaining):
+                self.calls.clear()
+                self.sleeps.clear()
+                self.ensure([self.token_problem(remaining)])
+                self.assertEqual(self.sleeps, [] if wait is None else [wait])
+                self.assertEqual(
+                    [name for name, _ in self.calls], ["ready", "start", "ready", "telemetry"],
+                )
+
+    def test_a_stopped_or_stale_container_runs_start_sh_without_waiting(self):
+        problem = GatewayStartRequired(
+            "The gateway's otel-collector container is not running, so litellm spans cannot reach "
+            "Application Insights. Run gateway/start.sh.",
+        )
+
+        def check_telemetry(gateway, **_kwargs):
+            self.calls.append(("telemetry", gateway))
+            if len([name for name, _ in self.calls if name == "telemetry"]) == 1:
+                raise problem
+            return {"config": "current", "status_normalized": True, "export_failures": 0}
+
+        result = self.ensure([], check_telemetry=check_telemetry)
+        self.assertEqual(
+            [name for name, _ in self.calls], ["ready", "telemetry", "start", "ready", "telemetry"],
+        )
+        self.assertEqual(self.sleeps, [])
+        self.assertIn("otel-collector container is not running", result.started_because)
+
+    def test_problems_start_sh_cannot_fix_or_a_custom_env_file_are_raised_without_running_it(self):
+        with self.assertRaisesRegex(RuntimeError, "Docker is unavailable"):
+            self.ensure([RuntimeError("Docker is unavailable, so trace export cannot be checked.")])
+
+        def expired(_gateway, **_kwargs):
+            raise self.token_problem(None)
+
+        custom = replace(self.gateway, env_file=Path(self.directory.name) / "custom.env")
+        with self.assertRaises(GatewayStartRequired):
+            ensure_gateway_ready(
+                custom, gateway_dir=self.gateway_dir, check_ready=expired,
+                check_telemetry=lambda _gateway, **_kwargs: {},
+                start=lambda: self.calls.append(("start", None)),
+                sleep=self.sleeps.append, log=self.log.append,
+            )
+        self.assertNotIn("start", [name for name, _ in self.calls])
+
+    def test_a_gateway_still_unusable_after_start_sh_is_reported_not_retried(self):
+        still_failing = [
+            self.token_problem(timedelta(minutes=-1)), self.token_problem(timedelta(minutes=7)),
+        ]
+        with self.assertRaisesRegex(RuntimeError, "finished, but the gateway is still not usable"):
+            self.ensure(still_failing)
+        self.assertEqual([name for name, _ in self.calls].count("start"), 1)
+
+
+@unittest.skipUnless(sys.platform == "linux", "gateway/start.sh is a Linux shell script")
+class GatewayStartScriptTests(unittest.TestCase):
+    """run_gateway_start runs the real start.sh process the way the notebook does."""
+
+    def write_script(self, directory, body):
+        """Write a fake gateway/start.sh with body and a compose.yaml that reads two variables."""
+        gateway_dir = Path(directory) / "gateway"
+        gateway_dir.mkdir()
+        (gateway_dir / "compose.yaml").write_text(
+            "services:\n  litellm:\n    environment:\n"
+            "      AZURE_AD_TOKEN: ${AZURE_AD_TOKEN:?run start.sh}\n"
+            "      OTEL_ENVIRONMENT_NAME: ${OTEL_ENVIRONMENT_NAME:-demo}\n", encoding="utf-8",
+        )
+        script = gateway_dir / "start.sh"
+        script.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
+        script.chmod(0o755)
+        return gateway_dir
+
+    def test_output_is_shown_and_compose_variables_come_only_from_the_env_file(self):
+        body = (
+            'echo "cwd=$(basename "$PWD")"\n'
+            'echo "token=${AZURE_AD_TOKEN:-unset} environment=${OTEL_ENVIRONMENT_NAME:-unset}"\n'
+            'echo "kept=${KEPT_VARIABLE:-unset}"\n'
+        )
+        log = []
+        shell = {
+            "AZURE_AD_TOKEN": "stale-shell-token", "OTEL_ENVIRONMENT_NAME": "shell",
+            "KEPT_VARIABLE": "yes",
+        }
+        with TemporaryDirectory() as directory, patch.dict(os.environ, shell):
+            gateway_dir = self.write_script(directory, body)
+            run_gateway_start(gateway_dir=gateway_dir, log=log.append)
+            self.assertEqual(log, [
+                f"      cwd={Path(directory).name}", "      token=unset environment=unset",
+                "      kept=yes",
+            ])
+
+    def test_a_failed_start_raises_with_its_last_output_and_sign_in_guidance(self):
+        body = (
+            'echo "Refreshing"\n'
+            'echo "ERROR: Please run az login to setup account." >&2\n'
+            "exit 3\n"
+        )
+        with TemporaryDirectory() as directory:
+            gateway_dir = self.write_script(directory, body)
+            with self.assertRaisesRegex(RuntimeError, r"start.sh failed \(exit code 3\)") as raised:
+                run_gateway_start(gateway_dir=gateway_dir, log=lambda line: None)
+        self.assertIn("az login --use-device-code", str(raised.exception))
+        self.assertIn("Please run az login to setup account.", str(raised.exception))
+
+    def test_a_hung_start_is_stopped_at_the_timeout(self):
+        with TemporaryDirectory() as directory:
+            gateway_dir = self.write_script(directory, 'echo "waiting"\nsleep 30\n')
+            with self.assertRaisesRegex(RuntimeError, "did not finish within"):
+                run_gateway_start(
+                    gateway_dir=gateway_dir, timeout=timedelta(seconds=0.5), log=lambda line: None,
+                )
 
 
 class GatewayTelemetryCheckTests(unittest.TestCase):
@@ -402,6 +597,11 @@ class GatewayTelemetryCheckTests(unittest.TestCase):
                     with self.assertRaisesRegex(RuntimeError, message) as raised:
                         check_gateway_telemetry(GATEWAY, gateway_dir=gateway_dir, run=fake_docker(containers, **options))
                     self.assertIn("gateway/start.sh", str(raised.exception))
+                    # start.sh starts or restarts containers, but it cannot start Docker itself.
+                    self.assertEqual(
+                        isinstance(raised.exception, GatewayStartRequired),
+                        message != "Docker is unavailable",
+                    )
 
 
 class GatewayConfigFileTests(unittest.TestCase):
@@ -806,12 +1006,16 @@ class LinuxNotebookGatewayWiringTests(unittest.TestCase):
         self.assertIn(
             "configure_agent_gateway(AgentRuntimeConfig.from_build_info(build_info), build_info)", source,
         )
-        self.assertIn("check_gateway_ready(agent_runtime.gateway)", source)
-        self.assertIn("if agent_runtime.gateway.virtual_key", source)
+        # Checks, and runs gateway/start.sh when that fixes the gateway, before any agent call.
+        self.assertIn("gateway_check = ensure_gateway_ready(agent_runtime.gateway)", source)
+        refreshed = "agent_runtime = replace(agent_runtime, gateway=gateway_check.gateway)"
+        self.assertIn(refreshed, source)
         self.assertLess(
-            source.index("check_gateway_ready(agent_runtime.gateway)"),
-            source.index("check_gateway_telemetry(agent_runtime.gateway)"),
+            source.index("ensure_gateway_ready(agent_runtime.gateway)"),
+            source.index(refreshed),
         )
+        self.assertNotIn("check_gateway_ready(", source)
+        self.assertIn("if agent_runtime.gateway.virtual_key", source)
         self.assertIn("agent_gateway_span_attributes = ", source)
         self.assertNotIn("gateway.api_key", source)
 

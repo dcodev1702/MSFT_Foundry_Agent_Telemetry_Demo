@@ -660,9 +660,9 @@ Linux notebook --(virtual key, end-user header, traceparent)--> LiteLLM 127.0.0.
   the notebook's LiteLLM identity ([Identity](#litellm-identity)); those lookups
   appear in Application Insights as short standalone requests, such as
   `GET /key/list`, outside the notebook's traces.
-  Rerun it before the token expires, typically after 60–90 minutes; the CLI can
-  reuse its cached token until about five minutes before expiry. Refreshing
-  recreates the container, so avoid it during a notebook run. Keys that `start.sh`
+  Section 3 of the notebook reruns it automatically when needed; see
+  [Token refresh](#token-refresh). A refresh recreates the LiteLLM container, so
+  avoid running it by hand during a notebook run. Keys that `start.sh`
   does not manage, such as a hand-added `NEON_API_KEY`, are kept when the file is
   rewritten. `gateway/smoke-test.sh` checks both routes.
 - **Neon:** LiteLLM keeps its state in Neon Postgres. The project, its location,
@@ -676,14 +676,17 @@ Linux notebook --(virtual key, end-user header, traceparent)--> LiteLLM 127.0.0.
   its `unless-stopped` policy.
 - **Notebook opt-in:** add `"agent_gateway": "litellm"` to the local build file or
   set `FOUNDRY_AGENT_GATEWAY=litellm`; the environment variable wins. Section 3
-  prints the route and stops before any agent call unless LiteLLM is ready, Neon
-  is connected and at least 10 minutes of token lifetime remain. It then checks
-  the trace path with `check_gateway_telemetry` and stops unless both containers
-  are running, neither container's mounted files changed after it started, the
-  Collector config keeps the status rules, and the LiteLLM container runs with
-  `LITELLM_OTEL_V2=true`, prompt capture and stable HTTP attributes from
-  `compose.yaml`; a container created before those settings must be recreated with
-  `start.sh`. It prints `Gateway telemetry` and warns,
+  prints the route, then checks the gateway before any agent call with
+  `ensure_gateway_ready`: LiteLLM is ready, Neon is connected, at least 10 minutes
+  of token lifetime remain, both containers are running, neither container's
+  mounted files changed after it started, the Collector config keeps the status
+  rules, and the LiteLLM container runs with `LITELLM_OTEL_V2=true`, prompt capture
+  and stable HTTP attributes from `compose.yaml`. When `gateway/start.sh` fixes the
+  problem, as it does for an expiring token or a stopped or stale container,
+  Section 3 runs it, shows its output and checks again
+  ([Token refresh](#token-refresh)); other problems, such as missing Collector
+  status rules or an unavailable Docker engine, stop the notebook with guidance.
+  It prints `Gateway telemetry` and warns,
   without stopping, about export failures logged in the last 30 minutes, then
   prints `Gateway identity`: the virtual key and end user, or a master-key
   fallback. The notebook keeps the Foundry SDK client and changes only its base
@@ -707,6 +710,39 @@ Linux notebook --(virtual key, end-user header, traceparent)--> LiteLLM 127.0.0.
   category, with prompts, results, token usage and cost), the OTEL Collector's
   status and export target, and Neon's status. LiteLLM's `postgres` and
   `batch_write_to_db` spans time its Neon queries. Direct mode shows `Not used`.
+
+#### Token refresh
+
+LiteLLM sends the same Microsoft Entra token for every call to Foundry, and reads
+it once, when its container starts. `start.sh` gets that token from the Azure CLI
+session. Entra gives it a lifetime of 60–90 minutes, and the Azure CLI keeps
+returning its cached token until fewer than five minutes remain, so running
+`start.sh` earlier returns the same token.
+
+Section 3 therefore refreshes the gateway itself when the token has less than the
+10 minutes a notebook run needs:
+
+- **Expired, or under 5 minutes left:** it runs `gateway/start.sh` at once, which
+  gets a new token and recreates the LiteLLM container with it.
+- **5 to 10 minutes left:** it first waits until the Azure CLI stops reusing the
+  token, at most about five minutes, then runs `start.sh`.
+- **A stopped or stale container:** it runs `start.sh` without waiting.
+
+`start.sh` output appears in the cell, after a `Gateway refresh` line that gives
+the reason. Section 3 then reloads `gateway/.env` and checks again; if the gateway
+is still not usable, it stops with the reason instead of retrying. If the Azure CLI
+session itself has expired, the error asks you to run `az login --use-device-code`
+in the host's terminal. A gateway configured with `FOUNDRY_AGENT_GATEWAY_ENV_FILE`
+outside `gateway/.env` is not refreshed automatically, because `start.sh` writes
+only `gateway/.env`.
+
+A longer token lifetime is not something the notebook or the Azure CLI can
+request. A Microsoft Entra administrator can set an access-token lifetime from
+10 minutes to one day with a
+[token lifetime policy](https://learn.microsoft.com/entra/identity-platform/configurable-token-lifetimes),
+for the whole organization or for specific service principals. That changes token
+lifetimes beyond this demo, and a longer-lived token in `gateway/.env` stays usable
+longer if it leaks, so the demo refreshes instead.
 
 #### LiteLLM identity
 
@@ -1117,7 +1153,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Section 6 reports failed spans after a successful retry | Expand failed spans and correlated exceptions; one failed operation can create several failed spans. Earlier attempts sharing the same run ID remain in the strict gate. Restart the kernel and rerun the runtime cells for a new run ID; do not disable the failure check |
 | Span health passes but content is waiting/not recorded | Content availability is independent of span health. Check the local content policy, service-side capture, table permissions and ingestion; rerun Section 6 to refresh. No content does not mean an empty answer |
 | `AppGenAIContent` query is denied or the table is unavailable | Obtain appropriate read access, including protected-table access when configured, or verify content routing. Errors remain explicit; the notebook does not silently fall back to legacy content attributes |
-| Section 3 reports that the LiteLLM gateway is not ready or its token expires too soon | Run `gateway/start.sh` on the host and rerun Section 3. If the token expiry does not change, the Azure CLI is reusing its cached token; wait until about five minutes before expiry and rerun it |
+| Section 3 reports that the LiteLLM gateway is still not usable after `gateway/start.sh` ran | Section 3 already ran `start.sh` for an expiring token or a stopped or stale container; read its output in the cell. Sign in again with `az login --use-device-code` if the Azure CLI session expired, fix the reported problem, then rerun Section 3 |
 | A gateway-routed run reports no GenAI chat spans | Keep `forward_headers: true` on both routes in `gateway/config.yaml` so `traceparent` reaches Foundry, then restart the gateway with `gateway/start.sh` |
 | Section 6 shows no LiteLLM gateway hops | Confirm the run used gateway mode and that `otel-collector` is running (`docker compose --project-directory gateway --env-file gateway/.env ps`). Rerun Section 6 after a minute if gateway spans are still being ingested |
 | The Foundry trace view marks LiteLLM spans as errors although Section 6 passes | For spans it does not recognize as HTTP or RPC, the Azure Monitor exporter stores LiteLLM's OK status as `ResultCode` 1. Keep the `transform/litellm_status` processor in `gateway/otel-collector.yaml` and run `gateway/start.sh`; new LiteLLM spans record `ResultCode` 0 or 200 and keep `STATUS_CODE_OK`, except the database-typed Neon spans, which are unset. Spans ingested earlier keep the flag |

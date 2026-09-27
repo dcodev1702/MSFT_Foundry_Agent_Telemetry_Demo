@@ -1,5 +1,6 @@
 """Optional local LiteLLM gateway for the notebook's Foundry agent traffic."""
 
+from collections import deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -7,7 +8,10 @@ import json
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
+import threading
+import time
 from typing import TYPE_CHECKING
 import urllib.error
 import urllib.request
@@ -22,8 +26,12 @@ GATEWAY_ROLES = ("main", "sentinel")
 ROUTE_PREFIX = "/foundry-agent"
 GATEWAY_DIR = Path(__file__).resolve().parents[1] / "gateway"
 DEFAULT_ENV_FILE = GATEWAY_DIR / ".env"
-# Azure CLI can reuse a cached token until about five minutes before expiry.
+# Foundry token lifetime a notebook run needs; the gateway sends one token for every call.
 MINIMUM_TOKEN_LIFETIME = timedelta(minutes=10)
+# The Azure CLI hands out its cached token until fewer than five minutes remain (MSAL's expiry
+# margin), so refreshing earlier than that returns the same token.
+CLI_TOKEN_REUSE_MARGIN = timedelta(minutes=5)
+START_SCRIPT_TIMEOUT = timedelta(minutes=10)
 COMPOSE_PROJECT = "foundry-agent-gateway"
 SERVICE_CONFIG_FILES = {
     "litellm": ("config.yaml", "litellm_callbacks.py"),
@@ -58,6 +66,20 @@ NEON_REGION_NAMES = {
 }
 _ENV_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _NEON_HOST = re.compile(r"^ep-[a-z0-9-]+(?:\.c-\d+)?\.(?P<region>[a-z]{2}-[a-z]+-\d)\.aws\.neon\.tech$")
+
+
+class GatewayStartRequired(RuntimeError):
+    """A gateway problem that running gateway/start.sh fixes, so the notebook can run it itself.
+
+    ``token_remaining`` is set when the Foundry token is the problem: how long it has left, or
+    None when no expiry is recorded.
+    """
+
+    def __init__(self, message: str, *, token_problem: bool = False,
+                 token_remaining: timedelta | None = None) -> None:
+        super().__init__(message)
+        self.token_problem = token_problem
+        self.token_remaining = token_remaining
 
 
 @dataclass(frozen=True)
@@ -175,25 +197,29 @@ def check_gateway_ready(
     now = datetime.now(timezone.utc) if now is None else now
     remaining = None if gateway.token_expires_at is None else gateway.token_expires_at - now
     if remaining is None or remaining < minimum_token_lifetime:
-        raise RuntimeError(
-            "The LiteLLM gateway's Foundry token expires too soon for a notebook run. "
-            "Run gateway/start.sh in this host's terminal, then rerun this cell. Azure CLI can "
-            "reuse its cached token until about five minutes before expiry; if the expiry does "
-            "not change, wait and run gateway/start.sh again."
+        left = (
+            "has no recorded expiry" if remaining is None
+            else "has expired" if remaining <= timedelta(0)
+            else f"expires in {int(remaining.total_seconds() // 60)} min"
+        )
+        raise GatewayStartRequired(
+            f"The LiteLLM gateway's Foundry token {left}; a notebook run needs "
+            f"{int(minimum_token_lifetime.total_seconds() // 60)} min. Run gateway/start.sh.",
+            token_problem=True, token_remaining=remaining,
         )
     try:
         with opener(f"{gateway.base_url}/health/readiness", timeout=10) as response:
             readiness = json.load(response)
     except urllib.error.HTTPError as error:
-        raise RuntimeError(
+        raise GatewayStartRequired(
             f"The LiteLLM gateway is not ready (HTTP {error.code}). Run gateway/start.sh."
         ) from error
     except OSError as error:
-        raise RuntimeError(
+        raise GatewayStartRequired(
             f"The LiteLLM gateway is unreachable at {gateway.base_url}. Run gateway/start.sh."
         ) from error
     if readiness.get("db") != "connected":
-        raise RuntimeError(
+        raise GatewayStartRequired(
             "The LiteLLM gateway reports that its Neon database is not connected. Run gateway/start.sh."
         )
     return {"db": readiness["db"], "token_minutes_remaining": int(remaining.total_seconds() // 60)}
@@ -308,20 +334,20 @@ def check_gateway_telemetry(
                 "Start Docker, then run gateway/start.sh."
             ) from error
         if container is None:
-            raise RuntimeError(
+            raise GatewayStartRequired(
                 f"The gateway's {service} container is not running, so {gateway.name} spans cannot "
                 "reach Application Insights. Run gateway/start.sh."
             )
         for config_name in config_names:
             if _config_changed_since_start(container, gateway_dir / config_name):
-                raise RuntimeError(
+                raise GatewayStartRequired(
                     f"gateway/{config_name} changed after the {service} container started, so it still "
                     "runs the old settings. Run gateway/start.sh to apply them."
                 )
         containers[service] = container
     missing = litellm_trace_settings_missing(containers["litellm"])
     if missing:
-        raise RuntimeError(
+        raise GatewayStartRequired(
             f"The running litellm container lacks {', '.join(missing)} from gateway/compose.yaml, "
             "so its spans would not use OpenTelemetry v2 with prompt capture. "
             "Run gateway/start.sh to recreate it."
@@ -339,6 +365,147 @@ def check_gateway_telemetry(
         lines = f"{logs.stdout or ''}\n{logs.stderr or ''}".splitlines()
         export_failures += sum(1 for line in lines if _EXPORT_FAILURE.search(line))
     return {"config": "current", "status_normalized": True, "export_failures": export_failures}
+
+
+def _compose_variables(gateway_dir: Path) -> set[str]:
+    """Return the variables compose.yaml interpolates; gateway/.env, not the shell, sets them."""
+    try:
+        text = (gateway_dir / "compose.yaml").read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)", text))
+
+
+def _kill_process_tree(process: subprocess.Popen) -> None:
+    """Kill start.sh and what it started, such as docker compose, which keep its output open."""
+    try:
+        if hasattr(os, "killpg"):
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
+    except ProcessLookupError:
+        pass
+
+
+def run_gateway_start(
+    *, gateway_dir: Path = GATEWAY_DIR, timeout: timedelta = START_SCRIPT_TIMEOUT,
+    log: Callable[[str], None] = print, popen: Callable[..., subprocess.Popen] = subprocess.Popen,
+) -> None:
+    """Run gateway/start.sh from the repository root, show its output, and raise if it fails.
+
+    Docker Compose prefers shell variables over its --env-file, so the variables that
+    compose.yaml reads are removed from the script's environment: gateway/.env stays the only
+    source, as when start.sh runs in a terminal. The script runs in its own process group, so a
+    timeout or an interrupted cell stops it together with the commands it started.
+    """
+    blocked = _compose_variables(gateway_dir)
+    environment = {key: value for key, value in os.environ.items() if key not in blocked}
+    tail: deque[str] = deque(maxlen=15)
+    with popen(
+        [str(gateway_dir / "start.sh")], cwd=gateway_dir.parent, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+        start_new_session=True,
+    ) as process:
+        killed = threading.Event()
+
+        def kill() -> None:
+            killed.set()
+            _kill_process_tree(process)
+
+        timer = threading.Timer(timeout.total_seconds(), kill)
+        timer.start()
+        try:
+            for line in process.stdout:
+                line = line.rstrip()
+                tail.append(line)
+                log(f"      {line}")
+            returncode = process.wait()
+        except BaseException:
+            # An interrupted cell (KeyboardInterrupt) must not leave start.sh running.
+            _kill_process_tree(process)
+            raise
+        finally:
+            timer.cancel()
+    if returncode == 0:
+        return
+    reason = (
+        f"did not finish within {int(timeout.total_seconds() // 60)} min" if killed.is_set()
+        else f"failed (exit code {returncode})"
+    )
+    output = "\n".join(tail)
+    hint = (
+        " Sign in with 'az login --use-device-code' in this host's terminal, then rerun this cell."
+        if re.search(r"(?i)az login|AADSTS|sign in|credential", output) else ""
+    )
+    raise RuntimeError(f"gateway/start.sh {reason}.{hint} Its last output:\n{output}")
+
+
+@dataclass(frozen=True)
+class GatewayCheck:
+    """A usable gateway, its readiness and telemetry status, and why start.sh ran, if it did."""
+
+    gateway: GatewayConfig
+    ready: dict[str, object]
+    telemetry: dict[str, object]
+    started_because: str | None = None
+
+
+def ensure_gateway_ready(  # pylint: disable=too-many-arguments
+    gateway: GatewayConfig, *, gateway_dir: Path = GATEWAY_DIR,
+    minimum_token_lifetime: timedelta = MINIMUM_TOKEN_LIFETIME,
+    check_ready: Callable[..., dict[str, object]] = check_gateway_ready,
+    check_telemetry: Callable[..., dict[str, object]] = check_gateway_telemetry,
+    start: Callable[[], None] | None = None,
+    reload: Callable[[], GatewayConfig] | None = None,
+    sleep: Callable[[float], None] = time.sleep, log: Callable[[str], None] = print,
+) -> GatewayCheck:
+    """Check the gateway and, when gateway/start.sh fixes the problem, run it once and check again.
+
+    start.sh refreshes the Foundry token and recreates or restarts stale containers. The Azure
+    CLI keeps returning its cached token until fewer than five minutes remain, so a token that
+    expires in five to ten minutes is first waited out; the wait is at most about five minutes.
+    """
+    def check(current: GatewayConfig) -> tuple[dict[str, object], dict[str, object]]:
+        ready = check_ready(current, minimum_token_lifetime=minimum_token_lifetime)
+        return ready, check_telemetry(current, gateway_dir=gateway_dir)
+
+    try:
+        ready, telemetry = check(gateway)
+        return GatewayCheck(gateway, ready, telemetry)
+    except GatewayStartRequired as error:
+        problem = error
+    default_env_file = (gateway_dir / ".env").resolve()
+    if gateway.env_file is None or gateway.env_file.resolve() != default_env_file:
+        # start.sh writes gateway/.env only; a gateway configured elsewhere is refreshed by hand.
+        raise problem
+    # The problem without its manual "Run gateway/start.sh" guidance, which this function follows.
+    reason = re.split(r"\s*Run gateway/start\.sh", str(problem))[0].rstrip(". ")
+    log(f"   🔄 {'Gateway refresh:':<24} {reason}.")
+    remaining = problem.token_remaining
+    if problem.token_problem and remaining is not None and remaining >= CLI_TOKEN_REUSE_MARGIN:
+        # Wait until the CLI stops reusing its token, plus a margin for clock skew.
+        wait = (remaining - CLI_TOKEN_REUSE_MARGIN + timedelta(seconds=15)).total_seconds()
+        log(
+            "      The Azure CLI reuses a token until "
+            f"{int(CLI_TOKEN_REUSE_MARGIN.total_seconds() // 60)} min before it expires, so "
+            f"waiting {int(wait // 60)} min {int(wait % 60)} s for a new one."
+        )
+        sleep(wait)
+    log("      Running gateway/start.sh:")
+    if start is None:
+        run_gateway_start(gateway_dir=gateway_dir, log=log)
+    else:
+        start()
+    refreshed = reload() if reload is not None else load_gateway_config(
+        {"FOUNDRY_AGENT_GATEWAY_ENV_FILE": str(default_env_file)}
+    )
+    try:
+        ready, telemetry = check(refreshed)
+    except GatewayStartRequired as error:
+        raise RuntimeError(
+            f"gateway/start.sh finished, but the gateway is still not usable: {error}"
+        ) from error
+    return GatewayCheck(refreshed, ready, telemetry, started_because=reason)
 
 
 def _collector_status(run: Callable[..., subprocess.CompletedProcess], gateway_dir: Path) -> str:
