@@ -10,6 +10,20 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Linux notebook environment, telemetry and prompt updates
+
+- Accept Python 3.14.7 or newer for an existing `.venv-linux` in the Linux
+  setup cell; the dependency cell still installs the pinned packages only on
+  Python 3.14.7.
+- Label the deployment table's gateway rows 🚦 LiteLLM Gateway (container),
+  🔭 OTEL Collector (container) and 🐘 Neon DB (cloud db).
+- Enable MAF's baseline GenAI message events in the Linux notebook
+  (`enable_message_events=True`); the Windows notebook keeps them disabled. MAF
+  emits them only for model calls it makes itself, while content capture is on.
+- Adjust the main and Sentinel agent instructions in both notebooks.
+- Add the Microsoft Sentinel VS Code extension's Python path to
+  `python.analysis.extraPaths` in `.vscode/settings.json`.
+
 ### Clean identity provisioning and the Linux notebook title
 
 - Look up the LiteLLM team, user and key through LiteLLM's list endpoints, which

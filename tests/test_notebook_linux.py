@@ -412,9 +412,15 @@ class LinuxEnvironmentCellTests(unittest.TestCase):
             root = self.make_root(directory, existing=True)
             commands = []
             probe = {"python": [3, 14, 4], "prefix": str(root / ".venv-linux"), "platform": "linux"}
-            with self.assertRaisesRegex(RuntimeError, "must be a Linux Python 3.14.7"):
+            with self.assertRaisesRegex(RuntimeError, "must use Linux Python 3.14.7 or newer"):
                 self.execute("fcc00444", root, runner=commands.append, probe=probe)
             self.assertEqual(commands, [])
+        with TemporaryDirectory() as directory:
+            root = self.make_root(directory, existing=True)
+            commands = []
+            probe = {"python": [3, 14, 8], "prefix": str(root / ".venv-linux"), "platform": "linux"}
+            self.execute("fcc00444", root, runner=commands.append, probe=probe)
+            self.assertEqual(len(commands), 3)
 
     def test_missing_uv_or_repository_fails_before_installation(self):
         with TemporaryDirectory() as directory:

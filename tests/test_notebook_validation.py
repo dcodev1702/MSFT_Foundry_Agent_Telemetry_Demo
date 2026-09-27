@@ -1067,6 +1067,9 @@ class TelemetryStatusOutputTests(unittest.TestCase):
 
 
 class TelemetryPolicyTests(unittest.TestCase):
+    # Whether the notebook asks MAF for its baseline GenAI message events; subclasses override it.
+    MAF_MESSAGE_EVENTS = False
+
     def setUp(self):
         self.environment = patch.dict(os.environ, {
             "OTEL_SERVICE_NAME": "foundry-agent-framework-demo",
@@ -1158,7 +1161,7 @@ class TelemetryPolicyTests(unittest.TestCase):
                 os.environ["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] = str(enabled)
                 self.initialize()
                 self.enable_maf.assert_called_once_with(
-                    enable_sensitive_data=enabled, enable_message_events=False, force=True,
+                    enable_sensitive_data=enabled, enable_message_events=self.MAF_MESSAGE_EVENTS, force=True,
                 )
                 self.assertEqual(os.environ["OTEL_LOGS_EXPORTER"], "none")
 

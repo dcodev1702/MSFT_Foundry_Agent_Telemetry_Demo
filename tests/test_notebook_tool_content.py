@@ -70,6 +70,8 @@ class ToolContentPolicyTests(unittest.TestCase):
 
 
 class LinuxTelemetryPolicyTests(validation_tests.TelemetryPolicyTests):
+    MAF_MESSAGE_EVENTS = True
+
     def setUp(self):
         with patch.object(validation_tests, "NOTEBOOK", NOTEBOOK):
             super().setUp()
