@@ -10,6 +10,13 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-27
 
+### Notebook kernel selections
+
+- Record the VS Code kernel selections in the Linux notebook (`.venv-linux`) and
+  the Windows Agent Framework notebook (`.venv`). The tests accept either the
+  kernel that a notebook's setup cell registers or VS Code's picker entry for the
+  same environment.
+
 ### Agent Framework demo audit
 
 - Pin the Aspire Dashboard image to `aspire-dashboard:13.5.2` by digest in both

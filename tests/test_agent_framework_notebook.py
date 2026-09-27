@@ -422,14 +422,14 @@ class NotebookStructureTests(unittest.TestCase):
         self.assertIn("Select Another Kernel", bootstrap_source)
         self.assertIn("Select Another Kernel", kernel_check_source)
         self.assertIn("requirements_path = demo_dir / 'requirements.txt'", install_source)
-        self.assertEqual(
-            self.notebook["metadata"]["kernelspec"],
-            {
-                "display_name": "Agent Framework SDK Demo (.venv)",
-                "language": "python",
-                "name": "agent-framework-sdk-demo",
-            },
+        kernelspec = self.notebook["metadata"]["kernelspec"]
+        # The kernel the setup cell registers, or VS Code's picker entry for the demo's own .venv interpreter.
+        registered = (kernelspec["name"], kernelspec["display_name"]) == (
+            "agent-framework-sdk-demo", "Agent Framework SDK Demo (.venv)",
         )
+        picker = kernelspec["name"] == "python3" and kernelspec["display_name"].startswith(".venv (")
+        self.assertEqual(kernelspec["language"], "python")
+        self.assertTrue(registered or picker, kernelspec)
 
     def test_observability_controls_are_explicit_and_safe_to_rerun(self):
         source = self.cells["50f0df38"]

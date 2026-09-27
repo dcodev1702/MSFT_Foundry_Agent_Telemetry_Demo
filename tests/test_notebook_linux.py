@@ -39,11 +39,14 @@ class LinuxNotebookTests(unittest.TestCase):
     def test_notebook_schema_and_code_cells_are_valid_and_unexecuted(self):
         notebook = nbformat.read(NOTEBOOK, as_version=4)
         nbformat.validate(notebook)
-        self.assertEqual(notebook.metadata.kernelspec.name, "ai-agent-demo-linux")
-        self.assertEqual(
-            notebook.metadata.kernelspec.display_name,
-            "AI Agent Demo (Linux, Python 3.14.7)",
+        kernelspec = notebook.metadata.kernelspec
+        # The kernel the setup cell registers, or VS Code's picker entry for the same .venv-linux interpreter.
+        registered = (kernelspec.name, kernelspec.display_name) == (
+            "ai-agent-demo-linux", "AI Agent Demo (Linux, Python 3.14.7)",
         )
+        picker = kernelspec.name == "python3" and kernelspec.display_name.startswith(".venv-linux (3.14")
+        self.assertEqual(kernelspec.language, "python")
+        self.assertTrue(registered or picker, dict(kernelspec))
         for cell in notebook.cells:
             if cell.cell_type == "code":
                 with self.subTest(cell=cell.id):
