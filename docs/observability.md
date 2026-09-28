@@ -46,7 +46,7 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](../zolab-ai-agent-demo
 
 The telemetry path for this repo is:
 
-1. The notebook creates spans through MAF's native workflow instrumentation, OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and the existing explicit custom spans. `story-facts` runs its `story` and `facts` executors in parallel (a MAF fan-out from a `fan-out` dispatch executor tagged `app.workflow.dispatch`), then its `persistence` executor. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
+1. The notebook creates spans through MAF's native workflow instrumentation, OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and the existing explicit custom spans. `story-facts` has `story`, `facts` and `persistence` executors. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
 2. `configure_azure_monitor(...)` registers Azure Monitor exporters for the signals that remain enabled.
 3. The notebook retrieves the Application Insights connection string from the Foundry project at runtime by calling `project_client.telemetry.get_application_insights_connection_string()`.
 4. Azure Monitor sends the exported trace data to Application Insights.
@@ -96,8 +96,7 @@ The trace view shows one of those calls as `AppRequests` and `AppDependencies`
 store it, from a validated OpenTelemetry v2 run on 2026-09-27: the facts step's
 Responses call that used the Microsoft Learn MCP tool. LiteLLM's server span is the
 only request row; its Neon lookups nest under `auth`, and Foundry's `invoke_agent`
-is its sibling under the notebook's `responses` span. In that run the story and
-facts steps overlapped, so their gateway calls interleave in the run's trace.
+is its sibling under the notebook's `responses` span.
 
 ![Trace view of one gateway Responses call: the notebook's HTTP and responses spans, LiteLLM's server span with auth (and its postgres lookups), chat and batch_write_to_db children, and Foundry's invoke_agent, chat and execute_tool spans, with roles, tables, types and a timing waterfall](../images/linux-gateway-trace-dark.svg)
 

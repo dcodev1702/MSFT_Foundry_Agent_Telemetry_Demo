@@ -912,9 +912,7 @@ spans with `ResultCode` 0 and `STATUS_CODE_OK`; and 57 `postgres get_*` and 11
 `batch_write_to_db` spans that kept the unset status. The 8 Responses calls'
 `chat` spans carried input and output messages, and every request, `chat` and
 `batch_write_to_db` span carried the virtual key alias `zolab-notebook-linux` and
-the team `Foundry Agent Demo`. The story and facts steps ran in parallel: both
-executors started at the same millisecond, story took 4.6 s and facts 24.9 s, and
-the whole workflow took 25.0 s instead of 29.6 s.
+the team `Foundry Agent Demo`.
 
 **Validated gateway traces (OpenTelemetry v1):** run `ac32240c-641c-4bac-ace4-70f5b1848ff2` passed
 Section 6 with LiteLLM tracing enabled. All 11 gateway requests (3 conversations
@@ -1027,35 +1025,9 @@ for per-cell span inventories, code examples and validation evidence.
 ### MAF Workflow Boundaries
 
 [notebook_support/workflow.py](notebook_support/workflow.py) uses the real MAF `WorkflowBuilder`
-and function executors. Section 5 runs the independent `story` and `facts` steps
-in parallel, then `persistence`; Section 5.1 runs a separate `sentinel` workflow
-with the same `demo.run_id` but its own trace.
-
-The parallel stage is a MAF fan-out and fan-in, declared with `ParallelSteps`:
-
-```python
-steps=[
-    ParallelSteps([
-        NotebookStep("story", generate_story_step),
-        NotebookStep("facts", retrieve_facts_step),
-    ]),
-    NotebookStep("persistence", persist_main_step),
-]
-```
-
-- A `fan-out` executor hands the run ID to both steps. Its span is tagged
-  `app.workflow.dispatch=true` and is workflow plumbing, not an interaction; the
-  `notebook.workflow` root records the stages in `app.workflow.stages`.
-- The steps' synchronous Foundry calls run in worker threads that carry the
-  OpenTelemetry context, so each step's spans stay under its own executor span in
-  the shared trace. `persistence` starts when both have finished.
-- Each step collects its messages with `buffered_output` and prints them as one
-  block when it finishes, so the two outputs never interleave.
-- If one step fails, the other's call still finishes, since a thread cannot be
-  interrupted; that step is then recorded as cancelled and persistence does not
-  run.
-- The workflow takes about as long as the slower step instead of the sum of both;
-  in the validated run below, 25.0 s instead of 29.6 s. This preserves independent notebook execution and Sentinel's existing
+and function executors. Section 5 runs `story -> facts -> persistence`; Section
+5.1 runs a separate `sentinel` workflow with the same `demo.run_id` but its own
+trace. This preserves independent notebook execution and Sentinel's existing
 OAuth/project connection. Set `RUN_SENTINEL_WORKFLOW=False` to skip it; an absent
 Sentinel agent also skips explicitly. A configured Sentinel failure is never
 treated as a skip.
@@ -1066,6 +1038,34 @@ stops the workflow without automatic retries or checkpoint replay. Persistence
 runs once per workflow execution, **not** once across manual cell reruns; use a
 fresh kernel/run ID for a clean validation run. Native MAF executor spans are
 the explicit interaction roots, while Foundry/HTTP spans remain descendants.
+
+<a id="section-5-call-limits"></a>
+
+**Section 5 call limits.** Section 5 calls Foundry through one client made with
+`with_options(timeout=RESPONSES_TIMEOUT_SECONDS, max_retries=0)`:
+
+- Each call waits at most **120 s** for a reply. The slowest reply seen so far
+  took 75 s; most take under 10 s. The OpenAI SDK's default waits 10 minutes.
+- Calls are not retried automatically. The SDK's default of two retries would
+  send the prompt or MCP approval again, running the agent a second time in the
+  same conversation, and after a stall could hold the cell for 30 minutes.
+- A call that times out stops the step with `The <story|facts> request got no
+  reply from Foundry within 120 s`. Its `responses` spans record
+  `error.type=openai.APITimeoutError`, and the interaction span records
+  `APITimeoutError`, so the trace shows how far the agent got.
+- The Foundry SDK patches the OpenAI client classes, so the bounded copy records
+  the same `create_conversation` and `responses` spans as the original client.
+  The notebook's own spans are unchanged.
+
+Section 5 briefly ran `story` and `facts` in parallel threads. That was rolled
+back after a run stalled: Foundry finished the facts step's MCP approval in
+4.7 s but never sent its HTTP reply, and LiteLLM waited its full 600 s
+`pass_through_request_timeout` (`Timeout on reading data from socket`). The
+parallel steps printed their output only when they finished, and their threads
+could not be interrupted, so the cell showed nothing and could only be stopped
+by restarting the kernel. The steps now run in order in the kernel's main thread,
+print as they go, and can be interrupted, and the call limit ends a stall after
+two minutes.
 
 ### MCP Tool Setup
 
@@ -1154,6 +1154,7 @@ See [`bot-app/runtime/README.md`](bot-app/runtime/README.md) for full bot docume
 | Span health passes but content is waiting/not recorded | Content availability is independent of span health. Check the local content policy, service-side capture, table permissions and ingestion; rerun Section 6 to refresh. No content does not mean an empty answer |
 | `AppGenAIContent` query is denied or the table is unavailable | Obtain appropriate read access, including protected-table access when configured, or verify content routing. Errors remain explicit; the notebook does not silently fall back to legacy content attributes |
 | Section 3 reports that the LiteLLM gateway is still not usable after `gateway/start.sh` ran | Section 3 already ran `start.sh` for an expiring token or a stopped or stale container; read its output in the cell. Sign in again with `az login --use-device-code` if the Azure CLI session expired, fix the reported problem, then rerun Section 3 |
+| Section 5 stops with `request got no reply from Foundry within 120 s` | Foundry did not reply in time; the agent may still have finished, and the trace shows how far it got. Rerun Section 5. In gateway mode, LiteLLM logs `Timeout on reading data from socket` when it gives up on Foundry after 600 s. See [Section 5 call limits](#section-5-call-limits) |
 | A gateway-routed run reports no GenAI chat spans | Keep `forward_headers: true` on both routes in `gateway/config.yaml` so `traceparent` reaches Foundry, then restart the gateway with `gateway/start.sh` |
 | Section 6 shows no LiteLLM gateway hops | Confirm the run used gateway mode and that `otel-collector` is running (`docker compose --project-directory gateway --env-file gateway/.env ps`). Rerun Section 6 after a minute if gateway spans are still being ingested |
 | The Foundry trace view marks LiteLLM spans as errors although Section 6 passes | For spans it does not recognize as HTTP or RPC, the Azure Monitor exporter stores LiteLLM's OK status as `ResultCode` 1. Keep the `transform/litellm_status` processor in `gateway/otel-collector.yaml` and run `gateway/start.sh`; new LiteLLM spans record `ResultCode` 0 or 200 and keep `STATUS_CODE_OK`, except the database-typed Neon spans, which are unset. Spans ingested earlier keep the flag |

@@ -11,7 +11,9 @@ from unittest.mock import Mock, patch
 from copy import deepcopy
 from tempfile import TemporaryDirectory
 
+import httpx2
 from azure.ai.projects.models import AgentIdentity, MCPTool, PromptAgentDefinition
+from openai import APITimeoutError
 from azure.monitor.opentelemetry._utils.configurations import _get_configurations
 from opentelemetry import context, trace
 from opentelemetry.sdk.resources import Resource
@@ -94,6 +96,7 @@ class ResponseValidationTests(unittest.TestCase):
             "project_name_value": "test-project", "main_tool_labels": ["msft-learn"],
             "main_agent_reference_payload": {}, "conversation_ids": {},
             "content_recording_enabled": False, "MAX_APPROVAL_ROUNDS": 1,
+            "APITimeoutError": APITimeoutError, "RESPONSES_TIMEOUT_SECONDS": 120,
             "make_baggage_context": lambda values: None,
             "build_responses_url": lambda client: "https://example.invalid/openai/v1/responses",
             "urlparse": urlparse,
@@ -138,6 +141,28 @@ class ResponseValidationTests(unittest.TestCase):
     def test_failed_response_with_text_still_raises(self):
         with self.assertRaisesRegex(RuntimeError, "did not complete"):
             self.run_responses([response("not a success", status="failed")])
+
+    def test_a_stalled_reply_fails_once_with_a_clear_error_and_the_timeout_recorded(self):
+        calls = []
+
+        def stalled(**kwargs):
+            calls.append(kwargs)
+            request = httpx2.Request("POST", "https://example.invalid/responses")
+            raise APITimeoutError(request=request)
+
+        client = SimpleNamespace(
+            conversations=SimpleNamespace(create=lambda: SimpleNamespace(id="conversation-test")),
+            responses=SimpleNamespace(create=stalled),
+        )
+        expected = "facts request got no reply from Foundry within 120 s"
+        with self.assertRaisesRegex(RuntimeError, expected) as raised:
+            self.scope["run_interaction_with_span"](
+                openai_client=client, interaction_name="facts", prompt="private prompt",
+            )
+        self.assertIsInstance(raised.exception.__cause__, APITimeoutError)
+        self.assertEqual(len(calls), 1)
+        # The interaction span keeps the real failure type for Section 6 and the trace views.
+        self.assertEqual(self.span.attributes["error.type"], "APITimeoutError")
 
     def test_content_is_not_recorded_when_disabled(self):
         self.run_responses([response("private completion")])

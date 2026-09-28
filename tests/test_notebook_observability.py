@@ -167,10 +167,6 @@ class QueryTests(unittest.TestCase):
         self.assertIn("WorkflowNames=make_set_if(WorkflowName, IsWorkflowRun", coverage)
         self.assertIn('WorkflowSteps=make_set_if(strcat(WorkflowName, "/", WorkflowStep)', coverage)
         self.assertIn('IsNotebookRoot and IsExecutor and CorrelationState == "correlated"', coverage)
-        # A parallel stage's fan-out executor is plumbing: tagged with the run, never a critical span.
-        self.assertIn('IsWorkflowDispatch=IsRunTagged and coalesce(tobool(Properties["app.workflow.dispatch"]), false)',
-                      coverage)
-        self.assertIn("IsCriticalSpan=IsNotebookRoot or (IsExecutor and not(IsWorkflowDispatch))", coverage)
 
     def test_previews_are_opt_in_and_size_limited(self):
         self.assertNotIn("InputPreview=", self.queries["content"])

@@ -216,7 +216,9 @@ class LinuxPresentationTests(unittest.TestCase):
         # Windows notebook's title color and weight.
         self.assertTrue(lines[0].startswith("# "))
         heading = re.sub(r"<[^>]+>", "", lines[0][2:]).strip()
-        self.assertEqual(unescape(heading), unescape(title.group(2)))
+        # The Linux title also names the LiteLLM gateway, which only this notebook has.
+        linux_title = unescape(title.group(2)).replace("AI Agents + ", "AI Agents + LiteLLM + ", 1)
+        self.assertEqual(unescape(heading), linux_title)
         styled = re.search(r'<span style="([^"]*)">(.*?)</span>', lines[0])
         assert styled is not None
 
@@ -230,7 +232,7 @@ class LinuxPresentationTests(unittest.TestCase):
             {key: style(styled.group(1)).get(key) for key in ("color", "font-weight")},
             {key: style(title.group(1))[key] for key in ("color", "font-weight")},
         )
-        self.assertEqual(unescape(styled.group(2)), unescape(title.group(2)))
+        self.assertEqual(unescape(styled.group(2)), linux_title)
         self.assertIn('src="images/microsoft-symbol.svg"', lines[0])
         self.assertIn("border-radius: 8px", lines[0])
         self.assertIn("End-to-end proof of concept", "".join(first["source"]))

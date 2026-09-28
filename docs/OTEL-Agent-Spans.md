@@ -43,30 +43,24 @@ optional Linux observations.
 ## MAF workflow orchestration
 
 The Windows notebook now wraps its existing Foundry calls with MAF core 1.19.0
-workflows. Section 5 runs `story` and `facts` in parallel, then `persistence`; Section 5.1 is an
+workflows. Section 5 executes `story -> facts -> persistence`; Section 5.1 is an
 independent optional `sentinel` workflow. The same run ID connects the workflows,
 but each has its own trace. Agent definitions, models, endpoint routing and MCP
 approvals remain on the existing Foundry path.
 
 ```text
-notebook.workflow story-facts  [app.workflow.stages = story+facts, persistence]
+notebook.workflow story-facts
   workflow.build
   workflow.run
-    executor.process fan-out     [app.workflow.dispatch = true; plumbing]
-    executor.process story       [app.interaction.root = true; runs alongside facts]
+    executor.process story       [app.interaction.root = true]
       invoke_agent ...
         POST /openai/v1/responses
           Foundry / transport / service spans
-    executor.process facts       [app.interaction.root = true; runs alongside story]
+    executor.process facts       [app.interaction.root = true]
       invoke_agent ...           [MCP approval continuations remain children]
-    executor.process persistence [app.interaction.root = true; after both]
+    executor.process persistence [app.interaction.root = true]
       persist_story
 ```
-
-`story` and `facts` overlap in time. Their Foundry calls run in worker threads
-that carry the OpenTelemetry context, so each step's spans stay under its own
-executor span. The span inventories below were recorded when the two steps still
-ran one after the other; their spans and parents are the same in a parallel run.
 
 MAF emits graph/message spans and causal links as well. Native executor spans
 are the stage roots, not every span carrying `demo.run_id`. The report follows
@@ -690,10 +684,10 @@ Sentinel creation operation: `ef9be3c0b50580d6150c5ce5c16d255b`.
 
 ## Section 5: story -- 6 spans
 
-**Cell:** `2692d274` -- **Query the Agent, story step**
+**Cell:** `2692d274` -- **Query the Agent, Pass 1**
 
 **Purpose:** run the main agent's fictional-story prompt in a new conversation.
-This step required one Responses request and no MCP execution or approval
+This pass required one Responses request and no MCP execution or approval
 continuation. The presence of `mcp_list_tools` in a response output is not an
 executed `search_tables` call.
 
@@ -710,7 +704,7 @@ Operation: `b9481c0848180a248bf87582e99e351a`.
 
 ## Section 5: Microsoft Learn -- 18 spans
 
-**Cell:** `2692d274` -- **Query the Agent, facts step**
+**Cell:** `2692d274` -- **Query the Agent, Pass 2**
 
 **Purpose:** ground the answer in Microsoft Learn using the public Learn MCP
 tool. The recorded flow was:

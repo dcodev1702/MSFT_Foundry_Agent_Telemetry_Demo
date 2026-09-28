@@ -8,6 +8,34 @@ formatting edits, and notebook-output refreshes are consolidated. Each
 `## YYYY-MM-DD` heading covers one commit day, with related change groups nested
 under `###` topic headings. Local stash snapshots are excluded.
 
+## 2026-09-28
+
+### Section 5 back to sequential steps, with bounded Foundry calls
+
+- Roll back the parallel story and facts steps in both root notebooks. Section 5
+  again runs `story -> facts -> persistence` in the kernel's main thread and
+  prints each step's progress as it happens. `ParallelSteps`, `buffered_output`
+  and the fan-out executor are removed from `notebook_support/workflow.py`, and
+  Section 6 no longer handles a dispatch span. The span tree and telemetry match
+  the original sequential version.
+- A parallel run stalled: Foundry finished the facts step's MCP approval in 4.7 s
+  but never sent its HTTP reply, and LiteLLM waited its full 600 s
+  `pass_through_request_timeout` before logging `Timeout on reading data from
+  socket`. The parallel steps showed no output until they finished and ran in
+  threads that could not be interrupted, so only a kernel restart stopped the cell.
+- Improve on the original: Section 5 calls Foundry through a client made with
+  `with_options(timeout=120, max_retries=0)`. A stalled reply now stops the step
+  after 120 s with `The <story|facts> request got no reply from Foundry within
+  120 s`, instead of waiting 10 minutes and then retrying twice, which would run
+  the prompt or MCP approval again and could hold the cell for 30 minutes. The
+  Foundry SDK's `create_conversation` and `responses` spans are unchanged, and a
+  timeout is recorded as `error.type=openai.APITimeoutError`.
+- A live gateway run passed Section 6 with 193 spans, none failed; the steps ran
+  story (6.9 s), facts (18.9 s, three MCP approval rounds), then persistence.
+- The architecture diagram again shows `story → facts → persistence`.
+- Add "LiteLLM" to the Linux notebook's title, which names its optional gateway;
+  the title test allows that difference from the Windows notebook.
+
 ## 2026-09-27
 
 ### Automatic gateway refresh in Section 3

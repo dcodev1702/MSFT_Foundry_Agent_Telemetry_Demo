@@ -2,12 +2,8 @@
 
 import ast
 import asyncio
-import io
 import json
-import threading
-import time
 import unittest
-from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,9 +14,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
-from notebook_support.workflow import (
-    DISPATCH_EXECUTOR_ID, NotebookStep, ParallelSteps, buffered_output, run_notebook_workflow,
-)
+from notebook_support.workflow import NotebookStep, run_notebook_workflow
 
 
 RUN_ID = "00000000-0000-0000-0000-000000000001"
@@ -174,111 +168,6 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 await self.run_workflow(**changes)
         self.assertEqual(self.calls, [])
 
-    def parallel_steps(self, story=None, facts=None):
-        return [
-            ParallelSteps([
-                NotebookStep("story", story or self.action("story")),
-                NotebookStep("facts", facts or self.action("facts")),
-            ]),
-            NotebookStep("persistence", self.action("persistence")),
-        ]
-
-    async def test_parallel_steps_overlap_and_persistence_waits_for_both(self):
-        both_started = threading.Barrier(2, timeout=5)
-
-        def overlapping(name):
-            record = self.action(name)
-
-            def invoke():
-                # Each step waits for the other, so the barrier breaks if they run one after another.
-                both_started.wait()
-                record()
-            return invoke
-
-        result = await self.run_workflow(self.parallel_steps(overlapping("story"), overlapping("facts")))
-        self.assertEqual(sorted(self.calls[:2]), ["facts", "story"])
-        self.assertEqual(self.calls[2:], ["persistence"])
-        self.assertEqual(result.get_outputs(), [RUN_ID])
-        invoked = [event.executor_id for event in result if event.type == "executor_invoked"]
-        self.assertEqual(invoked[0], DISPATCH_EXECUTOR_ID)
-        self.assertEqual(sorted(invoked[1:3]), ["facts", "story"])
-        self.assertEqual(invoked[3:], ["persistence"])
-
-    async def test_parallel_steps_keep_their_own_executor_parents(self):
-        await self.run_workflow(self.parallel_steps())
-        spans = self.exporter.get_finished_spans()
-        self.assertEqual(len({span.context.trace_id for span in spans}), 1)
-        roots = {span.attributes["app.interaction"]: span
-                 for span in spans if span.attributes.get("app.interaction.root")}
-        self.assertEqual(set(roots), {"story", "facts", "persistence"})
-        for name, root in roots.items():
-            child = next(span for span in spans if span.name == f"existing {name}")
-            self.assertEqual(child.parent.span_id, root.context.span_id)
-        dispatch = next(span for span in spans if span.name == f"executor.process {DISPATCH_EXECUTOR_ID}")
-        self.assertTrue(dispatch.attributes["app.workflow.dispatch"])
-        self.assertEqual(dispatch.attributes["demo.run_id"], RUN_ID)
-        self.assertNotIn("app.interaction.root", dispatch.attributes)
-        self.assertNotIn("app.workflow.step", dispatch.attributes)
-        outer = next(span for span in spans if span.attributes.get("app.workflow.root"))
-        self.assertEqual(list(outer.attributes["app.workflow.stages"]), ["story+facts", "persistence"])
-        self.assertEqual(list(outer.attributes["app.workflow.expected_steps"]), ["story", "facts", "persistence"])
-        self.assertEqual(sorted(outer.attributes["app.workflow.completed_steps"]),
-                         ["facts", "persistence", "story"])
-        self.assertFalse(trace.get_current_span().get_span_context().is_valid)
-
-    async def test_parallel_failure_lets_the_sibling_finish_and_skips_persistence(self):
-        def slow_story():
-            time.sleep(0.2)
-            self.calls.append("story")
-
-        def fail():
-            self.calls.append("facts")
-            raise RuntimeError("test-only MCP failure")
-
-        with self.assertRaisesRegex(RuntimeError, "MCP failure"):
-            await self.run_workflow(self.parallel_steps(slow_story, fail))
-        # The story thread finished before the workflow reported the failure; nothing persisted.
-        self.assertEqual(sorted(self.calls), ["facts", "story"])
-        spans = self.exporter.get_finished_spans()
-        story = next(span for span in spans if span.name == "executor.process story")
-        facts = next(span for span in spans if span.name == "executor.process facts")
-        self.assertEqual(story.attributes["app.workflow.step.status"], "cancelled")
-        self.assertEqual(facts.attributes["app.workflow.step.status"], "failed")
-        for span in (story, facts):
-            self.assertEqual(span.status.status_code, StatusCode.ERROR)
-        self.assertFalse(any(span.name == "executor.process persistence" for span in spans))
-
-    async def test_invalid_parallel_configuration_fails_before_side_effects(self):
-        with self.assertRaises(TypeError):
-            ParallelSteps([NotebookStep("story", self.action("story"))])
-        for steps in (
-            [ParallelSteps([NotebookStep("a", self.action("a")), NotebookStep("b", self.action("b"))]),
-             ParallelSteps([NotebookStep("c", self.action("c")), NotebookStep("d", self.action("d"))])],
-            [ParallelSteps([NotebookStep(DISPATCH_EXECUTOR_ID, self.action("x")),
-                            NotebookStep("y", self.action("y"))])],
-            [ParallelSteps([NotebookStep("same", self.action("a")), NotebookStep("same", self.action("b"))])],
-        ):
-            with self.subTest(steps=steps), self.assertRaises(ValueError):
-                await self.run_workflow(steps)
-        self.assertEqual(self.calls, [])
-
-    def test_buffered_output_prints_each_step_as_one_block(self):
-        output = io.StringIO()
-        with redirect_stdout(output):
-            with buffered_output("Story: generate") as log:
-                log("Conversation created: conv_1")
-                log("Response status: completed")
-        self.assertEqual(
-            output.getvalue(),
-            "\n=== Story: generate ===\nConversation created: conv_1\nResponse status: completed\n",
-        )
-        output = io.StringIO()
-        with redirect_stdout(output), self.assertRaises(RuntimeError):
-            with buffered_output("Facts: retrieve") as log:
-                log("Conversation created: conv_2")
-                raise RuntimeError("failure after partial output")
-        self.assertIn("Conversation created: conv_2", output.getvalue())
-
 
 class NotebookWorkflowWiringTests(unittest.TestCase):
     def setUp(self):
@@ -295,23 +184,27 @@ class NotebookWorkflowWiringTests(unittest.TestCase):
         self.assertIn("run_query_with_auto_approval(", source)
         self.assertEqual(source.count("story_id = append_story(stories_file, story_record)"), 1)
 
-    def test_story_and_facts_run_as_one_parallel_stage_before_persistence(self):
+    def test_story_facts_and_persistence_run_in_order_with_a_bounded_client(self):
         for notebook_name in ("zolab-ai-agent-demo-win11.ipynb", "zolab-ai-agent-demo-linux.ipynb"):
             notebook = json.loads((ROOT / notebook_name).read_text(encoding="utf-8"))
-            source = next(cell for cell in notebook["cells"] if cell["id"] == "2692d274")["source"]
-            source = "".join(source)
+            cells = {cell["id"]: "".join(cell["source"]) for cell in notebook["cells"]}
+            source = cells["2692d274"]
             with self.subTest(notebook=notebook_name):
-                stage = source[source.index("ParallelSteps(["):source.index('NotebookStep("persistence"')]
-                self.assertIn('NotebookStep("story", generate_story_step)', stage)
-                self.assertIn('NotebookStep("facts", retrieve_facts_step)', stage)
-                # Each parallel step buffers its messages; the approval loop logs instead of printing.
-                self.assertEqual(source.count("with buffered_output("), 2)
-                self.assertEqual(source.count("log=log,"), 3)
-                loop = source[source.index("def run_query_with_auto_approval"):source.index("def run_interaction_with_span")]
-                self.assertNotIn("print(", loop)
-                self.assertIn("ParallelSteps, buffered_output", "".join(
-                    "".join(cell["source"]) for cell in notebook["cells"] if cell["id"] == "8b1659dd"
-                ))
+                steps = [
+                    source.index(f'NotebookStep("{name}",')
+                    for name in ("story", "facts", "persistence")
+                ]
+                self.assertEqual(steps, sorted(steps))
+                for parallel in ("ParallelSteps", "buffered_output", "log=log"):
+                    self.assertNotIn(parallel, source + cells["8b1659dd"])
+                self.assertIn("RESPONSES_TIMEOUT_SECONDS = 120", source)
+                bounded = (
+                    "openai_client = agent_client.with_options("
+                    "timeout=RESPONSES_TIMEOUT_SECONDS, max_retries=0)"
+                )
+                self.assertLess(source.index(bounded), source.index("await run_notebook_workflow("))
+                self.assertIn("if isinstance(ex, APITimeoutError):", source)
+                self.assertIn("got no reply from Foundry within", source)
 
     def test_sentinel_keeps_its_own_endpoint_and_approval_path(self):
         source = self.cells["ef551c01"]

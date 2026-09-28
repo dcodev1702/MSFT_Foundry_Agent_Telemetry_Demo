@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import httpx2
 import yaml
 from azure.ai.projects import AIProjectClient
+from openai import APITimeoutError
 from azure.ai.projects.telemetry import AIProjectInstrumentor
 from azure.core.credentials import AccessToken
 from azure.core.settings import settings
@@ -298,6 +299,79 @@ class GatewaySdkTransportTests(unittest.TestCase):
                 self.assertEqual(request.headers["authorization"], "Bearer sk-test-master")
                 self.assertIn("foundry-features", request.headers)
                 self.assertIn(trace_id, request.headers["traceparent"])
+
+
+    def test_bounded_client_keeps_sdk_spans_and_sends_a_stalled_call_once(self):
+        """Section 5's with_options client: same spans and headers, a 120 s wait, no retry."""
+
+        class TestCredential:
+            """Entra credential double; the gateway, not this token, authenticates to Foundry."""
+
+            def get_token(self, *_scopes, **_kwargs):
+                """Return a token valid for an hour."""
+                return AccessToken("entra-token-must-not-reach-gateway", int(time.time()) + 3600)
+
+        def transport(request):
+            if b"stall" in request.content:
+                self.requests.append(request)
+                raise httpx2.ReadTimeout("simulated stalled Foundry reply", request=request)
+            return self.transport(request)
+
+        previous_implementation = settings.tracing_implementation()
+        previous_enabled = settings.tracing_enabled()
+        instrumentor = AIProjectInstrumentor()
+        try:
+            with (
+                patch.dict(os.environ, {"AZURE_EXPERIMENTAL_ENABLE_GENAI_TRACING": "true"}),
+                patch.object(trace, "get_tracer_provider", return_value=self.provider),
+            ):
+                settings.tracing_implementation = OpenTelemetrySpan
+                settings.tracing_enabled = True
+                instrumentor.instrument(
+                    enable_content_recording=False, enable_trace_context_propagation=True,
+                )
+                with (
+                    AIProjectClient(
+                        endpoint="https://example.services.ai.azure.com/api/projects/sdk-test",
+                        credential=TestCredential(), allow_preview=True,
+                    ) as project,
+                    project.get_openai_client(
+                        agent_name="main-backend", base_url=GATEWAY.agent_base_url("main"),
+                        api_key=GATEWAY.api_key,
+                        default_headers={"x-litellm-end-user-id": "user@test"},
+                        http_client=httpx2.Client(transport=httpx2.MockTransport(transport)),
+                    ) as agent_client,
+                ):
+                    client = agent_client.with_options(timeout=120, max_retries=0)
+                    conversation = client.conversations.create()
+                    client.responses.create(conversation=conversation.id, input="Gateway test")
+                    with self.assertRaises(APITimeoutError):
+                        client.responses.create(conversation=conversation.id, input="stall")
+        finally:
+            instrumentor.uninstrument()
+            settings.tracing_implementation = previous_implementation
+            settings.tracing_enabled = previous_enabled
+        paths = [request.url.path for request in self.requests]
+        # The stalled call went out once: the SDK's default would have retried it twice.
+        self.assertEqual(paths, [
+            "/foundry-agent/main/conversations", "/foundry-agent/main/responses",
+            "/foundry-agent/main/responses",
+        ])
+        for request in self.requests:
+            with self.subTest(path=request.url.path):
+                self.assertEqual(request.url.params.get("api-version"), "v1")
+                self.assertEqual(request.headers["x-litellm-end-user-id"], "user@test")
+                self.assertEqual(request.extensions["timeout"]["read"], 120)
+        # The Foundry SDK's spans for the OpenAI calls, as the unbounded client records them.
+        calls = [
+            span for span in self.exporter.get_finished_spans()
+            if span.name in ("create_conversation", "responses")
+        ]
+        self.assertEqual([(span.name, span.status.status_code) for span in calls], [
+            ("create_conversation", StatusCode.UNSET), ("responses", StatusCode.OK),
+            ("responses", StatusCode.ERROR),
+        ])
+        self.assertEqual(calls[-1].attributes["error.type"], "openai.APITimeoutError")
 
 
 class GatewayReadinessTests(unittest.TestCase):
