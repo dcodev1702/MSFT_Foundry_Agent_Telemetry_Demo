@@ -10,6 +10,21 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-28
 
+### Linux notebook prompt wording and service version
+
+- Set the Linux notebook's telemetry `service.version` to `2026.09.28`; Section 6
+  checks for the version the notebook sets. In a kernel that already set up
+  telemetry, Section 3.1 stops with `Telemetry configuration changed` until the
+  kernel is restarted.
+- Restore the Linux notebook's earlier Section 4 instructions, which the
+  2026-09-27 gateway-refresh commit had replaced with the Windows notebook's
+  wording: the main agent is told to "use the tools available to you" for
+  factual Microsoft questions, the sign-in instructions rule out substituting
+  "another SDL table", and the Sentinel agent is asked to "be sure to keep the
+  result short and factual". The Windows notebook keeps its wording.
+- Replace the observability guide's stale `2026.09.16` "current" version with
+  where the notebooks set it.
+
 ### Section 5 back to sequential steps, with bounded Foundry calls
 
 - Roll back the parallel story and facts steps in both root notebooks. Section 5

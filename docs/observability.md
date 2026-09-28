@@ -177,10 +177,12 @@ The Sentinel orchestration span now carries both `demo.run_id` and `app.interact
 
 Generated stories and Marp decks are local demo artifacts, not evidence that the service succeeded by themselves. Review MCP call results and the Section 6 gate as well.
 
-The current notebook uses `OTEL_SERVICE_NAME=foundry-agent-fw-demo` and
-`OTEL_SERVICE_VERSION=2026.09.16`; Section 6 expects the matching combined role.
-Restart the kernel and rerun the runtime cells after this identity change, since
-an initialized telemetry provider cannot adopt a different resource identity.
+The Linux and Windows notebooks set `OTEL_SERVICE_NAME=foundry-agent-fw-demo` and
+a date-shaped `OTEL_SERVICE_VERSION`, such as `2026.09.28`, in Section 3.1;
+Section 6 expects the matching combined role and version. Restart the kernel and
+rerun the runtime cells after changing either value, since an initialized
+telemetry provider cannot adopt a different resource identity; until then,
+Section 3.1 stops with `Telemetry configuration changed`.
 Historical run evidence below retains its original role and version. Queries or
 dashboards hardcoded to the old `foundry-agent-framework-demo` service name must
 include the new name to display subsequent runs.
