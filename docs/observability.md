@@ -32,8 +32,8 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](../zolab-ai-agent-demo
 | Azure Monitor export | `configure_azure_monitor(...)` with the project's Application Insights connection string | Sends notebook traces to Azure Monitor so they land in Application Insights and Log Analytics. |
 | Foundry client-side tracing | `AIProjectInstrumentor().instrument(...)` with explicit content, trace-context and baggage booleans | Emits client-side GenAI spans with the same content policy as custom notebook spans. |
 | Native MAF workflow tracing | `enable_instrumentation(...)` uses the existing OpenTelemetry provider | Emits native `workflow.run`, executor and graph spans into `AppDependencies`; no second provider or alternate exporter is configured. |
-| HTTP dependency tracing | Azure Monitor auto-instruments HTTPX and HTTPX2 when installed | The HTTPX instrumentation 0.65b0 package contains both instrumentors. OpenAI 3.x uses HTTPX2; no second package or manual re-wrapping is needed. |
-| Explicit Responses API dependency spans | Manual `POST /openai/v1/responses` client spans later in the notebook | Ensures Azure Monitor has concrete dependency rows that correlate cleanly in Service Map and KQL. |
+| HTTP dependency tracing | Azure Monitor auto-instruments HTTPX, HTTPX2, `requests`, `urllib3` and `urllib` when installed | The HTTPX instrumentation 0.65b0 package contains both instrumentors. OpenAI 3.x uses HTTPX2; no second package or manual re-wrapping is needed. Azure Core suppresses these spans inside Azure SDK spans to avoid duplicates, so Azure SDK calls show Azure Core's own HTTP spans. |
+| Explicit Responses API dependency spans | Manual `POST /openai/v1/responses` client spans later in the notebook | Ensures Azure Monitor has concrete dependency rows that correlate cleanly in Service Map and KQL. The Projects instrumentor's `responses` span suppresses the HTTPX2 span, so this is the Responses call's only notebook HTTP row. Azure Monitor names it from its URL path, such as `POST /foundry-agent/main/responses` through the Linux gateway. |
 | Notebook workflow and operation spans | A manual `notebook.workflow {name}` span encloses MAF execution; existing `invoke_agent`, `persist_story`, and Sentinel-specific spans remain executor descendants | Keeps the existing Foundry operations observable while explicit executor-root attributes identify logical stages. |
 | Resource identity | Native `Resource.create(attributes)` with explicit service, session, environment and project values | Preserves existing identity and additional `OTEL_RESOURCE_ATTRIBUTES`; adds `deployment.environment.name` alongside the legacy environment attribute. |
 | GenAI semantic conventions | Owned by Azure AI Projects' installed preview instrumentor | The Agent Framework `gen_ai_latest_experimental` opt-in does not select the Projects SDK's schema and is no longer set here. |
@@ -46,11 +46,11 @@ Sections 3.1 and 3.3 in [zolab-ai-agent-demo-win11.ipynb](../zolab-ai-agent-demo
 
 The telemetry path for this repo is:
 
-1. The notebook creates spans through MAF's native workflow instrumentation, OpenTelemetry, Azure SDK instrumentation, HTTPX/HTTPX2 instrumentation, and the existing explicit custom spans. `story-facts` has `story`, `facts` and `persistence` executors. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
+1. The notebook creates spans through MAF's native workflow instrumentation, the Azure AI Projects instrumentor, Azure Core tracing, the Azure Monitor distro's HTTP instrumentation, and the existing explicit custom spans, all on one OpenTelemetry provider. `story-facts` has `story`, `facts` and `persistence` executors. Optional Sentinel runs as a separate `sentinel` workflow with one `sentinel` executor, including its existing persistence.
 2. `configure_azure_monitor(...)` registers Azure Monitor exporters for the signals that remain enabled.
 3. The notebook retrieves the Application Insights connection string from the Foundry project at runtime by calling `project_client.telemetry.get_application_insights_connection_string()`.
 4. Azure Monitor sends the exported trace data to Application Insights.
-5. Because the Application Insights instance is workspace-based, the same telemetry is queryable in Log Analytics. Dependency spans are in `AppDependencies`; captured standard GenAI content is routed to `AppGenAIContent` and correlated by trace/span identifiers.
+5. Because the Application Insights instance is workspace-based, the same telemetry is queryable in Log Analytics, in a workspace that can be in another subscription. Client and internal spans are in `AppDependencies`, server spans (the optional LiteLLM gateway's) in `AppRequests`, span events in `AppTraces` and recorded exceptions in `AppExceptions`; captured standard GenAI content is routed to `AppGenAIContent` and correlated by trace/span identifiers.
 6. Agent calls use stable per-agent Responses endpoints in backend mode, or the project Responses API with `agent_reference` in explicit legacy mode. Client/service GenAI spans support the Foundry Traces view. Portal rendering is a separate UI check from the Log Analytics assertions.
 
 Workflow messages carry only the opaque run UUID, not prompts, responses or tool
@@ -58,9 +58,39 @@ results. MAF shares the established content-recording policy and 100% trace-only
 Azure Monitor configuration. No span processor stamps every SDK/service span with
 one agent or interaction; reporting follows actual parent relationships instead.
 
-![Pro-code observability stack for the Foundry agent demo](../images/foundry-observability-stack.svg)
+### Pro-Code Observability Stack
 
-The diagram above summarizes the same pro-code path visually: notebook orchestration creates explicit spans, Foundry and HTTP client instrumentation enrich the agent and dependency traces, and Azure Monitor exports the resulting telemetry into the operational analysis surfaces.
+![Pro-code observability stack: in the notebook kernel, Microsoft Agent Framework, the notebook's explicit spans, Azure Core tracing, HTTP instrumentation and the Azure AI Projects instrumentor share one OpenTelemetry TracerProvider; the Azure Monitor distro exports their spans to Application Insights next to Foundry's server spans, and Section 6 queries the Log Analytics workspace in the Security subscription](../images/observability-stack-architecture-dark.svg)
+
+Five span producers share the `TracerProvider` that Section 3.1 creates with
+`configure_azure_monitor(...)`, and the current span context nests their spans in
+one trace: `notebook.workflow` › `workflow.run` › `executor.process` ›
+`invoke_agent` › `POST` › `responses` › Foundry's server spans.
+
+| Producer | Spans in a run |
+| --- | --- |
+| Notebook tracer `foundry_agent_framework_notebook` | `sync_agent` or `resolve_agent` (Section 4); `notebook.workflow`, `invoke_agent`, the explicit `POST` Responses span and `persist_story` (Section 5); `sentinel-agent-query` (Section 5.1); `notebook.mcp.observe` for returned MCP items (Linux notebook) |
+| Microsoft Agent Framework 1.19.0 | `workflow.build`, `workflow.run`, `executor.process <step>`, `edge_group.process`, `message.send` |
+| Azure AI Projects instrumentor | `create_agent` when a version is created, `create_conversation` and `responses`; records GenAI content and sends `traceparent` and baggage to Foundry |
+| Azure Core tracing | Azure SDK operations such as `AgentsOperations.get_version`, with their own HTTP spans |
+| Azure Monitor HTTP instrumentation | HTTPX2 (the OpenAI client's transport), `requests`, `urllib3`, and `urllib`, which records the gateway readiness check and Section 6's Log Analytics queries |
+
+Azure Core suppresses automatic HTTP spans inside Azure SDK spans to avoid
+duplicates, and the instrumentor's `responses` and `create_conversation` spans are
+Azure SDK spans, so HTTPX2 records no span for those calls. The notebook's explicit
+`POST` client span is the Responses call's HTTP dependency. Azure Monitor names it
+from the URL path: `POST /api/projects/<project>/agents/<agent>/endpoint/protocols/openai/responses`
+for a direct call, or `POST /foundry-agent/main/responses` through the Linux gateway.
+
+The runtime view shows the order: Section 3.1 builds the pipeline once per kernel,
+Sections 4 to 5.1 emit spans, the exporters send batches asynchronously, and
+Section 6 flushes the provider, waits for ingestion and reads the run back.
+
+![Telemetry runtime sequence: Section 3.1 reads the Application Insights connection string from Foundry and configures Azure Monitor and the instrumentors; Sections 4 to 5.1 call Foundry with traceparent and baggage; notebook, SDK and Foundry spans are exported to Application Insights and Log Analytics; Section 6 flushes, polls coverage and reads 13 report views](../images/observability-stack-runtime-dark.svg)
+
+On 2026-09-28, a gateway run of the Linux notebook passed the Section 6 gate with
+206 spans from three roles (79 notebook, 26 Foundry and 101 LiteLLM), none
+failed, plus 40 span events in `AppTraces` and 57 `AppGenAIContent` records.
 
 That gives three useful observability surfaces:
 
@@ -108,7 +138,7 @@ Agent observability is useful only if it answers more than "did the call succeed
 | --- | --- |
 | Agent execution layer | Foundry client-side spans and Foundry Traces show agent creation and Responses API activity. |
 | Notebook orchestration layer | Native MAF workflow/executor spans show orchestration and wall-clock duration; retained custom spans show the underlying Foundry operations and persistence. |
-| Dependency layer | Automatically instrumented HTTPX2 plus explicit client spans create dependency rows for the actual outbound calls. |
+| Dependency layer | Azure Core's HTTP spans and the explicit Responses client spans create dependency rows for the actual outbound calls; Azure Core suppresses automatic HTTPX2 spans inside Azure SDK spans. |
 | Run correlation layer | Resource attributes and baggage context let a single notebook run be grouped and traced across surfaces. |
 
 That is the correct model for agent observability: agent actions, orchestration decisions, outbound dependencies, and correlation identifiers all need to exist in the same trace story.

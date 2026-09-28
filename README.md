@@ -1003,7 +1003,7 @@ Section **3.1** configures the notebook's observability path end to end:
 - **Azure Monitor + Application Insights** receive exported OpenTelemetry traces.
 - **MAF core workflows** add native `workflow.run`, `executor.process`, graph/message and error spans. `enable_instrumentation` reuses the already configured provider; it does not call `configure_otel_providers` or attach a second exporter.
 - **Microsoft Foundry client-side tracing** is enabled for project-backed agent and Responses API activity.
-- **Azure Monitor owns HTTPX/HTTPX2 auto-instrumentation**. Foundry instrumentation adds GenAI spans; explicit notebook spans retain the demo's orchestration and dependency context. The notebook no longer uninstalls/re-wraps HTTP instrumentors.
+- **Azure Monitor owns HTTPX/HTTPX2 auto-instrumentation**. Foundry instrumentation adds GenAI spans; explicit notebook spans retain the demo's orchestration and dependency context. The notebook no longer uninstalls/re-wraps HTTP instrumentors. Azure Core suppresses automatic HTTP spans inside Azure SDK spans, such as the Projects instrumentor's `responses`, so the explicit `POST` span is each Responses call's HTTP dependency.
 - **Trace context and baggage propagation** are enabled so notebook correlation identifiers flow with downstream requests.
 - **GenAI model/tool span semantics** remain controlled by the installed Projects instrumentor; MAF contributes workflow/executor semantics rather than wrapping model calls a second time.
 - **One content policy** controls Projects, MAF and custom spans: `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` defaults to `true` for this demo, accepts only `true`/`false` (case-insensitive), and is passed explicitly to both SDKs. Set it to `false` to opt out. MAF message events are disabled in the Windows notebook (`enable_message_events=False`) and enabled in the Linux notebook (`enable_message_events=True`). MAF emits these baseline GenAI message events only for model calls that it makes itself and only while content capture is on; the notebooks' model calls go through the Foundry SDK. Workflow edges carry only an opaque run UUID, not prompts/results. Changing policy requires a kernel restart.
@@ -1017,6 +1017,13 @@ Section **3.1** configures the notebook's observability path end to end:
 - **Message previews are separately opt-in**: `SHOW_GENAI_CONTENT=True` in Section 6 requests/displays up to 1,200 characters per message/tool field, only when local content recording is enabled. Set it to `False` to show metadata and character counts without retrieving payload previews. Detail views cap at 200 rows; coverage counts are uncapped. Treat exception messages as potentially sensitive too.
 
 Content capture is enabled by default for this controlled demo: prompts, responses and tool payloads may be exported to Application Insights, including sensitive Sentinel data. Set the environment variable to `false` before initialization when this is not appropriate. Restarting a previously initialized kernel is necessary to pick up the new default; an inherited explicit `false` still takes precedence. The policy is not a universal redaction filter: exception diagnostics and locally generated stories/decks can still contain personal data. Identical setup reruns reuse providers; changes to identity, backend or content policy require restarting the kernel.
+
+The [pro-code observability stack](docs/observability.md#pro-code-observability-stack)
+shows which library in the kernel emits which spans and how they reach Application
+Insights and Log Analytics next to Foundry's spans. The guide also has its runtime
+view, from Section 3.1's setup to Section 6's read-back.
+
+![Pro-code observability stack: in the notebook kernel, Microsoft Agent Framework, the notebook's explicit spans, Azure Core tracing, HTTP instrumentation and the Azure AI Projects instrumentor share one OpenTelemetry TracerProvider; the Azure Monitor distro exports their spans to Application Insights next to Foundry's server spans, and Section 6 queries the Log Analytics workspace in the Security subscription](images/observability-stack-architecture-dark.svg)
 
 See [observability.md](docs/observability.md) for the full environment variable reference,
 version posture and design notes, and [OTEL-Agent-Spans.md](docs/OTEL-Agent-Spans.md)

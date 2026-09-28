@@ -10,6 +10,34 @@ under `###` topic headings. Local stash snapshots are excluded.
 
 ## 2026-09-28
 
+### Pro-code observability stack diagrams
+
+- Replace the observability guide's stack diagram from May 2026 with two diagrams
+  in the style of the Linux gateway diagrams, based on the current notebooks, the
+  installed packages and a gateway run that passed Section 6 with 206 spans:
+  - `images/observability-stack-architecture-dark.svg` shows the five span
+    producers in the notebook kernel (the notebook tracer, Microsoft Agent
+    Framework, the Azure AI Projects instrumentor, Azure Core tracing and the Azure
+    Monitor distro's HTTP instrumentation), the one OpenTelemetry provider and the
+    distro that exports their spans, Section 6, and Foundry, Application Insights
+    and the Log Analytics workspace, with numbered flows.
+  - `images/observability-stack-runtime-dark.svg` shows the order from Section
+    3.1's setup to the exports and Section 6's read-back, with the rerun rules.
+- The old diagram showed settings the notebooks no longer use, such as the
+  `foundry-agent-framework-demo` service name, `OTEL_SEMCONV_STABILITY_OPT_IN`,
+  the obsolete Azure content-recording flag and OpenTelemetry 1.40, and had no
+  Agent Framework spans. It is removed.
+- Explain why HTTPX2 records no span for a Responses call: Azure Core suppresses
+  automatic HTTP spans inside Azure SDK spans, which include the Projects
+  instrumentor's `responses` and `create_conversation`, so the notebook's explicit
+  `POST` span is the call's HTTP dependency, named by Azure Monitor after its URL
+  path. The installed azure-core source and four days of Log Analytics data
+  confirm it.
+- List every Log Analytics table a run writes: `AppDependencies`, `AppRequests`
+  (LiteLLM's server spans), `AppTraces` (span events), `AppExceptions` and
+  `AppGenAIContent`.
+- Show the architecture view in the README's Observability section too.
+
 ### Linux notebook prompt wording and service version
 
 - Set the Linux notebook's telemetry `service.version` to `2026.09.28`; Section 6

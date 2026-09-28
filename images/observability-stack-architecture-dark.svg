@@ -1,0 +1,372 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 1395" font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0a0e1a"/><stop offset="1" stop-color="#0c1322"/></linearGradient>
+    <filter id="gviolet" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#a855f7" flood-opacity="0.45"/></filter>
+    <marker id="mviolet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#a855f7"/></marker>
+    <filter id="gcyan" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#22d3ee" flood-opacity="0.45"/></filter>
+    <marker id="mcyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#22d3ee"/></marker>
+    <filter id="gmagenta" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#ec4899" flood-opacity="0.45"/></filter>
+    <marker id="mmagenta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ec4899"/></marker>
+    <filter id="ggold" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#fbbf24" flood-opacity="0.45"/></filter>
+    <marker id="mgold" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fbbf24"/></marker>
+    <filter id="gorange" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#fb923c" flood-opacity="0.45"/></filter>
+    <marker id="morange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#fb923c"/></marker>
+    <filter id="gblue" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#60a5fa" flood-opacity="0.45"/></filter>
+    <marker id="mblue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#60a5fa"/></marker>
+    <filter id="ggreen" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#34d399" flood-opacity="0.45"/></filter>
+    <marker id="mgreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#34d399"/></marker>
+    <filter id="gslate" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#94a3b8" flood-opacity="0.45"/></filter>
+    <marker id="mslate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#94a3b8"/></marker>
+  </defs>
+  <rect width="1400" height="1395" fill="url(#bg)"/>
+  <text x="56" y="58" font-size="30" font-weight="800" fill="#e8edf5" letter-spacing="0.5">FOUNDRY AGENT DEMO <tspan font-weight="300" fill="#9aa7ba">// Pro-Code Observability Stack</tspan></text>
+  <text x="56" y="80" font-size="12" letter-spacing="0.3" fill="#6b7689">Windows and Linux notebooks · Agent Framework 1.19 · Azure AI Projects · Azure Core tracing · OpenTelemetry 1.44 · Azure Monitor 1.8.10</text>
+  <circle cx="1080" cy="50" r="5" fill="#34d399" filter="url(#ggreen)"/>
+  <text x="1094" y="54" font-size="12" fill="#aeb8c7">Trace-only · 100% sampled</text>
+  <text x="1094" y="69" font-size="10" fill="#5b6678">Section 6 checks every run</text>
+  <line x1="56" y1="96" x2="1344" y2="96" stroke="#1c2740" stroke-width="1"/>
+  <rect x="40" y="112" width="1320" height="1257" rx="16" fill="#0c1322" fill-opacity="0.4" stroke="#1c2740" stroke-width="1.5"/>
+  <rect x="60" y="132" width="868" height="1112" rx="14" fill="#0b111e" fill-opacity="0.55" stroke="#1f2b44" stroke-width="1.3"/>
+  <g>
+  <rect x="776" y="144" width="136" height="20" rx="10" fill="#0e1626" stroke="#334155" stroke-width="0.9"/>
+  <text x="844" y="158" font-size="9" font-weight="700" letter-spacing="1" text-anchor="middle" fill="#cbd5e1">NOTEBOOK KERNEL</text>
+  <text x="766" y="158" font-size="10" text-anchor="end" fill="#6b7689">Python 3.14.7 · Section 3.1 sets up one provider per kernel</text>
+  </g>
+  <rect x="76" y="176" width="836" height="541" rx="14" fill="#0b111e" fill-opacity="0.55" stroke="#1f2b44" stroke-width="1.3"/>
+  <g>
+  <rect x="768" y="188" width="128" height="20" rx="10" fill="#0e1626" stroke="#334155" stroke-width="0.9"/>
+  <text x="832" y="202" font-size="9" font-weight="700" letter-spacing="1" text-anchor="middle" fill="#cbd5e1">SPAN PRODUCERS</text>
+  <text x="758" y="202" font-size="10" text-anchor="end" fill="#6b7689">all share the provider · the current span context nests them</text>
+  </g>
+  <g>
+  <rect x="92" y="222" width="392" height="217" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#a855f7" stroke-width="1.4" filter="url(#gviolet)"/>
+  <rect x="110" y="242" width="18" height="18" rx="4" fill="#a855f7"/>
+  <text x="136" y="250" font-size="12.5" font-weight="700" fill="#e3e9f2">MICROSOFT AGENT FRAMEWORK</text>
+  <text x="136" y="266" font-size="9" font-weight="700" letter-spacing="0.8" fill="#c4a5f5">MAF CORE 1.19.0 · ENABLE_INSTRUMENTATION()</text>
+  <line x1="108" y1="280" x2="468" y2="280" stroke="#243150" stroke-width="1"/>
+  <text x="110" y="302" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">WORKFLOW SPANS</text>
+  <circle cx="114" cy="315" r="2" fill="#a855f7"/>
+  <text x="124" y="319" font-size="10.5" fill="#b8c2d2">workflow.build · workflow.run</text>
+  <circle cx="114" cy="332" r="2" fill="#a855f7"/>
+  <text x="124" y="336" font-size="10.5" fill="#b8c2d2">executor.process story · facts · persistence</text>
+  <circle cx="114" cy="349" r="2" fill="#a855f7"/>
+  <text x="124" y="353" font-size="10.5" fill="#b8c2d2">executor.process sentinel (optional)</text>
+  <circle cx="114" cy="366" r="2" fill="#a855f7"/>
+  <text x="124" y="370" font-size="10.5" fill="#b8c2d2">edge_group.process · message.send</text>
+  <circle cx="114" cy="383" r="2" fill="#a855f7"/>
+  <text x="124" y="387" font-size="10.5" fill="#b8c2d2">events workflow.started · workflow.completed</text>
+  <rect x="108" y="401" width="360" height="26" rx="13" fill="#1a1130" stroke="#7c3aed" stroke-width="0.9"/>
+  <circle cx="122" cy="414" r="3.5" fill="#a855f7"/>
+  <text x="134" y="417.8" font-size="10" font-weight="600" fill="#cdb6f7">Only the run UUID crosses workflow edges</text>
+  </g>
+  <g>
+  <rect x="504" y="222" width="392" height="217" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#a855f7" stroke-width="1.4" filter="url(#gviolet)"/>
+  <rect x="522" y="242" width="18" height="18" rx="4" fill="#a855f7"/>
+  <text x="548" y="250" font-size="12.5" font-weight="700" fill="#e3e9f2">NOTEBOOK SPANS</text>
+  <text x="548" y="266" font-size="9" font-weight="700" letter-spacing="0.8" fill="#c4a5f5">TRACER FOUNDRY_AGENT_FRAMEWORK_NOTEBOOK</text>
+  <line x1="520" y1="280" x2="880" y2="280" stroke="#243150" stroke-width="1"/>
+  <text x="522" y="302" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">EXPLICIT SPANS · SECTIONS 4 – 5.1</text>
+  <circle cx="526" cy="315" r="2" fill="#a855f7"/>
+  <text x="536" y="319" font-size="10.5" fill="#b8c2d2">notebook.workflow story-facts · sentinel</text>
+  <circle cx="526" cy="332" r="2" fill="#a855f7"/>
+  <text x="536" y="336" font-size="10.5" fill="#b8c2d2">sync_agent or resolve_agent &lt;agent&gt;</text>
+  <circle cx="526" cy="349" r="2" fill="#a855f7"/>
+  <text x="536" y="353" font-size="10.5" fill="#b8c2d2">invoke_agent &lt;agent&gt; · sentinel-agent-query</text>
+  <circle cx="526" cy="366" r="2" fill="#a855f7"/>
+  <text x="536" y="370" font-size="10.5" fill="#b8c2d2">POST &lt;Responses URL&gt; · responses.create</text>
+  <circle cx="526" cy="383" r="2" fill="#a855f7"/>
+  <text x="536" y="387" font-size="10.5" fill="#b8c2d2">persist_story · notebook.mcp.observe (Linux)</text>
+  <rect x="520" y="401" width="360" height="26" rx="13" fill="#1a1130" stroke="#7c3aed" stroke-width="0.9"/>
+  <circle cx="534" cy="414" r="3.5" fill="#a855f7"/>
+  <text x="546" y="417.8" font-size="10" font-weight="600" fill="#cdb6f7">Span events → AppTraces · exceptions → AppExceptions</text>
+  </g>
+  <g>
+  <rect x="92" y="459" width="254" height="200" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#94a3b8" stroke-width="1.4" filter="url(#gslate)"/>
+  <rect x="110" y="479" width="18" height="18" rx="4" fill="#94a3b8"/>
+  <text x="136" y="487" font-size="12.5" font-weight="700" fill="#e3e9f2">AZURE CORE TRACING</text>
+  <text x="136" y="503" font-size="9" font-weight="700" letter-spacing="0.8" fill="#cbd5e1">AZURE SDK SPANS · 1.0.0B13</text>
+  <line x1="108" y1="517" x2="330" y2="517" stroke="#243150" stroke-width="1"/>
+  <text x="110" y="539" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">SPANS</text>
+  <circle cx="114" cy="552" r="2" fill="#94a3b8"/>
+  <text x="124" y="556" font-size="10.5" fill="#b8c2d2">AgentsOperations.get_version</text>
+  <circle cx="114" cy="569" r="2" fill="#94a3b8"/>
+  <text x="124" y="573" font-size="10.5" fill="#b8c2d2">AIProjectClient.get_openai_client</text>
+  <circle cx="114" cy="586" r="2" fill="#94a3b8"/>
+  <text x="124" y="590" font-size="10.5" fill="#b8c2d2">GET /api/projects/…/agents/…</text>
+  <circle cx="114" cy="603" r="2" fill="#94a3b8"/>
+  <text x="124" y="607" font-size="10.5" fill="#b8c2d2">suppresses nested auto HTTP spans</text>
+  <rect x="108" y="621" width="222" height="26" rx="13" fill="#141c2b" stroke="#475569" stroke-width="0.9"/>
+  <circle cx="122" cy="634" r="3.5" fill="#94a3b8"/>
+  <text x="134" y="637.8" font-size="10" font-weight="600" fill="#cbd5e1">Traces every Azure SDK call</text>
+  </g>
+  <g>
+  <rect x="367" y="459" width="254" height="200" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#94a3b8" stroke-width="1.4" filter="url(#gslate)"/>
+  <rect x="385" y="479" width="18" height="18" rx="4" fill="#94a3b8"/>
+  <text x="411" y="487" font-size="12.5" font-weight="700" fill="#e3e9f2">HTTP INSTRUMENTATION</text>
+  <text x="411" y="503" font-size="9" font-weight="700" letter-spacing="0.8" fill="#cbd5e1">DISTRO-OWNED · 0.65B0</text>
+  <line x1="383" y1="517" x2="605" y2="517" stroke="#243150" stroke-width="1"/>
+  <text x="385" y="539" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">LIBRARIES</text>
+  <circle cx="389" cy="552" r="2" fill="#94a3b8"/>
+  <text x="399" y="556" font-size="10.5" fill="#b8c2d2">httpx2 · the OpenAI transport</text>
+  <circle cx="389" cy="569" r="2" fill="#94a3b8"/>
+  <text x="399" y="573" font-size="10.5" fill="#b8c2d2">urllib · readiness, Section 6 KQL</text>
+  <circle cx="389" cy="586" r="2" fill="#94a3b8"/>
+  <text x="399" y="590" font-size="10.5" fill="#b8c2d2">requests · urllib3</text>
+  <circle cx="389" cy="603" r="2" fill="#94a3b8"/>
+  <text x="399" y="607" font-size="10.5" fill="#b8c2d2">suppressed inside Azure SDK spans</text>
+  <rect x="383" y="621" width="222" height="26" rx="13" fill="#141c2b" stroke="#475569" stroke-width="0.9"/>
+  <circle cx="397" cy="634" r="3.5" fill="#94a3b8"/>
+  <text x="409" y="637.8" font-size="10" font-weight="600" fill="#cbd5e1">Owned by Azure Monitor</text>
+  </g>
+  <g>
+  <rect x="642" y="459" width="254" height="200" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#60a5fa" stroke-width="1.4" filter="url(#gblue)"/>
+  <rect x="660" y="479" width="18" height="18" rx="4" fill="#60a5fa"/>
+  <text x="686" y="487" font-size="12.5" font-weight="700" fill="#e3e9f2">AZURE AI PROJECTS</text>
+  <text x="686" y="503" font-size="9" font-weight="700" letter-spacing="0.8" fill="#93c5fd">AIPROJECTINSTRUMENTOR</text>
+  <line x1="658" y1="517" x2="880" y2="517" stroke="#243150" stroke-width="1"/>
+  <text x="660" y="539" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">SPANS</text>
+  <circle cx="664" cy="552" r="2" fill="#60a5fa"/>
+  <text x="674" y="556" font-size="10.5" fill="#b8c2d2">create_agent &lt;agent&gt;</text>
+  <circle cx="664" cy="569" r="2" fill="#60a5fa"/>
+  <text x="674" y="573" font-size="10.5" fill="#b8c2d2">create_conversation · responses</text>
+  <circle cx="664" cy="586" r="2" fill="#60a5fa"/>
+  <text x="674" y="590" font-size="10.5" fill="#b8c2d2">GenAI content → AppGenAIContent</text>
+  <circle cx="664" cy="603" r="2" fill="#60a5fa"/>
+  <text x="674" y="607" font-size="10.5" fill="#b8c2d2">traceparent + baggage to Foundry</text>
+  <rect x="658" y="621" width="222" height="26" rx="13" fill="#0b1a33" stroke="#2563eb" stroke-width="0.9"/>
+  <circle cx="672" cy="634" r="3.5" fill="#60a5fa"/>
+  <text x="684" y="637.8" font-size="10" font-weight="600" fill="#bfdbfe">2.7.0 Linux · 2.6.1 Windows</text>
+  </g>
+  <g>
+  <rect x="92" y="675" width="804" height="26" rx="13" fill="#141c2b" stroke="#475569" stroke-width="0.9"/>
+  <circle cx="106" cy="688" r="3.5" fill="#94a3b8"/>
+  <text x="118" y="691.8" font-size="10" font-weight="600" fill="#cbd5e1">One trace: notebook.workflow › workflow.run › executor.process › invoke_agent › POST › responses › Foundry spans</text>
+  </g>
+  <g>
+  <rect x="76" y="765" width="398" height="256" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#fb923c" stroke-width="1.4" filter="url(#gorange)"/>
+  <rect x="94" y="785" width="18" height="18" rx="4" fill="#fb923c"/>
+  <text x="120" y="793" font-size="12.5" font-weight="700" fill="#e3e9f2">OPENTELEMETRY SDK</text>
+  <text x="120" y="809" font-size="9" font-weight="700" letter-spacing="0.8" fill="#fdba74">API · SDK 1.44.0 · ONE TRACERPROVIDER</text>
+  <line x1="92" y1="823" x2="458" y2="823" stroke="#243150" stroke-width="1"/>
+  <text x="94" y="845" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">RESOURCE</text>
+  <circle cx="98" cy="858" r="2" fill="#fb923c"/>
+  <text x="108" y="862" font-size="10.5" fill="#b8c2d2">service.name foundry-agent-fw-demo</text>
+  <circle cx="98" cy="875" r="2" fill="#fb923c"/>
+  <text x="108" y="879" font-size="10.5" fill="#b8c2d2">service.namespace foundry-agent-demo</text>
+  <circle cx="98" cy="892" r="2" fill="#fb923c"/>
+  <text x="108" y="896" font-size="10.5" fill="#b8c2d2">service.version · service.instance.id</text>
+  <circle cx="98" cy="909" r="2" fill="#fb923c"/>
+  <text x="108" y="913" font-size="10.5" fill="#b8c2d2">deployment.environment.name demo</text>
+  <text x="94" y="935" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">CONTEXT · SAMPLING</text>
+  <circle cx="98" cy="948" r="2" fill="#fb923c"/>
+  <text x="108" y="952" font-size="10.5" fill="#b8c2d2">W3C traceparent + baggage</text>
+  <circle cx="98" cy="965" r="2" fill="#fb923c"/>
+  <text x="108" y="969" font-size="10.5" fill="#b8c2d2">microsoft.fixed_percentage · 1.0</text>
+  <rect x="92" y="983" width="366" height="26" rx="13" fill="#2a1608" stroke="#c2410c" stroke-width="0.9"/>
+  <circle cx="106" cy="996" r="3.5" fill="#fb923c"/>
+  <text x="118" y="999.8" font-size="10" font-weight="600" fill="#fed7aa">Role foundry-agent-demo.foundry-agent-fw-demo</text>
+  </g>
+  <g>
+  <rect x="514" y="765" width="398" height="256" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#fb923c" stroke-width="1.4" filter="url(#gorange)"/>
+  <rect x="532" y="785" width="18" height="18" rx="4" fill="#fb923c"/>
+  <text x="558" y="793" font-size="12.5" font-weight="700" fill="#e3e9f2">AZURE MONITOR DISTRO</text>
+  <text x="558" y="809" font-size="9" font-weight="700" letter-spacing="0.8" fill="#fdba74">1.8.10 · EXPORTER 1.0.0B57</text>
+  <line x1="530" y1="823" x2="896" y2="823" stroke="#243150" stroke-width="1"/>
+  <text x="532" y="845" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">CONFIGURE_AZURE_MONITOR</text>
+  <circle cx="536" cy="858" r="2" fill="#fb923c"/>
+  <text x="546" y="862" font-size="10.5" fill="#b8c2d2">connection string from the Foundry project</text>
+  <circle cx="536" cy="875" r="2" fill="#fb923c"/>
+  <text x="546" y="879" font-size="10.5" fill="#b8c2d2">Resource.create(attributes)</text>
+  <circle cx="536" cy="892" r="2" fill="#fb923c"/>
+  <text x="546" y="896" font-size="10.5" fill="#b8c2d2">sampling_ratio=1.0 · batch export</text>
+  <text x="532" y="918" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">TURNED OFF</text>
+  <circle cx="536" cy="931" r="2" fill="#fb923c"/>
+  <text x="546" y="935" font-size="10.5" fill="#b8c2d2">logs and metrics exporters: none</text>
+  <circle cx="536" cy="948" r="2" fill="#fb923c"/>
+  <text x="546" y="952" font-size="10.5" fill="#b8c2d2">Live Metrics · performance counters</text>
+  <circle cx="536" cy="965" r="2" fill="#fb923c"/>
+  <text x="546" y="969" font-size="10.5" fill="#b8c2d2">Statsbeat, outside Azure hosts</text>
+  <rect x="530" y="983" width="366" height="26" rx="13" fill="#2a1608" stroke="#c2410c" stroke-width="0.9"/>
+  <circle cx="544" cy="996" r="3.5" fill="#fb923c"/>
+  <text x="556" y="999.8" font-size="10" font-weight="600" fill="#fed7aa">Trace-only · span events export as AppTraces</text>
+  </g>
+  <g>
+  <rect x="76" y="1045" width="836" height="183" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#a855f7" stroke-width="1.4" filter="url(#gviolet)"/>
+  <rect x="94" y="1065" width="18" height="18" rx="4" fill="#a855f7"/>
+  <text x="120" y="1073" font-size="12.5" font-weight="700" fill="#e3e9f2">SECTION 6 · CURRENT-RUN GATE</text>
+  <text x="120" y="1089" font-size="9" font-weight="700" letter-spacing="0.8" fill="#c4a5f5">NOTEBOOK_SUPPORT.OBSERVABILITY · LOG ANALYTICS QUERY API</text>
+  <line x1="92" y1="1103" x2="896" y2="1103" stroke="#243150" stroke-width="1"/>
+  <text x="94" y="1125" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">WAIT</text>
+  <circle cx="98" cy="1138" r="2" fill="#a855f7"/>
+  <text x="108" y="1142" font-size="10.5" fill="#b8c2d2">force_flush, 30 s timeout</text>
+  <circle cx="98" cy="1155" r="2" fill="#a855f7"/>
+  <text x="108" y="1159" font-size="10.5" fill="#b8c2d2">coverage KQL every 15 s</text>
+  <circle cx="98" cy="1172" r="2" fill="#a855f7"/>
+  <text x="108" y="1176" font-size="10.5" fill="#b8c2d2">up to 12 waits (3 min)</text>
+  <text x="372" y="1125" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">CHECK</text>
+  <circle cx="376" cy="1138" r="2" fill="#a855f7"/>
+  <text x="386" y="1142" font-size="10.5" fill="#b8c2d2">role · service.version</text>
+  <circle cx="376" cy="1155" r="2" fill="#a855f7"/>
+  <text x="386" y="1159" font-size="10.5" fill="#b8c2d2">story · facts · persistence · sentinel</text>
+  <circle cx="376" cy="1172" r="2" fill="#a855f7"/>
+  <text x="386" y="1176" font-size="10.5" fill="#b8c2d2">zero failed spans · mapped ancestry</text>
+  <text x="650" y="1125" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">REPORT</text>
+  <circle cx="654" cy="1138" r="2" fill="#a855f7"/>
+  <text x="664" y="1142" font-size="10.5" fill="#b8c2d2">13 views, 5 at a time</text>
+  <circle cx="654" cy="1155" r="2" fill="#a855f7"/>
+  <text x="664" y="1159" font-size="10.5" fill="#b8c2d2">usage · MCP outcomes · content</text>
+  <circle cx="654" cy="1172" r="2" fill="#a855f7"/>
+  <text x="664" y="1176" font-size="10.5" fill="#b8c2d2">failure report on any failed span</text>
+  <rect x="92" y="1190" width="804" height="26" rx="13" fill="#1a1130" stroke="#7c3aed" stroke-width="0.9"/>
+  <circle cx="106" cy="1203" r="3.5" fill="#a855f7"/>
+  <text x="118" y="1206.8" font-size="10" font-weight="600" fill="#cdb6f7">Scoped by demo.run_id, then OperationId and ParentId ancestry</text>
+  </g>
+  <rect x="968" y="132" width="372" height="1112" rx="14" fill="#0b111e" fill-opacity="0.55" stroke="#1f2b44" stroke-width="1.3"/>
+  <g>
+  <rect x="1190" y="144" width="134" height="20" rx="10" fill="#0e1626" stroke="#334155" stroke-width="0.9"/>
+  <text x="1257" y="158" font-size="9" font-weight="700" letter-spacing="1" text-anchor="middle" fill="#cbd5e1">MICROSOFT AZURE</text>
+  <text x="1180" y="158" font-size="10" text-anchor="end" fill="#6b7689">Entra ID via the Azure CLI</text>
+  </g>
+  <rect x="980" y="176" width="348" height="694" rx="14" fill="#0b111e" fill-opacity="0.55" stroke="#1f2b44" stroke-width="1.3"/>
+  <g>
+  <rect x="1075" y="188" width="237" height="20" rx="10" fill="#0e1626" stroke="#334155" stroke-width="0.9"/>
+  <text x="1193.5" y="202" font-size="9" font-weight="700" letter-spacing="1" text-anchor="middle" fill="#cbd5e1">RESOURCE GROUP zolab-ai-&lt;suffix&gt;</text>
+  </g>
+  <rect x="980" y="910" width="348" height="318" rx="14" fill="#0b111e" fill-opacity="0.55" stroke="#1f2b44" stroke-width="1.3"/>
+  <g>
+  <rect x="1141" y="922" width="171" height="20" rx="10" fill="#0e1626" stroke="#334155" stroke-width="0.9"/>
+  <text x="1226.5" y="936" font-size="9" font-weight="700" letter-spacing="1" text-anchor="middle" fill="#cbd5e1">SECURITY SUBSCRIPTION</text>
+  </g>
+  <g>
+  <rect x="992" y="222" width="324" height="308" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#60a5fa" stroke-width="1.4" filter="url(#gblue)"/>
+  <rect x="1010" y="242" width="18" height="18" rx="4" fill="#60a5fa"/>
+  <text x="1036" y="250" font-size="12.5" font-weight="700" fill="#e3e9f2">MICROSOFT FOUNDRY</text>
+  <text x="1036" y="266" font-size="9" font-weight="700" letter-spacing="0.8" fill="#93c5fd">PROJECT · AGENT SERVICE · RESPONSES</text>
+  <line x1="1008" y1="280" x2="1300" y2="280" stroke="#243150" stroke-width="1"/>
+  <text x="1010" y="302" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">AGENT ENDPOINTS</text>
+  <circle cx="1014" cy="315" r="2" fill="#60a5fa"/>
+  <text x="1024" y="319" font-size="10.5" fill="#b8c2d2">main + Sentinel agents · Responses API</text>
+  <text x="1010" y="341" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">SERVER SPANS · ROLE RESPONSESAPI</text>
+  <circle cx="1014" cy="354" r="2" fill="#60a5fa"/>
+  <text x="1024" y="358" font-size="10.5" fill="#b8c2d2">invoke_agent &lt;agent&gt;:&lt;version&gt;</text>
+  <circle cx="1014" cy="371" r="2" fill="#60a5fa"/>
+  <text x="1024" y="375" font-size="10.5" fill="#b8c2d2">chat &lt;model&gt;</text>
+  <circle cx="1014" cy="388" r="2" fill="#60a5fa"/>
+  <text x="1024" y="392" font-size="10.5" fill="#b8c2d2">execute_tool mcp_&lt;server&gt;.&lt;tool&gt;</text>
+  <text x="1010" y="414" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">MCP TOOLS</text>
+  <rect x="1008" y="422" width="200" height="24" rx="12" fill="#2a0f22" stroke="#be185d" stroke-width="0.9"/>
+  <circle cx="1022" cy="434" r="3.5" fill="#ec4899"/>
+  <text x="1034" y="437.8" font-size="10" font-weight="600" fill="#fbcfe8">msft-learn · Microsoft Learn</text>
+  <rect x="1008" y="454" width="232" height="24" rx="12" fill="#2a0f22" stroke="#be185d" stroke-width="0.9"/>
+  <circle cx="1022" cy="466" r="3.5" fill="#ec4899"/>
+  <text x="1034" y="469.8" font-size="10" font-weight="600" fill="#fbcfe8">microsoft-sentinel-data · Sentinel</text>
+  <rect x="1008" y="492" width="292" height="26" rx="13" fill="#0b1a33" stroke="#2563eb" stroke-width="0.9"/>
+  <circle cx="1022" cy="505" r="3.5" fill="#60a5fa"/>
+  <text x="1034" y="508.8" font-size="10" font-weight="600" fill="#bfdbfe">Joins the notebook trace via traceparent</text>
+  </g>
+  <g>
+  <rect x="992" y="615" width="324" height="239" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#fbbf24" stroke-width="1.4" filter="url(#ggold)"/>
+  <rect x="1010" y="635" width="18" height="18" rx="4" fill="#fbbf24"/>
+  <text x="1036" y="643" font-size="12.5" font-weight="700" fill="#e3e9f2">APPLICATION INSIGHTS</text>
+  <text x="1036" y="659" font-size="9" font-weight="700" letter-spacing="0.8" fill="#fcd34d">WORKSPACE-BASED · PROJECT CONNECTION</text>
+  <line x1="1008" y1="673" x2="1300" y2="673" stroke="#243150" stroke-width="1"/>
+  <text x="1010" y="695" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">ROLES</text>
+  <circle cx="1014" cy="708" r="2" fill="#fbbf24"/>
+  <text x="1024" y="712" font-size="10.5" fill="#b8c2d2">foundry-agent-demo.foundry-agent-fw-demo</text>
+  <circle cx="1014" cy="725" r="2" fill="#fbbf24"/>
+  <text x="1024" y="729" font-size="10.5" fill="#b8c2d2">responsesapi · Foundry agents</text>
+  <circle cx="1014" cy="742" r="2" fill="#fbbf24"/>
+  <text x="1024" y="746" font-size="10.5" fill="#b8c2d2">…litellm-gateway · Linux gateway, opt-in</text>
+  <text x="1010" y="768" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">VIEWS</text>
+  <circle cx="1014" cy="781" r="2" fill="#fbbf24"/>
+  <text x="1024" y="785" font-size="10.5" fill="#b8c2d2">Foundry Traces (preview)</text>
+  <circle cx="1014" cy="798" r="2" fill="#fbbf24"/>
+  <text x="1024" y="802" font-size="10.5" fill="#b8c2d2">transaction search · Application Map</text>
+  <rect x="1008" y="816" width="292" height="26" rx="13" fill="#2a2208" stroke="#b45309" stroke-width="0.9"/>
+  <circle cx="1022" cy="829" r="3.5" fill="#fbbf24"/>
+  <text x="1034" y="832.8" font-size="10" font-weight="600" fill="#fde68a">One resource · spans joined by trace ID</text>
+  </g>
+  <g>
+  <rect x="992" y="956" width="324" height="256" rx="12" fill="#0e1626" fill-opacity="0.92" stroke="#fbbf24" stroke-width="1.4" filter="url(#ggold)"/>
+  <rect x="1010" y="976" width="18" height="18" rx="4" fill="#fbbf24"/>
+  <text x="1036" y="984" font-size="12.5" font-weight="700" fill="#e3e9f2">LOG ANALYTICS</text>
+  <text x="1036" y="1000" font-size="9" font-weight="700" letter-spacing="0.8" fill="#fcd34d">CROSS-SUBSCRIPTION WORKSPACE</text>
+  <line x1="1008" y1="1014" x2="1300" y2="1014" stroke="#243150" stroke-width="1"/>
+  <text x="1010" y="1036" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">TABLES</text>
+  <circle cx="1014" cy="1049" r="2" fill="#fbbf24"/>
+  <text x="1024" y="1053" font-size="10.5" fill="#b8c2d2">AppDependencies · client, internal spans</text>
+  <circle cx="1014" cy="1066" r="2" fill="#fbbf24"/>
+  <text x="1024" y="1070" font-size="10.5" fill="#b8c2d2">AppRequests · server spans (LiteLLM)</text>
+  <circle cx="1014" cy="1083" r="2" fill="#fbbf24"/>
+  <text x="1024" y="1087" font-size="10.5" fill="#b8c2d2">AppTraces · span events</text>
+  <circle cx="1014" cy="1100" r="2" fill="#fbbf24"/>
+  <text x="1024" y="1104" font-size="10.5" fill="#b8c2d2">AppGenAIContent · prompts, results, tools</text>
+  <circle cx="1014" cy="1117" r="2" fill="#fbbf24"/>
+  <text x="1024" y="1121" font-size="10.5" fill="#b8c2d2">AppExceptions · recorded exceptions</text>
+  <text x="1010" y="1143" font-size="9" font-weight="700" letter-spacing="0.6" fill="#7d8aa0">JOIN KEYS</text>
+  <circle cx="1014" cy="1156" r="2" fill="#fbbf24"/>
+  <text x="1024" y="1160" font-size="10.5" fill="#b8c2d2">OperationId · ParentId · demo.run_id</text>
+  <rect x="1008" y="1174" width="292" height="26" rx="13" fill="#2a2208" stroke="#b45309" stroke-width="0.9"/>
+  <circle cx="1022" cy="1187" r="3.5" fill="#fbbf24"/>
+  <text x="1034" y="1190.8" font-size="10" font-weight="600" fill="#fde68a">Log Analytics Reader for Section 6</text>
+  </g>
+  <path d="M896 559 L948 559 L948 380 L992 380" fill="none" stroke="#60a5fa" stroke-width="1.6" marker-end="url(#mblue)"/>
+  <path d="M275 717 L275 765" fill="none" stroke="#fb923c" stroke-width="1.6" marker-end="url(#morange)"/>
+  <path d="M474 893 L514 893" fill="none" stroke="#fb923c" stroke-width="1.6" marker-end="url(#morange)"/>
+  <path d="M912 800 L992 800" fill="none" stroke="#fb923c" stroke-width="1.6" marker-end="url(#morange)"/>
+  <path d="M1080 530 L1080 615" fill="none" stroke="#fb923c" stroke-width="1.6" marker-end="url(#morange)"/>
+  <path d="M1080 854 L1080 956" fill="none" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#mgold)"/>
+  <path d="M912 1137 L992 1137" fill="none" stroke="#fbbf24" stroke-width="1.6" marker-end="url(#mgold)"/>
+  <circle cx="948" cy="469.5" r="10" fill="#0e1626" stroke="#60a5fa" stroke-width="1.3"/>
+  <text x="948" y="473.3" font-size="10.5" font-weight="700" text-anchor="middle" fill="#93c5fd">1</text>
+  <circle cx="275" cy="741" r="10" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="275" y="744.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">2</text>
+  <circle cx="494" cy="893" r="10" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="494" y="896.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">3</text>
+  <circle cx="948" cy="800" r="10" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="948" y="803.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">4</text>
+  <circle cx="1080" cy="572.5" r="10" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="1080" y="576.3" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">5</text>
+  <circle cx="1080" cy="890" r="10" fill="#0e1626" stroke="#fbbf24" stroke-width="1.3"/>
+  <text x="1080" y="893.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fcd34d">6</text>
+  <circle cx="948" cy="1137" r="10" fill="#0e1626" stroke="#fbbf24" stroke-width="1.3"/>
+  <text x="948" y="1140.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fcd34d">7</text>
+  <g>
+  <text x="64" y="1265" font-size="9" font-weight="700" letter-spacing="0.8" fill="#5b6678">FLOWS</text>
+  <circle cx="74" cy="1283" r="8" fill="#0e1626" stroke="#60a5fa" stroke-width="1.3"/>
+  <text x="74" y="1286.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#93c5fd">1</text>
+  <text x="90" y="1287" font-size="10.5" fill="#aeb8c7">Agent, conversation and Responses calls · traceparent + baggage</text>
+  <circle cx="74" cy="1305" r="8" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="74" y="1308.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">2</text>
+  <text x="90" y="1309" font-size="10.5" fill="#aeb8c7">Every producer's spans → one TracerProvider</text>
+  <circle cx="74" cy="1327" r="8" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="74" y="1330.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">3</text>
+  <text x="90" y="1331" font-size="10.5" fill="#aeb8c7">Batch span processor → Azure Monitor exporter</text>
+  <circle cx="502" cy="1283" r="8" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="502" y="1286.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">4</text>
+  <text x="518" y="1287" font-size="10.5" fill="#aeb8c7">Trace export with the project's connection string</text>
+  <circle cx="502" cy="1305" r="8" fill="#0e1626" stroke="#fb923c" stroke-width="1.3"/>
+  <text x="502" y="1308.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fdba74">5</text>
+  <text x="518" y="1309" font-size="10.5" fill="#aeb8c7">Foundry server spans → the same resource</text>
+  <circle cx="502" cy="1327" r="8" fill="#0e1626" stroke="#fbbf24" stroke-width="1.3"/>
+  <text x="502" y="1330.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fcd34d">6</text>
+  <text x="518" y="1331" font-size="10.5" fill="#aeb8c7">Application Insights data → Log Analytics tables</text>
+  <circle cx="930" cy="1283" r="8" fill="#0e1626" stroke="#fbbf24" stroke-width="1.3"/>
+  <text x="930" y="1286.8" font-size="10.5" font-weight="700" text-anchor="middle" fill="#fcd34d">7</text>
+  <text x="946" y="1287" font-size="10.5" fill="#aeb8c7">Section 6 KQL: coverage gate, then 13 report views</text>
+  </g>
+  <text x="64" y="1354" font-size="9" font-weight="700" letter-spacing="0.8" fill="#5b6678">LEGEND</text>
+  <circle cx="132" cy="1351" r="5" fill="#a855f7"/>
+  <text x="142" y="1354.5" font-size="10.5" fill="#8b97a8">Notebook · MAF</text>
+  <circle cx="250.746" cy="1351" r="5" fill="#94a3b8"/>
+  <text x="260.746" y="1354.5" font-size="10.5" fill="#8b97a8">Azure SDK · HTTP</text>
+  <circle cx="378.496" cy="1351" r="5" fill="#60a5fa"/>
+  <text x="388.496" y="1354.5" font-size="10.5" fill="#8b97a8">Foundry</text>
+  <circle cx="457.094" cy="1351" r="5" fill="#fb923c"/>
+  <text x="467.094" y="1354.5" font-size="10.5" fill="#8b97a8">OpenTelemetry</text>
+  <circle cx="572.945" cy="1351" r="5" fill="#fbbf24"/>
+  <text x="582.945" y="1354.5" font-size="10.5" fill="#8b97a8">Azure Monitor</text>
+  <circle cx="682.098" cy="1351" r="5" fill="#ec4899"/>
+  <text x="692.098" y="1354.5" font-size="10.5" fill="#8b97a8">MCP</text>
+  <text x="1344" y="1381" font-size="10" text-anchor="end" fill="#5b6678">zolab-ai-agent-demo notebooks · pro-code observability stack · 2026</text>
+</svg>
